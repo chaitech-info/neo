@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Lead Scraping Admin{% endblock %}
+{% block content %}
+  <h1>Mənbələr</h1>
+  <p class="muted">Hər kartda "Scrape indi" düyməsi həmin mənbəni dərhal işə salır (nəticə Validasiya səhifəsinə düşür).</p>
+  <div class="cards">
+    {% for key, label in sources.items() %}
+      <div class="card">
+        <h3>{{ label }}</h3>
+        <span class="muted">Son nəticə: {{ last_run.get(key, 'hələ işə salınmayıb') }}</span>
+        <form method="post" action="/scrape/{{ key }}">
+          <button class="btn btn-primary" type="submit">Scrape indi</button>
+        </form>
+      </div>
+    {% endfor %}
+  </div>
+
+  <h1 style="margin-top:36px">Statistika</h1>
+  <table>
+    <tr><th>Status</th><th>Say</th></tr>
+    {% for status, count in stats.items() %}
+      <tr><td>{{ status }}</td><td>{{ count }}</td></tr>
+    {% endfor %}
+  </table>
+{% endblock %}

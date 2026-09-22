@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="az">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Lead Scraping Admin{% endblock %}</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: -apple-system, Segoe UI, Arial, sans-serif; margin: 0; background: #0b0e14; color: #e7e9ee; }
+    header { background: #12172a; padding: 16px 28px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #232c47; }
+    header a { color: #e7e9ee; text-decoration: none; margin-right: 20px; font-weight: 600; }
+    header a.active { color: #4C8DFF; }
+    main { padding: 28px; max-width: 1200px; margin: 0 auto; }
+    h1 { font-size: 22px; margin-bottom: 4px; }
+    .muted { color: #8d96b3; font-size: 14px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 16px; background: #12182c; border-radius: 10px; overflow: hidden; }
+    th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid #232c47; font-size: 14px; vertical-align: top; }
+    th { color: #8d96b3; font-weight: 600; text-transform: uppercase; font-size: 12px; letter-spacing: 0.5px; }
+    tr:last-child td { border-bottom: none; }
+    .badge { display: inline-block; padding: 3px 10px; border-radius: 100px; font-size: 12px; font-weight: 600; }
+    .badge-pending { background: #2a2340; color: #b58cff; }
+    .badge-sent { background: #0e2a1e; color: #34d399; }
+    .badge-rejected { background: #2a1730; color: #f97066; }
+    .badge-new { background: #12203a; color: #7ca8ff; }
+    .btn { display: inline-block; padding: 8px 16px; border-radius: 8px; border: 1px solid #2a3555; background: #1a2340; color: #e7e9ee; cursor: pointer; font-size: 14px; font-weight: 600; text-decoration: none; }
+    .btn:hover { background: #232c47; }
+    .btn-primary { background: #4C8DFF; border-color: #4C8DFF; color: #0b0e14; }
+    .btn-approve { background: #34d399; border-color: #34d399; color: #0b0e14; }
+    .btn-reject { background: #f97066; border-color: #f97066; color: #0b0e14; }
+    .btn-sm { padding: 5px 12px; font-size: 13px; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; margin-top: 16px; }
+    .card { background: #12182c; border: 1px solid #232c47; border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 10px; }
+    .card h3 { margin: 0; font-size: 16px; }
+    .flash { background: #12203a; border: 1px solid #4C8DFF; color: #cbd3ec; padding: 10px 16px; border-radius: 8px; margin-bottom: 16px; font-size: 14px; }
+    .error { background: #2a1730; border-color: #f97066; color: #ffd7d0; }
+    .empty { color: #6a7391; padding: 24px; text-align: center; }
+    form.inline { display: inline; }
+    .score { font-weight: 700; }
+    .actions { display: flex; gap: 8px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <a href="/" class="{{ 'active' if active == 'dashboard' else '' }}">Dashboard</a>
+      <a href="/leads/pending_review" class="{{ 'active' if active == 'validation' else '' }}">Validasiya</a>
+      <a href="/leads" class="{{ 'active' if active == 'all' else '' }}">Bütün lead-lər</a>
+    </div>
+    <span class="muted">Lead Scraping Admin</span>
+  </header>
+  <main>
+    {% if request.query_params.get('msg') %}
+      <div class="flash">{{ request.query_params.get('msg') }}</div>
+    {% endif %}
+    {% if request.query_params.get('err') %}
+      <div class="flash error">{{ request.query_params.get('err') }}</div>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

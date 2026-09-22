@@ -1,0 +1,27 @@
+{
+  "v": 4,
+  "createdOnFiles": {"v": 1, "at": "2026-09-22T00:00:00Z"},
+  "title": "AI-Powered Enterprise Management",
+  "order": ["cover", "problem", "solution", "exec-assistant", "crm", "neoai", "neoanalyze", "architecture", "scenario", "before-after", "value", "not-just-crm", "cta"],
+  "cover": "cover",
+  "sections": {
+    "s1": {"description": "AI ekosistemi bir cümlədə: bir platforma, dörd məhsul, tam nəzarət", "start": "cover"},
+    "s2": {"description": "Problemin təsviri: şirkətlər data ilə zəngin, amma nəzarətdə zəifdir", "start": "problem"},
+    "s3": {"description": "Həll: dörd sistem, bir AI nüvəsi ətrafında birləşən vahid ekosistem", "start": "solution"},
+    "s4": {"description": "Executive AI Assistant: rəhbərin şirkətlə danışdığı şəxsi panel", "start": "exec-assistant"},
+    "s5": {"description": "CRM Platforması: task yaratmaqdan nəticəyə qədər bir platforma", "start": "crm"},
+    "s6": {"description": "NeoAI: şirkət datasından soruşmaq — axtarmaq deyil", "start": "neoai"},
+    "s7": {"description": "NeoAnalyze: arxa planda 24/7 işləyən AI monitorinq mühərriki", "start": "neoanalyze"},
+    "s8": {"description": "4 sistem necə birlikdə işləyir: Enterprise AI Core ətrafında arxitektura", "start": "architecture"},
+    "s9": {"description": "Real ssenari: maliyyə uyğunsuzluğunun avtomatik aşkarlanması və həlli", "start": "scenario"},
+    "s10": {"description": "Data → AI → Action → Verification: əvvəlki proses ilə yeni sistemin müqayisəsi", "start": "before-after"},
+    "s11": {"description": "Şirkət nə əldə edir: 8 əsas dəyər", "start": "value"},
+    "s12": {"description": "Ən vacib fərq: ənənəvi CRM ilə bizim AI ekosistemi arasındakı fərq", "start": "not-just-crm"},
+    "s13": {"description": "Final: Your Company. Your Data. Your AI.", "start": "cta"}
+  },
+  "faces": {
+    "space-grotesk": {"family": "Space Grotesk", "href": "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400..700&display=swap"},
+    "ibm-plex-sans": {"family": "IBM Plex Sans", "href": "https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"}
+  },
+  "designSystems": []
+}
