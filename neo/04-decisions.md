@@ -61,7 +61,21 @@
 - **Dry-run nəticəsi (3 aylıq pəncərə):** 80 post → scraper 66-nı atdı (41 vakansiya, 12 rəqib, 13 xarici) → 14 AI-yə → **1 `pending_review`** (Azeri Steel, 0.9), 13 `rejected`. Yanlış müsbət: 0.
 - **Real gözlənti:** LinkedIn-də Azərbaycanda açıq "catering axtarırıq" postu nadirdir (3 ayda ~1). LinkedIn köməkçi mənbədir; bu müştəri profili üçün `etender` (iaşə tenderləri) çox güman ki daha güclüdür.
 - **Hər lead-də:** müəllifin LinkedIn profili `contact_website`-a, postdakı email `contact_email`-ə yazılır, müəllifin vəzifəsi `raw_text`-in sonuna əlavə olunur (satış komandası kimlə danışacağını bilsin).
-- **Kodda:** `app/scrapers/linkedin.py` (`SEARCH_QUERIES`, `AZ_MARKER_RE`, `VACANCY_MARKERS`, `JOB_BOARD_AUTHORS`, `KNOWN_COMPETITORS`, `rejection_reason`), `app/ai_filter.py::SYSTEM_PROMPT`
+- **Kodda:** `app/scrapers/linkedin.py` (`SEARCH_QUERIES`, `AZ_MARKER_RE`, `VACANCY_MARKERS`, `JOB_BOARDS`, `KNOWN_COMPETITORS`, `rejection_reason`), `app/ai_filter.py::SYSTEM_PROMPT`
+
+### İşçilərinə nahar verən şirkətlər (vakansiya elanlarından lead)
+- **Status:** Decided (2026-09-23), canlı test + real kodla dry-run
+- **Problem:** açıq alıcı postu çox nadirdir (3 ayda ~1). LinkedIn-in həcmi azdır.
+- **Fikir:** Azərbaycan vakansiya elanlarının çoxu "Nahar şirkət tərəfindən təmin olunur" yazır — bu, işəgötürənin artıq hər gün işçilərini yedizdirdiyini (yəni yemək aldığını/təşkil etdiyini) göstərir. Bu, təchizatçı dəyişməyə potensial müştəridir. Əvvəl bu elanlar "vakansiya" kimi atılırdı.
+- **Test edilib, rədd edilib:** genişlənmə sorğuları (`"yeni zavod"`, `"sənaye parkı"`, `"istehsal müəssisəsi"`) — 29 postun demək olar hamısı fikir yazısı, logistika reklamı, universitet xəbəri idi. Belə xəbərləri artıq marja/fed/oxu scraper-ləri tutur.
+- **Qərar:** `"nahar şirkət tərəfindən"`, `"yemək şirkət tərəfindən"` sorğuları əlavə olundu. Vakansiya + `MEAL_PROVIDED_RE` → post rədd edilmir, **işəgötürən şirkət** lead olur:
+  - İşəgötürən `employer_identity()` ilə tapılır: əvvəl korporativ email domeni (`hr@vumes.az` → `vumes.az`), sonra `"X" MMC` adı. Pulsuz email (gmail, mail.ru) və iş elanı saytı/agentlik domenləri (`JOB_BOARDS`, məs. `humanpro.az` — gizli müştəri üçün elan verir) sayılmır. Canlı testdə 32 elandan 29-da işəgötürən tapıldı (27 domen, 2 ad).
+  - `source_url` = şirkətin saytı (post URL-i YOX) — dedup şirkət üzrə olur: eyni şirkətin 5 elanı 1 lead, sonrakı günlərin elanları yeni lead yaratmır. Post linki `raw_text`-dədir.
+  - `raw_text` `[SİQNAL: ...]` ilə başlayır; AI prompt bunu iş elanı kimi yox, işəgötürən lead-i kimi 0.6-0.8 qiymətləndirir. İşəgötürən özü catering şirkətidirsə → rəqib (ATS Food bu testdə tapılıb, `KNOWN_COMPETITORS`-a əlavə olundu; rəqib yoxlaması indi vakansiyadan ƏVVƏL gedir).
+- **Dry-run nəticəsi (1 aylıq pəncərə):** **22 işəgötürən lead-i**, hamısı 0.7 → `pending_review` (Azersun, Sirab, Gilan-Knauf, Avrora, Sea Breeze, Rossmann, VUMART, Chinar Park və s.) + əvvəlki alıcı-post axını. Əvvəl: ayda ~0.3 lead.
+- **Qiymət:** 7 sorğu × 30 post (gündəlik, 1 həftəlik pəncərə) = gündə ≤210 post ≈ ≤$0.4/gün (Apify). OpenAI (`gpt-4o-mini`) xərci cüzidir.
+- **Məhdudiyyət:** AI şirkət ölçüsünü bilmir (elanda yazılmır) — demək olar hamısına 0.7 verir. Sıralama üçün satış komandası özü baxmalıdır.
+- **Kodda:** `app/scrapers/linkedin.py` (`MEAL_PROVIDED_RE`, `employer_identity`, `_employer_lead`), `app/ai_filter.py::SYSTEM_PROMPT`
 
 ## Açıq suallar (hələ qərar verilməyib)
 

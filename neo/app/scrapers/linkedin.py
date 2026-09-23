@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 from datetime import datetime
+from urllib.parse import quote
 
 import structlog
 
@@ -26,6 +27,10 @@ SEARCH_QUERIES = [
     "korporativ qidalanma",
     "korporativ nahar",
     "iaşə xidməti",
+    # İşçilərinə nahar verən işəgötürənləri tapır (vakansiya elanlarından) —
+    # bax 04-decisions.md → "İşçilərinə nahar verən şirkətlər".
+    "nahar şirkət tərəfindən",
+    "yemək şirkət tərəfindən",
 ]
 
 # Post Azərbaycanla bağlı deyilsə atılır (test: türk, hind, indoneziya postları
@@ -46,16 +51,37 @@ VACANCY_MARKERS = (
     "вакансия", "резюме", "зарплата",
     "salary:", "apply via", "job vacancy", "send your cv", "we are hiring", "#hiring",
 )
-JOB_BOARD_AUTHORS = ("azvak", "jobsearch", "vakansiya", "hellojob", "boss.az", "azjob")
+# İş elanı saytları və işə qəbul agentlikləri — həm müəllif adında, həm email
+# domenində yoxlanır. Agentlik (humanpro.az) gizli müştəri üçün elan verir,
+# onun domeni işəgötürən deyil.
+JOB_BOARDS = ("azvak", "jobsearch", "vakansiya", "hellojob", "boss.az", "azjob", "humanpro")
 
 # Eyni məhsulu satan rəqiblər (canlı testdə tapılıb). Onların reklam postları
 # lead deyil. Yeni rəqib görsəniz bura əlavə edin (kiçik hərflə).
 KNOWN_COMPETITORS = (
     "plan&eat", "plan & eat", "planandeat", "doydum", "catering 145",
-    "lunchbox.az", "tais ikf",
+    "lunchbox.az", "tais ikf", "atsfood",
 )
 
-EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+EMAIL_RE = re.compile(r"[\w.+-]+@([\w-]+(?:\.[\w-]+)+)")
+
+# Vakansiya elanında "Nahar şirkət tərəfindən təmin olunur" — işəgötürən artıq
+# hər gün işçilərini yedizdirir, yəni yemək alır. Bu, elanı rədd etmək yerinə
+# işəgötürənin özünü lead edir.
+MEAL_PROVIDED_RE = re.compile(
+    r"(nahar|yemək|qidalanma)[^.\n]{0,40}(şirkət tərəfindən|pulsuz|ödənişsiz|təmin)"
+)
+FREE_EMAIL_DOMAINS = {
+    "gmail.com", "mail.ru", "yahoo.com", "outlook.com", "hotmail.com", "icloud.com",
+    "yandex.ru", "yandex.com", "inbox.ru", "bk.ru", "list.ru", "rambler.ru",
+    "mail.com", "usa.com", "gmx.com", "aol.com", "live.com", "msn.com", "ymail.com",
+    "proton.me", "protonmail.com",
+}
+_LEGAL_FORM = r"(?:MMC|ASC|QSC|LLC|Ltd|LTD)"
+EMPLOYER_NAME_RES = (
+    re.compile(r"[\"“«„]([^\"”»“\n]{2,60})[\"”»“]\s*" + _LEGAL_FORM),
+    re.compile(r"\b([A-ZƏÖÜĞİŞÇ][\w&.\- ]{1,40}?)\s+" + _LEGAL_FORM + r"\b"),
+)
 
 
 def _parse_posted_at(raw: str | None) -> datetime | None:
@@ -80,10 +106,32 @@ def rejection_reason(content: str, author_name: str, author_info: str) -> str | 
 
     if not AZ_MARKER_RE.search(text):
         return "not_azerbaijan"
-    if any(m in text for m in VACANCY_MARKERS) or any(j in author for j in JOB_BOARD_AUTHORS):
-        return "vacancy"
+    # Rəqib yoxlaması vakansiyadan ƏVVƏL — rəqibin öz iş elanı (məs. ATS Food
+    # aşpaz axtarır) "işçilərinə nahar verən şirkət" kimi lead olmamalıdır.
     if any(c in text or c in author for c in KNOWN_COMPETITORS):
         return "competitor"
+    if any(m in text for m in VACANCY_MARKERS) or any(j in author for j in JOB_BOARDS):
+        return "vacancy"
+    return None
+
+
+def employer_identity(content: str) -> tuple[str, str] | None:
+    """Vakansiya elanından işəgötürəni tap: (göstəriləcək ad, sabit URL).
+
+    URL dedup açarıdır — eyni şirkətin 5 elanı panelə 1 lead kimi düşür.
+    Korporativ email domeni ən etibarlıdır (canlı testdə 32 elandan 27-si);
+    iş elanı saytlarının öz domenləri (hr@vakansiya.biz və s.) sayılmır.
+    """
+    for m in EMAIL_RE.finditer(content):
+        domain = m.group(1).lower().rstrip(".")
+        if domain in FREE_EMAIL_DOMAINS or any(j in domain for j in JOB_BOARDS):
+            continue
+        return domain, f"https://{domain}"
+    for rx in EMPLOYER_NAME_RES:
+        m = rx.search(content)
+        if m:
+            name = m.group(1).strip()
+            return name, f"https://www.linkedin.com/search/results/companies/?keywords={quote(name)}"
     return None
 
 
@@ -132,7 +180,9 @@ class LinkedInScraper(BaseScraper):
         items = resp.json()
 
         leads: list[RawLead] = []
+        seen_employers: set[str] = set()
         rejected: dict[str, int] = {}
+        employer_leads = 0
         for item in items:
             if item.get("type") != "post":
                 continue
@@ -145,13 +195,21 @@ class LinkedInScraper(BaseScraper):
             author = item.get("author") or {}
             author_name = author.get("name") or ""
             author_info = author.get("info") or ""
+            posted_at = _parse_posted_at((item.get("postedAt") or {}).get("date"))
+            email = EMAIL_RE.search(content)
 
             reason = rejection_reason(content, author_name, author_info)
+            if reason == "vacancy" and MEAL_PROVIDED_RE.search(_norm(content)):
+                employer = employer_identity(content)
+                if employer and employer[1] not in seen_employers:
+                    seen_employers.add(employer[1])
+                    leads.append(self._employer_lead(employer, url, content, email, posted_at))
+                    employer_leads += 1
+                    continue
             if reason:
                 rejected[reason] = rejected.get(reason, 0) + 1
                 continue
 
-            email = EMAIL_RE.search(content)
             leads.append(
                 RawLead(
                     source="linkedin",
@@ -167,9 +225,38 @@ class LinkedInScraper(BaseScraper):
                     ),
                     category=LeadCategory.corporate,
                     location="Azərbaycan",
-                    posted_at=_parse_posted_at((item.get("postedAt") or {}).get("date")),
+                    posted_at=posted_at,
                 )
             )
 
-        log.info("linkedin_filtered", kept=len(leads), rejected=rejected)
+        log.info(
+            "linkedin_filtered",
+            kept=len(leads),
+            employer_leads=employer_leads,
+            rejected=rejected,
+        )
         return leads
+
+    @staticmethod
+    def _employer_lead(employer, post_url, content, email, posted_at) -> RawLead:
+        name, company_url = employer
+        return RawLead(
+            source="linkedin",
+            # Şirkətin saytı — post URL-i yox. Dedup şirkət üzrə olsun deyə:
+            # eyni işəgötürənin sonrakı elanları yeni lead yaratmır.
+            source_url=company_url,
+            title=f"{name} — işçilərinə nahar verir (vakansiya elanından)",
+            raw_text=(
+                "[SİQNAL: işəgötürən vakansiya elanında işçilərinə nahar/yemək "
+                "verdiyini yazır — şirkət artıq hər gün yemək təşkil edir]\n"
+                f"Elan: {post_url}\n\n{content}"
+            ),
+            entity_name=name,
+            contact_info=ContactInfo(
+                website=company_url,
+                email=email.group(0) if email else None,
+            ),
+            category=LeadCategory.corporate,
+            location="Azərbaycan",
+            posted_at=posted_at,
+        )

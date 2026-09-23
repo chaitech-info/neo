@@ -129,6 +129,71 @@ def test_rejects_uppercase_competitor_name():
     assert rejection_reason(text, "Amir", "Founder") == "competitor"
 
 
+def _vacancy(url, content, author="AzVak"):
+    return {
+        "type": "post",
+        "linkedinUrl": url,
+        "content": content,
+        "author": {"name": author, "info": "Azərbaycanda Vakansiyalar"},
+    }
+
+
+VUMART_1 = "Təndirçi tələb olunur\nNahar Şirkət tərəfindən təmin olunur\nCV-lərinizi hr@vumes.az ünvanına göndərin"
+VUMART_2 = "Mühasib tələb olunur\nNahar Şirkət tərəfindən təmin olunur\nCV-lərinizi hr@vumes.az ünvanına göndərin"
+
+
+def test_vacancy_with_company_lunch_becomes_one_employer_lead():
+    items = [_vacancy("https://li/p/1", VUMART_1), _vacancy("https://li/p/2", VUMART_2)]
+    scraper = LinkedInScraper(client=FakeClient(items), api_token="fake-token")
+
+    leads = scraper.fetch_leads()
+
+    assert len(leads) == 1
+    lead = leads[0]
+    assert lead.source_url == "https://vumes.az"
+    assert lead.entity_name == "vumes.az"
+    assert lead.contact_info.email == "hr@vumes.az"
+    assert lead.raw_text.startswith("[SİQNAL")
+    assert "https://li/p/1" in lead.raw_text
+
+
+def test_vacancy_without_meal_signal_is_still_rejected():
+    text = "Kassir tələb olunur, Bakı\nƏməkhaqqı: 600 AZN\nhr@market.az"
+    scraper = LinkedInScraper(client=FakeClient([_vacancy("https://li/p/3", text)]), api_token="t")
+    assert scraper.fetch_leads() == []
+
+
+def test_meal_vacancy_with_only_free_email_and_no_name_is_rejected():
+    for email in ("someone@gmail.com", "hr.jobs@usa.com"):
+        text = f"Gözətçi tələb olunur, Bakı\nNahar şirkət tərəfindən verilir\nCV: {email}"
+        scraper = LinkedInScraper(client=FakeClient([_vacancy("https://li/p/4", text)]), api_token="t")
+        assert scraper.fetch_leads() == []
+
+
+def test_employer_name_fallback_when_no_corporate_email():
+    text = "“Royale Sea Breeze Operation” MMC hüquqşünas axtarır\nNahar şirkət tərəfindən\nnamizədlər zəng etsin"
+    scraper = LinkedInScraper(client=FakeClient([_vacancy("https://li/p/5", text)]), api_token="t")
+
+    leads = scraper.fetch_leads()
+
+    assert len(leads) == 1
+    assert leads[0].entity_name == "Royale Sea Breeze Operation"
+    assert "linkedin.com/search/results/companies" in leads[0].source_url
+
+
+def test_competitor_own_vacancy_is_not_employer_lead():
+    text = "Mühəndis-mexanik tələb olunur, Bakı\nNahar şirkət tərəfindən təmin olunur\nhr@atsfood.az"
+    scraper = LinkedInScraper(client=FakeClient([_vacancy("https://li/p/6", text)]), api_token="t")
+    assert scraper.fetch_leads() == []
+
+
+def test_job_board_or_agency_email_is_not_the_employer():
+    for email in ("info@vakansiya.biz", "cv@humanpro.az"):
+        text = f"Anbardar tələb olunur, Bakı\nNahar şirkət tərəfindən\n{email}"
+        scraper = LinkedInScraper(client=FakeClient([_vacancy("https://li/p/7", text)]), api_token="t")
+        assert scraper.fetch_leads() == []
+
+
 def test_keeps_buyer_writing_teleb_olunur():
     text = "Zavodumuzun 200 işçisi üçün gündəlik nahar xidməti tələb olunur, Sumqayıt"
     assert rejection_reason(text, "Elvin", "Operations Manager") is None

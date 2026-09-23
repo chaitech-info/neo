@@ -67,6 +67,7 @@ Hər mənbənin **real** strukturu — brauzerlə birbaşa yoxlanılıb (ilkin s
 - **⚠️ Tələ #1 (canlı test):** nəticələrin çoxu iş elanı (AzVak, ASG Aviation — şirkət təsvirində "catering" keçir) və rəqib reklamıdır (Plan&Eat, Lunchbox.az). Filtrlər: `app/scrapers/linkedin.py::rejection_reason`.
 - **⚠️ Tələ #2:** uzun sorğular (4+ söz) 0 nəticə qaytarır — yalnız 2-3 sözlük sorğular.
 - **⚠️ Tələ #3:** türkcə "bakış" içində "bakı" var; `"İ".lower()` birləşdirici nöqtə qaytarır. Hər ikisi kodda həll olunub — bax `04-decisions.md` → "LinkedIn filtrləri — hədəf müştəri profili".
+- **Ən güclü siqnal:** vakansiya elanlarında "Nahar şirkət tərəfindən təmin olunur" — işəgötürən özü lead-dir. Əksər elanlarda HR email-i var, domeni şirkəti müəyyən edir. Bax `04-decisions.md` → "İşçilərinə nahar verən şirkətlər".
 - **Kodda:** `app/scrapers/linkedin.py`
 
 ## Ümumi dərs
