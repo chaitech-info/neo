@@ -3,6 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import structlog
+from dotenv import load_dotenv
+
+load_dotenv()
 from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -17,6 +20,7 @@ from app.scrapers import (
     EmlakScraper,
     EtenderScraper,
     FedScraper,
+    LinkedInScraper,
     MarjaScraper,
     News1Scraper,
     OxuScraper,
@@ -34,7 +38,7 @@ SOURCES = {
     "fed": ("Fed.az", FedScraper),
     "etender": ("Etender.gov.az", EtenderScraper),
     "emlak": ("Emlak.gov.az", EmlakScraper),
-    # linkedin qəsdən yoxdur — bax app/scrapers/linkedin.py
+    "linkedin": ("LinkedIn (Apify)", LinkedInScraper),
 }
 
 _last_run: dict[str, str] = {}

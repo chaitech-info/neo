@@ -4,10 +4,9 @@
 
 ```mermaid
 flowchart LR
-  A[Scheduler<br/>Celery Beat] --> B1[7 scraper<br/>marja/azerweb/1news/oxu/fed/etender/emlak]
-  A -.disabled.-> B0[LinkedIn scraper]
+  A[Scheduler<br/>Celery Beat] --> B1[8 scraper<br/>marja/azerweb/1news/oxu/fed/etender/emlak/linkedin]
   B1 --> C[Normalizer<br/>dedup hash]
-  C --> D[AI Filter<br/>Claude API]
+  C --> D[AI Filter<br/>OpenAI API]
   D --> E{ai_score >= 0.6?}
   E -->|Bəli| F[pending_review<br/>admin paneldə gözləyir]
   E -->|Xeyr| G[rejected]
@@ -24,7 +23,7 @@ flowchart LR
 | Data modeli | [`app/models.py`](../../app/models.py) | `RawLead`, enum-lar, dedup hash |
 | Scraper-lar | [`app/scrapers/`](../../app/scrapers) | Hər mənbə üçün ayrıca sinif, ortaq `BaseScraper` |
 | Normalizer | [`app/normalizer.py`](../../app/normalizer.py) | Dublikat yoxlaması (DB-yə əsaslanan) |
-| AI Filter | [`app/ai_filter.py`](../../app/ai_filter.py) | Claude API ilə skorlama, fail-safe (xəta → `pending_review`, YOX `rejected`) |
+| AI Filter | [`app/ai_filter.py`](../../app/ai_filter.py) | OpenAI API ilə skorlama, fail-safe (xəta → `pending_review`, YOX `rejected`) |
 | CRM Client | [`app/crm_client.py`](../../app/crm_client.py) | `/opportunities` POST sorğusu |
 | Pipeline | [`app/pipeline.py`](../../app/pipeline.py) | Yuxarıdakıları bir-birinə bağlayan orkestrator |
 | DB qatı | [`app/db/`](../../app/db) | SQLAlchemy modeli + repository (CRUD, status keçidləri) |
@@ -57,7 +56,7 @@ stateDiagram-v2
 1. `scrape_source("etender")` çağırılır (admin panel düyməsi və ya Celery task)
 2. `EtenderScraper.fetch_leads()` → real API-dən `RawLead` siyahısı
 3. `Normalizer.process()` → dedup hash yoxlanılır, yeni olanlar DB-yə yazılır
-4. `AIFilter.score_batch()` → Claude API çağırılır, `ai_score`/`ai_reason` təyin olunur
+4. `AIFilter.score_batch()` → OpenAI API çağırılır, `ai_score`/`ai_reason` təyin olunur
 5. Repository yenilənir, status `pending_review` və ya `rejected`
 6. Admin panel `/leads/pending_review`-də insan görür, Təsdiqlə/Rədd et
 7. Təsdiqlənərsə → `CRMClient.create_opportunity()` → status `sent_to_crm`

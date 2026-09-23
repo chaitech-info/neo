@@ -20,7 +20,6 @@ Scrape → Normalize (dedup) → AI Score → İnsan təsdiqi (pending_review) �
 
 ## Nəyi HƏLL ETMİR (scope-dan kənar)
 
-- LinkedIn scraping (hüquqi/texniki qərar gözlənilir — bax `04-decisions.md`)
 - Real CRM inteqrasiyası (CRM tərəfin API-si hələ təyin olunmayıb)
 - Avtomatik əlaqə saxlama/satış (sistem yalnız "bu potensial müştəridir" deyir, zəng/email atmır)
 

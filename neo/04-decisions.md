@@ -10,9 +10,15 @@
 
 ### AI xətası zamanı fail-safe davranış
 - **Status:** Decided (2026-09-23)
-- **Qərar:** Claude API əlçatan olmasa (API key yoxdur, şəbəkə xətası və s.), lead avtomatik `rejected`-ə düşmür — `pending_review`-a düşür, `ai_score=None`, `ai_reason="AI qiymətləndirməsi alınmadı — əl ilə yoxlanmalıdır"`.
+- **Qərar:** OpenAI API əlçatan olmasa (API key yoxdur, şəbəkə xətası və s.), lead avtomatik `rejected`-ə düşmür — `pending_review`-a düşür, `ai_score=None`, `ai_reason="AI qiymətləndirməsi alınmadı — əl ilə yoxlanmalıdır"`.
 - **Niyə:** ilk versiyada AI xətası = avtomatik rədd idi, bu isə API key olmadıqda BÜTÜN lead-lərin səssizcə itməsinə səbəb olurdu (data itkisi, sükutla). İndi insan hələ də görə bilir.
 - **Kodda:** `app/ai_filter.py::AIFilter.score`
+
+### AI Filter provideri: OpenAI (Anthropic əvəzinə)
+- **Status:** Decided (2026-09-23)
+- **Qərar:** `AIFilter` ilkin versiyada Anthropic (Claude) API istifadə edirdi, indi OpenAI API-yə (`gpt-4o-mini`, Chat Completions + `response_format=json_object`) keçirildi. Prompt, JSON format (`{"score", "reason"}`), threshold (0.6) və fail-safe davranış DƏYİŞMƏDİ — yalnız provider və `OPENAI_API_KEY` env dəyişəni.
+- **Niyə:** komanda üzvü OpenAI açarı ilə davam etmək istədi.
+- **Kodda:** `app/ai_filter.py`, `requirements.txt` (`anthropic` → `openai`)
 
 ### Development/test üçün SQLite, production üçün Postgres
 - **Status:** Decided (2026-09-22)
@@ -25,14 +31,39 @@
 - **Qərar:** Azerweb API-də "catering" axtarışı iş elanlarını da qaytarır (Chef, Housekeeper və s.) — bunlar müştəri lead-i deyil. Yalnız `type in {tender, announcement}` saxlanılır.
 - **Kodda:** `app/scrapers/azerweb.py::RELEVANT_TYPES`
 
-## Açıq suallar (hələ qərar verilməyib)
-
 ### LinkedIn scraping yanaşması
-- **Status:** Open
-- **Sual:** Rəsmi API/lisenziyalı 3-cü tərəf provider (Proxycurl, Phantombuster və s.) istifadə olunacaq, yoxsa LinkedIn ilk MVP-dən tamamilə çıxarılacaq?
-- **Niyə açıqdır:** açıq HTML scraping LinkedIn ToS-unu pozur, hesab bloklanma riski var.
-- **Kim qərar verməlidir:** hüquq şöbəsi + məhsul rəhbəri
-- **Hazırkı vəziyyət:** `app/scrapers/linkedin.py` boş stub, scheduler-ə qoşulmayıb
+- **Status:** Decided (2026-09-23)
+- **Qərar:** Birbaşa HTML/cookie scraping YOX — Apify-də lisenziyalı actor `harvestapi/linkedin-post-search` (keyword üzrə post axtarışı, cookie/hesab lazım deyil) istifadə olunur. Apify-nin `run-sync-get-dataset-items` REST endpoint-i birbaşa `httpx` ilə çağırılır (ayrıca `apify-client` SDK-sı əlavə olunmadı — mövcud `BaseScraper.post()` kifayət etdi).
+- **Niyə:** ToS pozuntusu/hesab bloklanma riskini aradan qaldırır — açıq sualda qeyd olunan "lisenziyalı 3-cü tərəf provider" yolu seçildi (Proxycurl/Phantombuster əvəzinə Apify, sərfəli qiymət və sadə REST API-yə görə).
+- **Qeyd:** `APIFY_TOKEN` `.env`-də olmalıdır, yoxdursa scraper boş siyahı qaytarır və loglayır (digər fail-safe qərarlarla eyni naxış). Post başına ödəniş olduğu üçün scheduler-də gündə 1 dəfə işə salınır (bax `app/scheduler.py`), tez-tez YOX.
+- **Kodda:** `app/scrapers/linkedin.py`, `app/scrapers/base.py::BaseScraper.post`
+
+### LinkedIn axtarış sözləri (canlı test edilib)
+- **Status:** Decided (2026-09-23), Apify MCP vasitəsilə canlı test edildikdən sonra
+- **Test:** 2 dəfə real actor run (26 post cəmi) — sadə açar sözlərlə (`"catering Bakı"`, `"corporate catering Baku"`, `"looking for catering Baku"` və s.) axtarış demək olar TAMAMİLƏ iş elanı (AzVak, ASG Aviation Services Group — "Baş Aşpaz tələb olunur", "Catering Loader", hətta əlaqəsi olmayan "Lead Accountant" vakansiyaları, çünki şirkət təsvirində "catering" sözü keçir) və catering şirkətlərinin öz reklamı/HR məzmunu ilə doldu. 26 postdan cəmi 1-i (bax aşağı) real müştəri siqnalı idi.
+- **Nə işlədi:** niyyət bildirən ifadələr (`"catering axtarırıq"`) — nümunə: Azeri Steel MMC-nin İR rəhbəri əməkdaşların gündəlik qidalanması üçün catering şirkəti ilə əməkdaşlıq axtardığını yazmışdı (dəqiq bizim istədiyimiz lead tipi).
+- **Qərar:** `SEARCH_QUERIES` niyyət-ifadələrinə keçirildi (`"catering axtarırıq"`, `"catering şirkəti ilə əməkdaşlıq axtarırıq"`, `"iaşə təminatçısı axtarılır"` və s.), bare keyword-lər çıxarıldı. Əlavə olaraq `EXCLUDE_KEYWORDS` filtri əlavə olundu (`"tələb olunur"`, `"əməkhaqqı"`, `"cv göndər"`, `"hr@"` və s.) — çünki "axtarırıq" sözü iş elanlarında da "əməkdaş axtarırıq" mənasında çıxır, sadəcə niyyət-ifadəsi kifayət deyil.
+- **Qeyd:** filtr mükəmməl deyil (məs. marketinq postları hələ keçə bilər) — qalan səs-küyü AI Filter (`ai_score`) və insan review tutmalıdır, sənədin əsas prinsipinə uyğun (bax "Human-in-the-loop").
+- **Yeniləmə (2026-09-23, ikinci test dövrəsi):** bax aşağı "LinkedIn filtrləri — hədəf müştəri profili".
+
+### LinkedIn filtrləri — hədəf müştəri profili
+- **Status:** Decided (2026-09-23), 3 əlavə canlı test + real kodla dry-run
+- **Hədəf müştəri:** Azərbaycanda əməkdaşları/işçiləri üçün gündəlik paketlənmiş/porsiyalı yemək (lunch box, toplu çatdırılma) alan təşkilatlar — ofis, zavod, tikinti, anbar, sənaye parkı. Korporativ tədbir ikinci dərəcəlidir.
+- **Tapıntılar:**
+  - LinkedIn axtarışı uzun ifadələrə (4+ söz, məs. `"əməkdaşların qidalanması üçün"`, `"yemək təchizatı tender"`) **0 nəticə** qaytarır — yalnız qısa (2-3 söz) sorğular işləyir.
+  - `"korporativ qidalanma"` alıcı yox, **satıcı** dilidir — nəticələrin çoxu rəqib reklamı idi: **Plan&Eat** (ən aktiv), **Lunchbox.az** (eyni məhsul), Doydum Catering, TAIS İKF, Catering 145 Group.
+  - Türkcə "bakış açısı" içində "bakı" var → sadə substring yoxlaması türk postlarını Azərbaycan kimi qəbul edirdi. Tam söz regex-i ilə düzəldildi.
+  - Python-da `"İ".lower()` → `"i̇"` (birləşdirici nöqtə ilə) — `"VAKANSİYA:"` heç vaxt `"vakansiya:"` ilə uyğun gəlmirdi. `_norm()` ilə düzəldildi.
+  - "tələb olunur" filtrdən çıxarıldı — alıcı da "nahar xidməti tələb olunur" yaza bilər.
+- **Qərar — iki qatlı filtr:**
+  1. Scraper (ucuz, deterministik, `rejection_reason()`): Azərbaycan olmayan → at; vakansiya işarələri və ya iş elanı saytı müəllifi (AzVak, Jobsearch.az, Vakansiya.biz) → at; `KNOWN_COMPETITORS` → at.
+  2. AI Filter (semantik): prompt hədəf müştəri profili ilə yenidən yazıldı — rəqib reklamı, fikir yazısı, avadanlıq satışı → 0.0-0.2.
+- **Dry-run nəticəsi (3 aylıq pəncərə):** 80 post → scraper 66-nı atdı (41 vakansiya, 12 rəqib, 13 xarici) → 14 AI-yə → **1 `pending_review`** (Azeri Steel, 0.9), 13 `rejected`. Yanlış müsbət: 0.
+- **Real gözlənti:** LinkedIn-də Azərbaycanda açıq "catering axtarırıq" postu nadirdir (3 ayda ~1). LinkedIn köməkçi mənbədir; bu müştəri profili üçün `etender` (iaşə tenderləri) çox güman ki daha güclüdür.
+- **Hər lead-də:** müəllifin LinkedIn profili `contact_website`-a, postdakı email `contact_email`-ə yazılır, müəllifin vəzifəsi `raw_text`-in sonuna əlavə olunur (satış komandası kimlə danışacağını bilsin).
+- **Kodda:** `app/scrapers/linkedin.py` (`SEARCH_QUERIES`, `AZ_MARKER_RE`, `VACANCY_MARKERS`, `JOB_BOARD_AUTHORS`, `KNOWN_COMPETITORS`, `rejection_reason`), `app/ai_filter.py::SYSTEM_PROMPT`
+
+## Açıq suallar (hələ qərar verilməyib)
 
 ### CRM real endpoint-i
 - **Status:** Open
@@ -54,4 +85,4 @@
 
 ### Hər saytın ToS/robots.txt hüquqi təsdiqi
 - **Status:** Open — HƏLƏ EDİLMƏYİB
-- **Qeyd:** development başlamazdan (yəni production-a keçmədən) əvvəl hər 7 mənbə üçün hüquq şöbəsindən yazılı təsdiq alınmalıdır. Bu, kodun yazılmasını əngəlləmədi, amma **production deploy-u əngəlləməlidir**.
+- **Qeyd:** development başlamazdan (yəni production-a keçmədən) əvvəl 7 birbaşa scrape olunan mənbə üçün hüquq şöbəsindən yazılı təsdiq alınmalıdır. LinkedIn bura daxil deyil (Apify — lisenziyalı 3-cü tərəf, öz ToS-u üzərindən işləyir), amma Apify-nin öz istifadə şərtlərinin qəbul edilməsi də hüquq şöbəsi ilə yoxlanmalıdır. Bu, kodun yazılmasını əngəlləmədi, amma **production deploy-u əngəlləməlidir**.

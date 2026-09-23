@@ -50,6 +50,17 @@ class BaseScraper(abc.ABC):
         resp.raise_for_status()
         return resp
 
+    @retry(
+        reraise=True,
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=20),
+        retry=retry_if_exception_type((httpx.TransportError, httpx.HTTPStatusError)),
+    )
+    def post(self, url: str, **kwargs) -> httpx.Response:
+        resp = self._client.post(url, **kwargs)
+        resp.raise_for_status()
+        return resp
+
     @abc.abstractmethod
     def fetch_leads(self) -> list[RawLead]:
         """Bu mənbədən tapılan bütün RawLead-ləri qaytarır."""

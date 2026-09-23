@@ -59,8 +59,15 @@ Hər mənbənin **real** strukturu — brauzerlə birbaşa yoxlanılıb (ilkin s
 
 ## LinkedIn
 
-- **Status:** İSTİFADƏ OLUNMUR (bilərəkdən) — bax `04-decisions.md` → "LinkedIn scraping yanaşması"
-- Kodda `app/scrapers/linkedin.py` stub kimi var, scheduler-ə qoşulmayıb
+- **Yanaşma:** birbaşa scraping YOX — Apify actor `harvestapi/linkedin-post-search` (bax `04-decisions.md` → "LinkedIn scraping yanaşması")
+- **API:** `POST https://api.apify.com/v2/acts/harvestapi~linkedin-post-search/run-sync-get-dataset-items?token=<APIFY_TOKEN>`, body: `{"searchQueries": [...], "postedLimit": "week", "sortBy": "date", "maxPosts": N}`
+- **Cavab formatı:** dataset item-ləri `type` sahəsinə görə filtrlə (`"post"` saxla, `"comment"`/`"reaction"` AT — `scrapeComments`/`scrapeReactions` deaktivdir, defolt yalnız post gəlir)
+- **Sahə uyğunluğu:** `linkedinUrl` → `source_url`, `content` (ilk sətir) → `title`, `content` → `raw_text`, `author.name` → `entity_name`, `postedAt.date` (ISO 8601) → `posted_at`
+- **Qiymət:** ~$1.50-2 / 1000 post — buna görə scheduler-də gündə 1 dəfə (bax `app/scheduler.py::beat_schedule`), xəbər saytları kimi saatlıq YOX
+- **⚠️ Tələ #1 (canlı test):** nəticələrin çoxu iş elanı (AzVak, ASG Aviation — şirkət təsvirində "catering" keçir) və rəqib reklamıdır (Plan&Eat, Lunchbox.az). Filtrlər: `app/scrapers/linkedin.py::rejection_reason`.
+- **⚠️ Tələ #2:** uzun sorğular (4+ söz) 0 nəticə qaytarır — yalnız 2-3 sözlük sorğular.
+- **⚠️ Tələ #3:** türkcə "bakış" içində "bakı" var; `"İ".lower()` birləşdirici nöqtə qaytarır. Hər ikisi kodda həll olunub — bax `04-decisions.md` → "LinkedIn filtrləri — hədəf müştəri profili".
+- **Kodda:** `app/scrapers/linkedin.py`
 
 ## Ümumi dərs
 

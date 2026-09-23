@@ -11,6 +11,7 @@ from app.scrapers import (
     EmlakScraper,
     EtenderScraper,
     FedScraper,
+    LinkedInScraper,
     MarjaScraper,
     News1Scraper,
     OxuScraper,
@@ -20,8 +21,8 @@ SessionLocal = sessionmaker(bind=engine)
 
 # Sənəd §7 Scheduling:
 # - Xəbər/elan saytları: hər 1-2 saatdan bir
-# - Etender.gov.az, Emlak.gov.az: gündə 1 dəfə
-# - LinkedIn: rəsmi/lisenziyalı yanaşma təsdiqlənənə qədər deaktiv (bax app/scrapers/linkedin.py)
+# - Etender.gov.az, Emlak.gov.az, LinkedIn: gündə 1 dəfə
+#   (LinkedIn Apify actor-u post başına ödənişlidir — tez-tez çağırmaq lazım deyil)
 
 SOURCE_TASKS = {
     "marja": MarjaScraper,
@@ -31,6 +32,7 @@ SOURCE_TASKS = {
     "fed": FedScraper,
     "etender": EtenderScraper,
     "emlak": EmlakScraper,
+    "linkedin": LinkedInScraper,
 }
 
 
@@ -79,5 +81,10 @@ celery_app.conf.beat_schedule = {
         "task": "scrape_source",
         "schedule": crontab(minute=30, hour=6),
         "args": ("emlak",),
+    },
+    "scrape-linkedin-daily": {
+        "task": "scrape_source",
+        "schedule": crontab(minute=0, hour=7),
+        "args": ("linkedin",),
     },
 }

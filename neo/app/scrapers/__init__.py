@@ -13,7 +13,7 @@ ALL_SCRAPERS = [
     FedScraper,
     EtenderScraper,
     EmlakScraper,
-    # LinkedInScraper qəsdən buraya salınmayıb — bax app/scrapers/linkedin.py
+    LinkedInScraper,
 ]
 
 __all__ = [
