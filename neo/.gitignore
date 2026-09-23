@@ -1,4 +1,11 @@
-.env
 .venv/
 __pycache__/
 *.pyc
+.env
+.pytest_cache/
+
+# Lokal data və alət ayarları
+neo_leads.db
+*.db
+.DS_Store
+.claude/

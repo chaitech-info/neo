@@ -13,6 +13,8 @@
     main { padding: 28px; max-width: 1200px; margin: 0 auto; }
     h1 { font-size: 22px; margin-bottom: 4px; }
     .muted { color: #8d96b3; font-size: 14px; }
+    details { margin-top: 6px; max-width: 520px; white-space: pre-line; font-size: 13px; line-height: 1.5; }
+    details summary { cursor: pointer; color: #7ca8ff; }
     table { width: 100%; border-collapse: collapse; margin-top: 16px; background: #12182c; border-radius: 10px; overflow: hidden; }
     th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid #232c47; font-size: 14px; vertical-align: top; }
     th { color: #8d96b3; font-weight: 600; text-transform: uppercase; font-size: 12px; letter-spacing: 0.5px; }
@@ -44,6 +46,7 @@
     <div>
       <a href="/" class="{{ 'active' if active == 'dashboard' else '' }}">Dashboard</a>
       <a href="/leads/pending_review" class="{{ 'active' if active == 'validation' else '' }}">Validasiya</a>
+      <a href="/leads/ai_rejected" class="{{ 'active' if active == 'ai_rejected' else '' }}">AI rədd etdi</a>
       <a href="/leads" class="{{ 'active' if active == 'all' else '' }}">Bütün lead-lər</a>
     </div>
     <span class="muted">Lead Scraping Admin</span>

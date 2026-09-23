@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
 from app.models import LeadCategory, RawLead
-from app.scrapers.base import BaseScraper
+from app.scrapers.base import BaseScraper, az_lower
 
 # Brauzerlə yoxlanıb: emlak.gov.az əslində "Əmlak Məsələləri Dövlət Xidməti"
 # saytıdır — ilk fərziyyə (yeni obyekt qeydiyyatı reyestri) mövcud deyil.
@@ -13,8 +14,10 @@ from app.scrapers.base import BaseScraper
 # /az/news/view/<id>-<slug> URL-i altında dərc edir; torpaq müsabiqəsi,
 # hərrac, kommersiya/obyekt satışı ilə bağlı elanlar catering üçün potensial
 # yer/obyekt siqnalı ola bilər (sənəd §5: "aşağı prioritetli siqnal").
-LISTING_URL = "https://emlak.gov.az"
-ARTICLE_RE = re.compile(r"^https://emlak\.gov\.az/az/news/view/\d+-[a-z0-9-]+$")
+# Linklərin çoxu nisbidir ("/az/...", hətta "az/..."), bəzi slug-lar Unicode-dur —
+# ona görə əvvəl mütləq URL-ə çeviririk, slug-ı yoxlamırıq.
+LISTING_URL = "https://emlak.gov.az/"
+ARTICLE_RE = re.compile(r"^https://emlak\.gov\.az/az/news/view/\d+-")
 
 KEYWORDS = [
     "hərrac", "müsabiqə", "obyekt", "restoran", "kommersiya",
@@ -33,26 +36,26 @@ class EmlakScraper(BaseScraper):
         resp = self.get(LISTING_URL)
         soup = BeautifulSoup(resp.text, "lxml")
 
-        seen: set[str] = set()
+        best_text: dict[str, str] = {}
         for a in soup.find_all("a", href=True):
-            href = a["href"]
-            if not ARTICLE_RE.match(href) or href in seen:
+            url = urljoin(LISTING_URL, a["href"])
+            if not ARTICLE_RE.match(url):
                 continue
-            seen.add(href)
+            text = a.get_text(strip=True)
+            if len(text) >= len(best_text.get(url, "")):
+                best_text[url] = text
 
-            title = a.get_text(strip=True)
-            if not title or not any(kw in title.lower() for kw in KEYWORDS):
+        for url, title in best_text.items():
+            if not title or not any(kw in az_lower(title) for kw in KEYWORDS):
                 continue
 
-            leads.append(
-                RawLead(
-                    source="emlak",
-                    source_url=href,
-                    title=title,
-                    raw_text=title,
-                    category=LeadCategory.real_estate,
-                )
+            lead = RawLead(
+                source="emlak",
+                source_url=url,
+                title=title,
+                raw_text=title,
+                category=LeadCategory.real_estate,
             )
-            self.polite_sleep()
+            leads.append(self.enrich(lead))
 
         return leads

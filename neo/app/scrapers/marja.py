@@ -5,7 +5,7 @@ import re
 from bs4 import BeautifulSoup
 
 from app.models import LeadCategory, RawLead
-from app.scrapers.base import BaseScraper
+from app.scrapers.base import BaseScraper, az_lower
 
 # marja.az əslində iqtisadi/biznes XƏBƏR saytıdır (elan saytı deyil — ilk
 # fərziyyə səhv idi, brauzerlə yoxlanıb düzəldilib). Məqalə linkləri:
@@ -22,6 +22,7 @@ KEYWORDS = [
 class MarjaScraper(BaseScraper):
     source_name = "marja"
     base_url = "https://marja.az"
+    article_body_selector = ".content-news"
 
     def fetch_leads(self) -> list[RawLead]:
         leads: list[RawLead] = []
@@ -43,18 +44,16 @@ class MarjaScraper(BaseScraper):
             title = best_text.get(url, "")
             if not title:
                 continue
-            if not any(kw in title.lower() for kw in KEYWORDS):
+            if not any(kw in az_lower(title) for kw in KEYWORDS):
                 continue
 
-            leads.append(
-                RawLead(
-                    source="marja",
-                    source_url=url,
-                    title=title,
-                    raw_text=title,
-                    category=LeadCategory.corporate,
-                )
+            lead = RawLead(
+                source="marja",
+                source_url=url,
+                title=title,
+                raw_text=title,
+                category=LeadCategory.corporate,
             )
-            self.polite_sleep()
+            leads.append(self.enrich(lead))
 
         return leads

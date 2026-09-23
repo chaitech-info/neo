@@ -16,6 +16,9 @@ class LeadSource(str, Enum):
     fed = "fed"
     etender = "etender"
     emlak = "emlak"
+    worldbank = "worldbank"
+    bp_edp = "bp_edp"
+    corporate = "corporate"  # şirkət/agentliklərin öz tender səhifələri (app/scrapers/corporate.py)
 
 
 class LeadCategory(str, Enum):

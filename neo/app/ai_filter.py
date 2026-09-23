@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import date, datetime
 
 import structlog
 from openai import OpenAI
 
 from app.models import LeadStatus, RawLead
+from app.scrapers.base import BAKU_TZ
 
 log = structlog.get_logger()
 
 SCORE_THRESHOLD = 0.6
+DEFAULT_MODEL = "gpt-4o-mini"
 
 SYSTEM_PROMPT = """\
 Sən Azərbaycandakı bir catering şirkəti üçün potensial müştəri (lead) qiymətləndirirsən.
@@ -37,6 +40,10 @@ BİZDƏN yemək ALA BİLƏCƏK bir təşkilata işarə etmə ehtimalını qiymə
   - yalnız avadanlıq (mətbəx avadanlığı və s.) alınır, yemək xidməti yox;
   - Azərbaycandan kənarda.
 
+Bu gün: {today}. Mətndə müraciət/təklif üçün son tarix göstərilibsə və o tarix bu
+gündən əvvəldirsə, fürsət artıq bitib — score 0.1-dən yuxarı olmasın və reason-da
+"son tarix keçib" yaz. Son tarix göstərilməyibsə, bunu nəzərə alma.
+
 Yalnız bu JSON formatında cavab ver, başqa heç nə yazma:
 {"score": 0.0-1.0 arası float, "reason": "bir cümləlik qısa əsaslandırma, Azərbaycan dilində"}
 """
@@ -45,9 +52,25 @@ Yalnız bu JSON formatında cavab ver, başqa heç nə yazma:
 class AIFilter:
     """Sənəd §6 Lead scoring & AI filtering-in tətbiqi."""
 
-    def __init__(self, client: OpenAI | None = None, model: str = "gpt-4o-mini") -> None:
-        self.client = client or OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-        self.model = model
+    def __init__(self, client: OpenAI | None = None, model: str | None = None) -> None:
+        self._client = client
+        self.model = model or os.environ.get("AI_MODEL") or DEFAULT_MODEL
+
+    @property
+    def client(self) -> OpenAI:
+        # Lazy: OpenAI() key olmadıqda konstruktorda xəta atır — bu, score()-un
+        # try blokunda baş versin ki, lead pending_review-a düşsün, pipeline çökməsin.
+        if self._client is None:
+            self._client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+        return self._client
+
+    @staticmethod
+    def today() -> date:
+        return datetime.now(BAKU_TZ).date()
+
+    def system_prompt(self) -> str:
+        # .replace — prompt-dakı JSON nümunəsinin {} mötərizələri .format-ı sındırardı.
+        return SYSTEM_PROMPT.replace("{today}", self.today().strftime("%d.%m.%Y"))
 
     def score(self, lead: RawLead) -> RawLead:
         try:
@@ -57,15 +80,15 @@ class AIFilter:
                 # Eyni post eyni skoru almalıdır — defolt temperature-da vergi
                 # izahı postu bir dəfə 0.0, bir dəfə 0.6 (eşik) almışdı.
                 temperature=0,
+                # JSON rejimi: model cavabı ```json ... ``` blokuna salmır.
                 response_format={"type": "json_object"},
                 messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": self.system_prompt()},
                     {"role": "user", "content": lead.raw_text[:4000]},
                 ],
             )
-            text = response.choices[0].message.content.strip()
-            parsed = json.loads(text)
-            lead.ai_score = float(parsed["score"])
+            parsed = json.loads(response.choices[0].message.content)
+            lead.ai_score = min(max(float(parsed["score"]), 0.0), 1.0)
             lead.ai_reason = str(parsed["reason"])
             lead.status = (
                 LeadStatus.pending_review

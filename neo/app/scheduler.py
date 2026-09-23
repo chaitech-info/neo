@@ -7,14 +7,17 @@ from app.celery_app import celery_app
 from app.db.engine import engine
 from app.pipeline import run_pipeline
 from app.scrapers import (
-    AzerwebScraper,
+    BpEdpScraper,
+    CorporateTenderScraper,
     EmlakScraper,
     EtenderScraper,
     FedScraper,
+    FedTenderScraper,
     LinkedInScraper,
     MarjaScraper,
     News1Scraper,
     OxuScraper,
+    WorldBankScraper,
 )
 
 SessionLocal = sessionmaker(bind=engine)
@@ -26,12 +29,16 @@ SessionLocal = sessionmaker(bind=engine)
 
 SOURCE_TASKS = {
     "marja": MarjaScraper,
-    "azerweb": AzerwebScraper,
+    # azerweb qəsdən yoxdur — robots.txt `Disallow: /api/`, məzmun isə yalnız API-dən gəlir (bax app/scrapers/azerweb.py)
     "1news": News1Scraper,
     "oxu": OxuScraper,
     "fed": FedScraper,
+    "fed_tenders": FedTenderScraper,
     "etender": EtenderScraper,
     "emlak": EmlakScraper,
+    "corporate": CorporateTenderScraper,
+    "worldbank": WorldBankScraper,
+    "bp_edp": BpEdpScraper,
     "linkedin": LinkedInScraper,
 }
 
@@ -52,11 +59,6 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(minute=0, hour="*/1,*/2"),
         "args": ("marja",),
     },
-    "scrape-azerweb-every-90min": {
-        "task": "scrape_source",
-        "schedule": crontab(minute=15, hour="*/2"),
-        "args": ("azerweb",),
-    },
     "scrape-1news-hourly": {
         "task": "scrape_source",
         "schedule": crontab(minute=0, hour="*"),
@@ -72,10 +74,30 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(minute=40, hour="*"),
         "args": ("fed",),
     },
+    "scrape-fed-tenders-every-2h": {
+        "task": "scrape_source",
+        "schedule": crontab(minute=50, hour="*/2"),
+        "args": ("fed_tenders",),
+    },
     "scrape-etender-daily": {
         "task": "scrape_source",
         "schedule": crontab(minute=0, hour=6),
         "args": ("etender",),
+    },
+    "scrape-corporate-twice-daily": {
+        "task": "scrape_source",
+        "schedule": crontab(minute=10, hour="8,16"),
+        "args": ("corporate",),
+    },
+    "scrape-worldbank-daily": {
+        "task": "scrape_source",
+        "schedule": crontab(minute=0, hour=7),
+        "args": ("worldbank",),
+    },
+    "scrape-bp-edp-daily": {
+        "task": "scrape_source",
+        "schedule": crontab(minute=15, hour=7),
+        "args": ("bp_edp",),
     },
     "scrape-emlak-daily": {
         "task": "scrape_source",

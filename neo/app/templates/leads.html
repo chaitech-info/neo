@@ -9,15 +9,22 @@
     <tr>
       <th>Mənbə</th>
       <th>Başlıq</th>
+      <th>Dərc tarixi</th>
       <th>AI skor</th>
       <th>Əsaslandırma</th>
       <th>Status</th>
-      {% if show_actions %}<th>Əməliyyat</th>{% endif %}
+      {% if show_actions or show_restore %}<th>Əməliyyat</th>{% endif %}
     </tr>
     {% for lead in leads %}
     <tr>
       <td>{{ lead.source }}</td>
-      <td><a href="{{ lead.source_url }}" target="_blank" style="color:#7ca8ff">{{ lead.title[:80] }}</a></td>
+      <td>
+        <a href="{{ lead.source_url }}" target="_blank" style="color:#7ca8ff">{{ lead.title[:80] }}</a>
+        {% if lead.raw_text and lead.raw_text != lead.title %}
+        <details class="muted"><summary>Mətn</summary>{{ lead.raw_text[lead.title|length:]|trim|truncate(1500) }}</details>
+        {% endif %}
+      </td>
+      <td class="muted">{{ lead.posted_at|baku_time }}</td>
       <td class="score">{{ "%.2f"|format(lead.ai_score) if lead.ai_score is not none else "—" }}</td>
       <td class="muted">{{ lead.ai_reason or "—" }}</td>
       <td>
@@ -32,6 +39,13 @@
         </form>
         <form class="inline" method="post" action="/leads/{{ lead.dedupe_key }}/reject">
           <button class="btn btn-reject btn-sm" type="submit">Rədd et</button>
+        </form>
+      </td>
+      {% endif %}
+      {% if show_restore %}
+      <td class="actions">
+        <form class="inline" method="post" action="/leads/{{ lead.dedupe_key }}/restore">
+          <button class="btn btn-approve btn-sm" type="submit">Validasiyaya qaytar</button>
         </form>
       </td>
       {% endif %}

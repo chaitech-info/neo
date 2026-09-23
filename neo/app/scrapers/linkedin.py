@@ -96,6 +96,7 @@ class LinkedInScraper(BaseScraper):
     """
 
     source_name = "linkedin"
+    respect_robots = False  # lisenziyalı Apify API (token ilə) — robots.txt yox, Apify ToS tətbiq olunur
     base_url = "https://www.linkedin.com"
     min_delay_s = 1.0
     max_delay_s = 2.0

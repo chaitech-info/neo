@@ -73,11 +73,25 @@ def send_lead_to_crm(dedupe_key: str, session: Session) -> str:
     return "ok"
 
 
-def reject_lead(dedupe_key: str, session: Session) -> bool:
-    """Admin panelində 'Reject' düyməsi çağırır."""
+def restore_lead(dedupe_key: str, session: Session) -> bool:
+    """'AI rədd etdi' səhifəsində 'Validasiyaya qaytar' — AI-nin səhv rəddini insan düzəldir."""
     repo = LeadRepository(session)
     record = repo.get(dedupe_key)
-    if record is None:
+    if record is None or record.status != "rejected":
+        return False
+    repo.set_status(dedupe_key, "pending_review")
+    return True
+
+
+def reject_lead(dedupe_key: str, session: Session) -> bool:
+    """Admin panelində 'Reject' düyməsi çağırır.
+
+    Yalnız pending_review rədd edilə bilər — artıq CRM-ə göndərilmiş lead-in
+    statusunu dəyişmək DB ilə CRM arasında uyğunsuzluq yaradardı.
+    """
+    repo = LeadRepository(session)
+    record = repo.get(dedupe_key)
+    if record is None or record.status != "pending_review":
         return False
     repo.set_status(dedupe_key, "rejected")
     return True

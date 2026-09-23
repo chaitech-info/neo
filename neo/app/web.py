@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import structlog
@@ -11,19 +12,23 @@ from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import sessionmaker
 
+from app.ai_filter import SCORE_THRESHOLD
 from app.db.engine import engine
 from app.db.models import Base
 from app.db.repository import LeadRepository
-from app.pipeline import reject_lead, run_pipeline, send_lead_to_crm
+from app.pipeline import reject_lead, restore_lead, run_pipeline, send_lead_to_crm
 from app.scrapers import (
-    AzerwebScraper,
+    BpEdpScraper,
+    CorporateTenderScraper,
     EmlakScraper,
     EtenderScraper,
     FedScraper,
+    FedTenderScraper,
     LinkedInScraper,
     MarjaScraper,
     News1Scraper,
     OxuScraper,
+    WorldBankScraper,
 )
 
 log = structlog.get_logger()
@@ -32,12 +37,16 @@ SessionLocal = sessionmaker(bind=engine)
 
 SOURCES = {
     "marja": ("Marja.az", MarjaScraper),
-    "azerweb": ("Azerweb.az", AzerwebScraper),
+    # azerweb qəsdən yoxdur — robots.txt `Disallow: /api/`, məzmun isə yalnız API-dən gəlir (bax app/scrapers/azerweb.py)
     "1news": ("1news.az", News1Scraper),
     "oxu": ("Oxu.az", OxuScraper),
     "fed": ("Fed.az", FedScraper),
+    "fed_tenders": ("Fed.az Tenderlər", FedTenderScraper),
     "etender": ("Etender.gov.az", EtenderScraper),
     "emlak": ("Emlak.gov.az", EmlakScraper),
+    "corporate": ("Şirkət/agentlik tenderləri", CorporateTenderScraper),
+    "worldbank": ("Dünya Bankı", WorldBankScraper),
+    "bp_edp": ("bp EDP", BpEdpScraper),
     "linkedin": ("LinkedIn (Apify)", LinkedInScraper),
 }
 
@@ -45,6 +54,14 @@ _last_run: dict[str, str] = {}
 
 app = FastAPI(title="Lead Scraping Admin")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+
+
+def _baku_time(value: datetime | None) -> str:
+    """DB-də naive UTC saxlanılır — paneldə Bakı vaxtı (+04) göstərilir."""
+    return (value + timedelta(hours=4)).strftime("%d.%m.%Y %H:%M") if value else "—"
+
+
+templates.env.filters["baku_time"] = _baku_time
 
 
 @app.on_event("startup")
@@ -138,6 +155,32 @@ def leads_pending(request: Request):
     )
 
 
+@app.get("/leads/ai_rejected")
+def leads_ai_rejected(request: Request):
+    session = SessionLocal()
+    try:
+        repo = LeadRepository(session)
+        leads = repo.list_ai_rejected(SCORE_THRESHOLD)
+    finally:
+        session.close()
+
+    return templates.TemplateResponse(
+        "leads.html",
+        {
+            "request": request,
+            "active": "ai_rejected",
+            "heading": "AI rədd etdi",
+            "subtitle": (
+                f"AI skoru {SCORE_THRESHOLD} eşiyindən aşağı olan lead-lər. "
+                "Səhv rədd görsən, Validasiyaya qaytar."
+            ),
+            "leads": leads,
+            "show_actions": False,
+            "show_restore": True,
+        },
+    )
+
+
 @app.get("/leads")
 def leads_all(request: Request):
     session = SessionLocal()
@@ -185,6 +228,25 @@ def approve_lead(dedupe_key: str):
     return RedirectResponse(url="/leads/pending_review?msg=Lead CRM-ə göndərildi", status_code=303)
 
 
+@app.post("/leads/{dedupe_key}/restore")
+def restore_lead_route(dedupe_key: str):
+    if not dedupe_key or len(dedupe_key) != 64:
+        return RedirectResponse(url="/leads/ai_rejected?err=Yanlış lead ID", status_code=303)
+
+    session = SessionLocal()
+    try:
+        ok = restore_lead(dedupe_key, session)
+    finally:
+        session.close()
+
+    if not ok:
+        return RedirectResponse(
+            url="/leads/ai_rejected?err=Lead tapılmadı və ya artıq rədd statusunda deyil",
+            status_code=303,
+        )
+    return RedirectResponse(url="/leads/ai_rejected?msg=Lead Validasiyaya qaytarıldı", status_code=303)
+
+
 @app.post("/leads/{dedupe_key}/reject")
 def reject_lead_route(dedupe_key: str):
     if not dedupe_key or len(dedupe_key) != 64:
@@ -197,5 +259,8 @@ def reject_lead_route(dedupe_key: str):
         session.close()
 
     if not ok:
-        return RedirectResponse(url="/leads/pending_review?err=Lead tapılmadı", status_code=303)
+        return RedirectResponse(
+            url="/leads/pending_review?err=Lead tapılmadı və ya artıq emal olunub (yalnız pending_review rədd edilə bilər)",
+            status_code=303,
+        )
     return RedirectResponse(url="/leads/pending_review?msg=Lead rədd edildi", status_code=303)

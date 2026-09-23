@@ -75,6 +75,21 @@ class LeadRepository:
         )
         return list(self.session.execute(stmt).scalars().all())
 
+    def list_ai_rejected(self, threshold: float) -> list[LeadRecord]:
+        """AI-nin eşikdən aşağı skorla rədd etdikləri (insanın rədd etdikləri yox —
+        insan yalnız pending_review-u, yəni skoru eşikdən yuxarı və ya boş olanı rədd edir).
+        Eşiyə ən yaxın olanlar əvvəldə — səhv rədd ehtimalı ən yüksək olanlar."""
+        stmt = (
+            select(LeadRecord)
+            .where(
+                LeadRecord.status == "rejected",
+                LeadRecord.ai_score.is_not(None),
+                LeadRecord.ai_score < threshold,
+            )
+            .order_by(LeadRecord.ai_score.desc(), LeadRecord.scraped_at.desc())
+        )
+        return list(self.session.execute(stmt).scalars().all())
+
     def list_all(self, limit: int = 200) -> list[LeadRecord]:
         stmt = select(LeadRecord).order_by(LeadRecord.scraped_at.desc()).limit(limit)
         return list(self.session.execute(stmt).scalars().all())
