@@ -31,10 +31,16 @@ BİZDƏN yemək ALA BİLƏCƏK bir təşkilata işarə etmə ehtimalını qiymə
   axtarır, və ya işçi qidalanması üzrə tender/satınalma elan edir.
 0.6-0.8: korporativ tədbir/banket/konfrans üçün catering ehtiyacı; və ya çoxlu
   işçisi olan yeni zavod/ofis/tikinti layihəsinin Azərbaycanda açılması.
+0.6-0.8: mətn "[SİQNAL: işəgötürən ... işçilərinə nahar/yemək verdiyini yazır]"
+  ilə başlayırsa — bu iş elanı DEYİL, işəgötürən şirkətin özü lead-dir (artıq
+  hər gün işçi yedizdirir, təchizatçı dəyişə bilər). Zavod, istehsal, tikinti,
+  mağaza/filial şəbəkəsi, çox işçili şirkət → 0.7-0.8; kiçik ofis → 0.6.
+  Əgər işəgötürənin özü catering/yemək şirkətidirsə → 0.0 (rəqibdir).
 0.3-0.6: dolayı siqnal (yeni restoran, böyüyən şirkət), amma yemək ehtiyacı aydın deyil.
 0.0-0.2: aşağıdakılardan biridirsə —
   - müəllif özü catering/yemək xidməti REKLAM EDİR və ya təklif edir (rəqibdir, alıcı deyil);
-  - iş elanı (vakansiya), könüllü axtarışı, şəxsi post, sektor haqqında fikir yazısı;
+  - iş elanı (vakansiya) — [SİQNAL] qeydi olanlar istisnadır, yuxarıya bax;
+  - könüllü axtarışı, şəxsi post, sektor haqqında fikir yazısı;
   - informativ/izah yazısı (vergi, mühasibat, qanunvericilik, xəbər şərhi) — mövzu
     yemək olsa belə, konkret təşkilat yemək almaq istəmirsə;
   - yalnız avadanlıq (mətbəx avadanlığı və s.) alınır, yemək xidməti yox;
