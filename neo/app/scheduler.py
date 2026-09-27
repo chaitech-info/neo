@@ -7,6 +7,7 @@ from app.celery_app import celery_app
 from app.db.engine import engine
 from app.pipeline import run_pipeline
 from app.scrapers import (
+    BossAzScraper,
     BpEdpScraper,
     CorporateTenderScraper,
     EmlakScraper,
@@ -17,6 +18,7 @@ from app.scrapers import (
     MarjaScraper,
     News1Scraper,
     OxuScraper,
+    ReportSenayeScraper,
     WorldBankScraper,
 )
 
@@ -34,11 +36,13 @@ SOURCE_TASKS = {
     "oxu": OxuScraper,
     "fed": FedScraper,
     "fed_tenders": FedTenderScraper,
+    "report": ReportSenayeScraper,
     "etender": EtenderScraper,
     "emlak": EmlakScraper,
     "corporate": CorporateTenderScraper,
     "worldbank": WorldBankScraper,
     "bp_edp": BpEdpScraper,
+    "boss": BossAzScraper,
     "linkedin": LinkedInScraper,
 }
 
@@ -79,6 +83,11 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(minute=50, hour="*/2"),
         "args": ("fed_tenders",),
     },
+    "scrape-report-every-2h": {
+        "task": "scrape_source",
+        "schedule": crontab(minute=25, hour="*/2"),
+        "args": ("report",),
+    },
     "scrape-etender-daily": {
         "task": "scrape_source",
         "schedule": crontab(minute=0, hour=6),
@@ -108,5 +117,11 @@ celery_app.conf.beat_schedule = {
         "task": "scrape_source",
         "schedule": crontab(minute=0, hour=7),
         "args": ("linkedin",),
+    },
+    # ~28 GraphQL səhifəsi, ~1.5 dəq. Elanlar 30 gün aktiv qalır — gündə 1 dəfə kifayətdir.
+    "scrape-boss-daily": {
+        "task": "scrape_source",
+        "schedule": crontab(minute=45, hour=7),
+        "args": ("boss",),
     },
 }

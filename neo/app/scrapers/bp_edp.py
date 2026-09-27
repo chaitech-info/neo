@@ -44,7 +44,7 @@ class BpEdpScraper(BaseScraper):
         soup = BeautifulSoup(resp.text, "lxml")
         today = self.today()
 
-        leads: list[RawLead] = []
+        candidates = []
         for row in soup.select("#table-body-tender-list > tr"):
             cells = row.find_all("td", recursive=False)
             if len(cells) < 5:
@@ -53,11 +53,14 @@ class BpEdpScraper(BaseScraper):
             title = cells[2].get_text(" ", strip=True)
             scope = cells[3].get_text(" ", strip=True)
             deadline = parse_listing_day(cells[4].get_text(" ", strip=True))
+            if title and not (deadline and deadline < today):
+                candidates.append((bid_no, title, scope, deadline))
 
-            if deadline and deadline < today:
-                continue
-            # Başlıq qısadır ("Provision of ... Services") — işin təsviri də yoxlanılır.
-            if not title or not contains_keyword(f"{title} {scope}", KEYWORDS):
+        # Başlıq qısadır ("Provision of ... Services") — işin təsviri də yoxlanılır.
+        keep = self.select_relevant([f"{t} {s}" for _, t, s, _ in candidates], KEYWORDS, kind="tender")
+        leads: list[RawLead] = []
+        for (bid_no, title, scope, deadline), selected in zip(candidates, keep):
+            if not selected:
                 continue
 
             raw_text = f"{title}\n\nSifarişçi: {ORG}\nNömrə: {bid_no}"

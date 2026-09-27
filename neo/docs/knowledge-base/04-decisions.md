@@ -76,6 +76,37 @@
 - **Qiymət:** 7 sorğu × 30 post (gündəlik, 1 həftəlik pəncərə) = gündə ≤210 post ≈ ≤$0.4/gün (Apify). OpenAI (`gpt-4o-mini`) xərci cüzidir.
 - **Məhdudiyyət:** AI şirkət ölçüsünü bilmir (elanda yazılmır) — demək olar hamısına 0.7 verir. Sıralama üçün satış komandası özü baxmalıdır.
 - **Kodda:** `app/scrapers/linkedin.py` (`MEAL_PROVIDED_RE`, `employer_identity`, `_employer_lead`), `app/ai_filter.py::SYSTEM_PROMPT`
+- **Yeniləmə (2026-09-27):** məntiq `app/scrapers/employer_signal.py`-a köçürüldü və boss.az-da da işlədilir — bax aşağı.
+
+### Mənbə keyfiyyəti auditi və boss.az (2026-09-27)
+- **Status:** Decided, canlı audit (hər mənbə real çəkilib + AI skorlanıb, DB-yə yazılmadan)
+- **Audit nəticəsi (əvvəl):** 10 mənbə → 19 lead, cəmi 2-si ≥0.6 (fed.az və etender-də catering tenderləri). Xəbər açar sözləri (`forum`, `sərgi`, `tədbir`, `açılış`, `restoran`) 16 başlıqdan 15-ni dövlət tədbiri səs-küyü ilə doldurdu (İnvestisiya Forumu, F1 açılışı) — hamısı 0.0.
+- **Qərarlar:**
+  1. **boss.az** yeni mənbə (`app/scrapers/boss.py`): bütün aktiv elanlar GraphQL ilə oxunur, nahar qeyd olunanların işəgötürəni lead olur (şirkət başına bir lead, vəzifələr siyahısı ölçü siqnalıdır). Filtr: anonim ad ("Company"), rəqib, öz mətbəxi olan (otel/restoran/kafe/catering — adda). **Nəticə: 660 elan → 29 `pending_review` işəgötürən** (Siyəzən-Broyler, Zeytun Pharma, Unimetal, Avromak, CHOCO-ARS, Kral ət, Perfect Logistics, Aramex və s.).
+  2. **Ortaq modul** `employer_signal.py` (LinkedIn + boss.az): `fold()` — `"İ".lower()` nöqtə problemi və `az_lower()`-un "CATERING" → "caterıng" problemi, hər ikisi həll.
+  3. **Mənbələrarası dedup:** `Normalizer` indi `source_url`-u mənbədən asılı olmayaraq yoxlayır (`repo.url_exists`) — işəgötürənin URL-i onun saytıdır, eyni şirkət LinkedIn və boss.az-dan 1 lead olur.
+  4. **Xəbər açar sözləri** `base.NEWS_KEYWORDS`-da birləşdirildi (marja/1news/oxu/fed): dövlət tədbiri sözləri çıxarıldı; genişlənmə (zavod, sənaye parkı, "təməli qoyul", "yeni iş yeri") və mədən ("qızıl mədən", "filiz", "istehsala başla") siqnalları əlavə olundu. Canlı başlıqlarda: köhnə 16 uyğunluq/1 faydalı → yeni 3/3 (Azərsun zavodu 2 dəfə böyüdür, Mingəçevir tekstil zavodu).
+  5. **report.az/senaye** yeni xəbər mənbəyi (`ReportSenayeScraper`).
+  6. **AI prompt:** işəgötürən ölçüsü (fəhlə/operator/anbar və ya bir neçə vakansiya → 0.75-0.85, kiçik ofis → 0.6); hazır yemək bişirən işəgötürən → 0.1-0.2 (qida istehsalı zavodları istisna); konkret şirkətli zavod/genişlənmə xəbəri → 0.6-0.7 (əvvəl 0.5 alıb eşikdən aşağı qalırdı); `reason` qaydaların mətnini təkrarlamasın (əvvəl "PAŞA Holding memorandumu" üçün "rəqib reklam edir" yazırdı).
+  7. **fed.az başlıqları:** kart mətninə yapışan "Sənaye26 Sen 2026" / "13:0126 Sen 2026" təmizlənir.
+- **Qəbul edilmiş məhdudiyyət:** gpt-4o-mini ölçü qaydalarını zəif tətbiq edir (boss.az-da demək olar hamısı 0.75). Hamısı real işəgötürəndir, sıralama satış komandasındadır.
+- **Kodda:** `app/scrapers/boss.py`, `app/scrapers/employer_signal.py`, `app/normalizer.py`, `app/db/repository.py::url_exists`, `app/scrapers/base.py::NEWS_KEYWORDS`, `app/scrapers/news.py`, `app/ai_filter.py`
+
+### Açar söz + AI triaj — "heç bir fürsət buraxılmasın" (2026-09-27)
+- **Status:** Decided, etender və boss.az-da canlı ölçülüb
+- **Problem:** hər mənbə sabit açar söz siyahısı ilə süzürdü; siyahıda olmayan söz = buraxılmış fürsət. Etender-də 5 sözlə SERVER axtarışı edilirdi.
+- **Ölçü (etender, 1707 "aktiv" tender):** 486-sının son tarixi hələ keçməyib (EventStatus=1 bitmişləri də qaytarır — scraper 2024-cü il tenderlərini də ötürürdü). Köhnə 5 sözlük axtarış: 4 nəticə, **0 real fürsət** (avadanlıq, təmir, fevralda bitmiş). Buraxılanlar: tədbir təşkili tenderləri — Şabran bayram tədbirləri, SOFAZ komandaqurma, Şuşa 2026 bağlanış mərasimi, İsmayıllı 95 illik, İdman Festivalı (təşkilatçı yemək alır).
+- **Qərar:**
+  1. **Açar sözlər genişləndirildi** (`base.py`: `MEAL_KEYWORDS`, `EVENT_KEYWORDS`, `EXPANSION_KEYWORDS`): az kök sözləri + rus + ingilis. Uyğunluq `fold()` ilə sözün əvvəlində (böyük hərf, "İ"/"ı", şəkilçi problemləri həll). "müsabiqə" yoxdur — tenderin öz adıdır.
+  2. **AI başlıq triajı** (`app/ai_triage.py`): siyahıdakı BÜTÜN başlıqlar 40-lıq partiyalarla AI-yə, hər başlıq üçün 1/0 (nömrə siyahısı istəyəndə model həm artıq seçir, həm buraxırdı). "Şübhədə daxil et". Tender və xəbər üçün ayrı qaydalar (tenderdə tikinti/təmir = 0: alıcı yemək almır). Pozuq cavab → partiyanın hamısı daxil. AI işləmirsə → yalnız açar sözlər (heç nə itmir).
+  3. **Seçim = açar söz VƏ YA AI** (`BaseScraper.select_relevant`) — bütün siyahı mənbələrində (xəbərlər, fed tenderləri, şirkət saytları, emlak, Dünya Bankı, bp EDP, etender). Logda `candidates_selected`: keyword/ai/ai_only sayları.
+  4. **Etender:** server axtarışı yox — bütün aktiv tenderlər (100-lük səhifə, ~18 sorğu), son tarixi keçənlər kodda atılır, alıcı + son tarix `raw_text`-də.
+  5. **AI skorlama düzəlişləri:** tədbir təşkili tenderi → 0.6-0.7 (yemək adı çəkilməsə də); müəssisə qidalanması → 0.8-1.0; tikinti/təmir tenderi → 0.1-0.2 (əvvəl su anbarı tikintisi 0.7 alırdı). **Son tarix kodda hesablanır** (`annotate_deadline` → "[SON TARİX: AKTİV — N gün qalıb]") — gpt-4o-mini 06.10.2026-nı 27.09.2026-da "keçib" sayıb açıq tenderi rədd etmişdi.
+  6. **OpenAI 429:** paralel skorlama 200k TPM limitinə çatırdı — `max_retries=8` (eksponensial gözləmə).
+- **Nəticə (etender, 486 açıq tender, tam AI skoru = həqiqət):** köhnə axtarış 0/5, yeni açar sözlər 5/5, AI triaj 4/5, birlikdə 5/5 real fürsət.
+- **boss.az yemək imtiyazı naxışı** (`employer_signal.mentions_company_meal`): köhnə tək regex 660 elandan 49-u tuturdu; tərs sıra ("şirkət tərəfindən pulsuz nahar"), "günorta yeməyi", "nahar verilir", "şirkət hesabına", "qidalanma kartı", "əlavə imkanlar: nahar", rusca "обед за счёт компании" buraxılırdı. Yeni: **69 elan** (+20 real). İnkar ("... verilmir") və iş qrafiki ("nahar fasiləsi", "nahar: 13:00-14:00") istisna — köhnə regex LOADSPHERE-in "nahar ... şirkət tərəfindən verilmir" elanını səhvən lead etmişdi.
+- **Qalan risk:** xəbərlərdə yalnız başlıq yoxlanır (məqalə mətni yox). AI triaj başlıqda semantik uyğunluğu tutur, amma fürsət yalnız mətndədirsə buraxıla bilər. "AI rədd etdi" səhifəsi (`/leads/ai_rejected`) AI-nin rədd etdiklərini əl ilə yoxlamaq üçündür.
+- **Kodda:** `app/ai_triage.py`, `app/scrapers/base.py` (`fold`, keyword siyahıları, `select_relevant`), `app/scrapers/etender.py`, `app/scrapers/employer_signal.py`, `app/ai_filter.py` (`annotate_deadline`, prompt), testlər `tests/test_keyword_recall.py`
 
 ## Açıq suallar (hələ qərar verilməyib)
 

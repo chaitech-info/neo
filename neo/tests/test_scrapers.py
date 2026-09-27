@@ -164,3 +164,62 @@ def test_azerweb_skips_expired_tenders():
 
     assert [lead.title for lead in leads] == ["Catering açıq", "Deadline-sız"]
     assert leads[0].posted_at.isoformat() == "2026-09-19T20:00:00"
+
+
+def test_fed_keeps_clean_title_when_card_text_has_category_and_date():
+    from bs4 import BeautifulSoup
+
+    from app.scrapers import FedScraper
+
+    href = "/az/senaye/azersun-zavodu-boyudur-265418"
+    html = f"""
+    <a href="{href}">Sənaye26 Sen 2026“Azərsun” zavodunu böyüdür</a>
+    <a href="{href}">“Azərsun” zavodunu böyüdür</a>
+    <a href="{href}">“Azərsun” zavodunu böyüdür19:3626 Sen 2026</a>
+    """
+    links = FedScraper().article_links(BeautifulSoup(html, "lxml"))
+
+    assert links == [(f"https://fed.az{href}", "“Azərsun” zavodunu böyüdür")]
+
+
+def test_fed_strips_glued_category_date_and_time_date():
+    from bs4 import BeautifulSoup
+
+    from app.scrapers import FedScraper
+
+    html = """
+    <a href="/az/senaye/mingecevir-tekstil-265403">Sənaye26 Sen 2026Mingəçevirdə tekstil layihəsinin təməli qoyuldu</a>
+    <a href="/az/senaye/mingecevir-tekstil-265403">Mingəçevirdə tekstil layihəsinin təməli qoyuldu13:0126 Sen 2026</a>
+    """
+    links = FedScraper().article_links(BeautifulSoup(html, "lxml"))
+
+    assert links == [("https://fed.az/az/senaye/mingecevir-tekstil-265403",
+                      "Mingəçevirdə tekstil layihəsinin təməli qoyuldu")]
+
+
+def test_report_senaye_reads_title_element_only():
+    from bs4 import BeautifulSoup
+
+    from app.scrapers import ReportSenayeScraper
+
+    html = """
+    <a class="news__item" href="/senaye/azergold-yeni-meden">
+      <span class="news__category">Sənaye</span>
+      <h2 class="news__title">"AzerGold" yeni qızıl mədənində istehsala başlayır</h2>
+      <ul class="news__date"><li>25 sentyabr, 2026</li><li>19:05</li></ul>
+    </a>
+    <a class="news__item" href="/iqtisadiyyat/other">Başqa bölmə</a>
+    """
+    links = ReportSenayeScraper().article_links(BeautifulSoup(html, "lxml"))
+
+    assert links == [("https://report.az/senaye/azergold-yeni-meden",
+                      '"AzerGold" yeni qızıl mədənində istehsala başlayır')]
+
+
+def test_news_keywords_skip_state_events_and_match_expansion():
+    from app.scrapers.base import NEWS_KEYWORDS, contains_keyword
+
+    assert not contains_keyword("II Azərbaycan Beynəlxalq İnvestisiya Forumunda sənədlər imzalandı", NEWS_KEYWORDS)
+    assert not contains_keyword("Mədəniyyət nazirliyi yeni layihə təqdim edib", NEWS_KEYWORDS)
+    assert contains_keyword("“Azərsun” mövcud zavodunu iki dəfə böyütməyi planlaşdırır", NEWS_KEYWORDS)
+    assert contains_keyword("Filizçay polimetal yatağında ilk istehsalın başlayacağı vaxt açıqlanıb", NEWS_KEYWORDS)

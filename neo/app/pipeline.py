@@ -25,9 +25,17 @@ def run_pipeline(scraper_cls: type[BaseScraper], session: Session) -> int:
     normalizer = Normalizer(repo)
     ai_filter = AIFilter()
 
+    log.info("pipeline_started", source=scraper_cls.source_name)
     scraper = scraper_cls()
     raw_leads = scraper.run()
     fresh_leads = normalizer.process(raw_leads)
+    log.info(
+        "dedup_done",
+        source=scraper_cls.source_name,
+        scraped=len(raw_leads),
+        fresh=len(fresh_leads),
+        duplicates=len(raw_leads) - len(fresh_leads),
+    )
 
     if not fresh_leads:
         log.info("pipeline_no_new_leads", source=scraper_cls.source_name)

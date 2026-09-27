@@ -3,12 +3,21 @@ from __future__ import annotations
 import os
 import re
 from datetime import datetime
-from urllib.parse import quote
 
 import structlog
 
 from app.models import ContactInfo, LeadCategory, RawLead
 from app.scrapers.base import BaseScraper
+from app.scrapers.employer_signal import (
+    EMAIL_RE,
+    JOB_BOARDS,
+    KNOWN_COMPETITORS,
+    SIGNAL_PREFIX,
+    corporate_domain,
+    employer_url,
+    has_own_kitchen,
+    mentions_company_meal,
+)
 
 log = structlog.get_logger()
 
@@ -31,6 +40,9 @@ SEARCH_QUERIES = [
     # bax 04-decisions.md → "İşçilərinə nahar verən şirkətlər".
     "nahar şirkət tərəfindən",
     "yemək şirkət tərəfindən",
+    # boss.az testində (2026-09-27) köhnə naxışın buraxdığı ən çox ifadələr.
+    "pulsuz nahar",
+    "nahar verilir",
 ]
 
 # Post Azərbaycanla bağlı deyilsə atılır (test: türk, hind, indoneziya postları
@@ -51,32 +63,6 @@ VACANCY_MARKERS = (
     "вакансия", "резюме", "зарплата",
     "salary:", "apply via", "job vacancy", "send your cv", "we are hiring", "#hiring",
 )
-# İş elanı saytları və işə qəbul agentlikləri — həm müəllif adında, həm email
-# domenində yoxlanır. Agentlik (humanpro.az) gizli müştəri üçün elan verir,
-# onun domeni işəgötürən deyil.
-JOB_BOARDS = ("azvak", "jobsearch", "vakansiya", "hellojob", "boss.az", "azjob", "humanpro")
-
-# Eyni məhsulu satan rəqiblər (canlı testdə tapılıb). Onların reklam postları
-# lead deyil. Yeni rəqib görsəniz bura əlavə edin (kiçik hərflə).
-KNOWN_COMPETITORS = (
-    "plan&eat", "plan & eat", "planandeat", "doydum", "catering 145",
-    "lunchbox.az", "tais ikf", "atsfood",
-)
-
-EMAIL_RE = re.compile(r"[\w.+-]+@([\w-]+(?:\.[\w-]+)+)")
-
-# Vakansiya elanında "Nahar şirkət tərəfindən təmin olunur" — işəgötürən artıq
-# hər gün işçilərini yedizdirir, yəni yemək alır. Bu, elanı rədd etmək yerinə
-# işəgötürənin özünü lead edir.
-MEAL_PROVIDED_RE = re.compile(
-    r"(nahar|yemək|qidalanma)[^.\n]{0,40}(şirkət tərəfindən|pulsuz|ödənişsiz|təmin)"
-)
-FREE_EMAIL_DOMAINS = {
-    "gmail.com", "mail.ru", "yahoo.com", "outlook.com", "hotmail.com", "icloud.com",
-    "yandex.ru", "yandex.com", "inbox.ru", "bk.ru", "list.ru", "rambler.ru",
-    "mail.com", "usa.com", "gmx.com", "aol.com", "live.com", "msn.com", "ymail.com",
-    "proton.me", "protonmail.com",
-}
 _LEGAL_FORM = r"(?:MMC|ASC|QSC|LLC|Ltd|LTD)"
 EMPLOYER_NAME_RES = (
     re.compile(r"[\"“«„]([^\"”»“\n]{2,60})[\"”»“]\s*" + _LEGAL_FORM),
@@ -122,16 +108,14 @@ def employer_identity(content: str) -> tuple[str, str] | None:
     Korporativ email domeni ən etibarlıdır (canlı testdə 32 elandan 27-si);
     iş elanı saytlarının öz domenləri (hr@vakansiya.biz və s.) sayılmır.
     """
-    for m in EMAIL_RE.finditer(content):
-        domain = m.group(1).lower().rstrip(".")
-        if domain in FREE_EMAIL_DOMAINS or any(j in domain for j in JOB_BOARDS):
-            continue
-        return domain, f"https://{domain}"
+    domain = corporate_domain(content)
+    if domain:
+        return domain, employer_url(domain, domain)
     for rx in EMPLOYER_NAME_RES:
         m = rx.search(content)
         if m:
             name = m.group(1).strip()
-            return name, f"https://www.linkedin.com/search/results/companies/?keywords={quote(name)}"
+            return name, employer_url(None, name)
     return None
 
 
@@ -200,8 +184,12 @@ class LinkedInScraper(BaseScraper):
             email = EMAIL_RE.search(content)
 
             reason = rejection_reason(content, author_name, author_info)
-            if reason == "vacancy" and MEAL_PROVIDED_RE.search(_norm(content)):
+            if reason == "vacancy" and mentions_company_meal(content):
                 employer = employer_identity(content)
+                # Restoran/otel/kafe öz mətbəxində yedizdirir — alıcı deyil (boss.az ilə eyni qayda).
+                if employer and has_own_kitchen(employer[0]):
+                    rejected["own_kitchen"] = rejected.get("own_kitchen", 0) + 1
+                    continue
                 if employer and employer[1] not in seen_employers:
                     seen_employers.add(employer[1])
                     leads.append(self._employer_lead(employer, url, content, email, posted_at))
@@ -247,11 +235,7 @@ class LinkedInScraper(BaseScraper):
             # eyni işəgötürənin sonrakı elanları yeni lead yaratmır.
             source_url=company_url,
             title=f"{name} — işçilərinə nahar verir (vakansiya elanından)",
-            raw_text=(
-                "[SİQNAL: işəgötürən vakansiya elanında işçilərinə nahar/yemək "
-                "verdiyini yazır — şirkət artıq hər gün yemək təşkil edir]\n"
-                f"Elan: {post_url}\n\n{content}"
-            ),
+            raw_text=f"{SIGNAL_PREFIX}\nElan: {post_url}\n\n{content}",
             entity_name=name,
             contact_info=ContactInfo(
                 website=company_url,

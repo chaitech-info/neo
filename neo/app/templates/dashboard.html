@@ -1,16 +1,37 @@
 {% extends "base.html" %}
 {% block title %}Dashboard — Lead Scraping Admin{% endblock %}
 {% block content %}
-  <h1>Mənbələr</h1>
-  <p class="muted">Hər kartda "Scrape indi" düyməsi həmin mənbəni dərhal işə salır (nəticə Validasiya səhifəsinə düşür).</p>
+  {% if running %}
+    {# İşləyən mənbə varsa səhifə özü yenilənir ki, status kartlarda görünsün. #}
+    <meta http-equiv="refresh" content="5">
+  {% endif %}
+  <div class="toolbar">
+    <div>
+      <h1>Mənbələr</h1>
+      <p class="muted">Hər kartda "Scrape indi" düyməsi həmin mənbəni dərhal işə salır (nəticə Validasiya səhifəsinə düşür).</p>
+    </div>
+    <form method="post" action="/scrape-all">
+      <button class="btn btn-primary btn-lg" type="submit" {% if running|length == sources|length %}disabled{% endif %}>
+        {% if running %}İşləyir: {{ running|length }}/{{ sources|length }} mənbə{% else %}Hamısını scrape et{% endif %}
+      </button>
+    </form>
+  </div>
+  {% if running %}
+    <div class="flash">{{ running|length }} mənbə paralel işləyir — gedişatı <a href="/logs">Loglar</a> səhifəsində canlı izlə. Səhifə hər 5 saniyədən bir yenilənir.</div>
+  {% endif %}
   <div class="cards">
     {% for key, label in sources.items() %}
-      <div class="card">
+      <div class="card {% if key in running %}card-running{% endif %}">
         <h3>{{ label }}</h3>
         <span class="muted">Son nəticə: {{ last_run.get(key, 'hələ işə salınmayıb') }}</span>
-        <form method="post" action="/scrape/{{ key }}">
-          <button class="btn btn-primary" type="submit">Scrape indi</button>
-        </form>
+        <div class="card-actions">
+          <form method="post" action="/scrape/{{ key }}">
+            <button class="btn btn-primary" type="submit" {% if key in running %}disabled{% endif %}>
+              {% if key in running %}İşləyir…{% else %}Scrape indi{% endif %}
+            </button>
+          </form>
+          <a class="btn btn-sm" href="/logs?source={{ key }}">Loglar</a>
+        </div>
       </div>
     {% endfor %}
   </div>

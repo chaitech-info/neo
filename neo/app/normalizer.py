@@ -18,7 +18,9 @@ class Normalizer:
         fresh: list[RawLead] = []
         for lead in leads:
             key = lead.dedupe_key()
-            if self.repo.exists(key):
+            # URL yoxlaması mənbədən asılı deyil: işəgötürən lead-lərinin URL-i
+            # şirkətin saytıdır — eyni şirkət LinkedIn-dən də, boss.az-dan da gələ bilər.
+            if self.repo.exists(key) or self.repo.url_exists(lead.source_url):
                 log.debug("duplicate_skipped", source=lead.source, url=lead.source_url)
                 continue
             self.repo.save(key, lead)

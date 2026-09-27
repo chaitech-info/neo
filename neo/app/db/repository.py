@@ -17,6 +17,10 @@ class LeadRepository:
         stmt = select(LeadRecord.dedupe_key).where(LeadRecord.dedupe_key == dedupe_key)
         return self.session.execute(stmt).scalar_one_or_none() is not None
 
+    def url_exists(self, url: str) -> bool:
+        stmt = select(LeadRecord.dedupe_key).where(LeadRecord.source_url == url).limit(1)
+        return self.session.execute(stmt).scalar_one_or_none() is not None
+
     def save(self, dedupe_key: str, lead: RawLead) -> LeadRecord:
         record = LeadRecord(
             dedupe_key=dedupe_key,

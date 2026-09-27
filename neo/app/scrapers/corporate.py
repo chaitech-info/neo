@@ -151,7 +151,7 @@ class CorporateTenderScraper(BaseScraper):
         if not items:
             log.warning("corporate_site_no_items", site=site.key, selector=site.item_selector)
 
-        leads: list[RawLead] = []
+        candidates = []
         seen: set[str] = set()
         expired = 0
         today = self.today()
@@ -166,13 +166,21 @@ class CorporateTenderScraper(BaseScraper):
 
             title_el = item.select_one(site.title_selector) if site.title_selector else item
             title = title_el.get_text(" ", strip=True) if title_el else ""
-            if not title or not any(kw in az_lower(title) for kw in self.keywords):
+            if not title:
                 continue
-
             url = self._item_url(site, item, title)
             if url in seen:
                 continue
             seen.add(url)
+            candidates.append((item, title, url, deadline))
+
+        keep = self.select_relevant(
+            [f"{title} — {site.org}" for _, title, _, _ in candidates], self.keywords, kind="tender"
+        )
+        leads: list[RawLead] = []
+        for (item, title, url, deadline), selected in zip(candidates, keep):
+            if not selected:
+                continue
 
             date_el = item.select_one(site.date_selector) if site.date_selector else item
             posted_at = parse_listing_date(date_el.get_text(" ", strip=True)) if date_el else None

@@ -5,18 +5,34 @@ from app.normalizer import Normalizer
 class FakeRepo:
     def __init__(self):
         self.seen = set()
+        self.urls = set()
         self.saved = []
 
     def exists(self, key: str) -> bool:
         return key in self.seen
 
+    def url_exists(self, url: str) -> bool:
+        return url in self.urls
+
     def save(self, key: str, lead: RawLead) -> None:
         self.seen.add(key)
+        self.urls.add(lead.source_url)
         self.saved.append(lead)
 
 
-def _lead(url: str) -> RawLead:
-    return RawLead(source="marja", source_url=url, title="T", raw_text="x")
+def _lead(url: str, source: str = "marja") -> RawLead:
+    return RawLead(source=source, source_url=url, title="T", raw_text="x")
+
+
+def test_same_employer_from_two_sources_is_one_lead():
+    repo = FakeRepo()
+    normalizer = Normalizer(repo)
+
+    first = normalizer.process([_lead("https://vumes.az", source="linkedin")])
+    second = normalizer.process([_lead("https://vumes.az", source="boss")])
+
+    assert len(first) == 1
+    assert second == []
 
 
 def test_normalizer_drops_duplicates_within_batch():

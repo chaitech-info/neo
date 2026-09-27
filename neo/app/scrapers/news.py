@@ -5,15 +5,17 @@ import re
 from bs4 import BeautifulSoup
 
 from app.models import LeadCategory, RawLead
-from app.scrapers.base import TENDER_KEYWORDS, BaseScraper, az_lower
+from app.scrapers.base import NEWS_KEYWORDS, TENDER_KEYWORDS, BaseScraper
 
 # RSS-lər (ilk versiyada güman edilmişdi) real deyil — brauzerlə yoxlanıb,
 # hər sayt statik HTML render edir və konkret CSS seçiciləri var (aşağıda).
 
-KEYWORDS = [
-    "tədbir", "konfrans", "açılış", "korporativ", "banket", "forum",
-    "sərgi", "restoran", "qonaqpərvərlik", "catering",
-]
+KEYWORDS = NEWS_KEYWORDS
+
+_AZ_DATE = r"\d{1,2} (?:Yan|Fev|Mar|Apr|May|İyn|İyl|Avq|Sen|Okt|Noy|Dek) \d{4}"
+# fed.az kartları: "Sənaye26 Sen 2026Başlıq" və "Başlıq13:0126 Sen 2026".
+_FED_CATEGORY_DATE_PREFIX = re.compile(rf"^[^\W\d]*{_AZ_DATE}")
+_FED_TIME_DATE_SUFFIX = re.compile(rf"\d{{1,2}}:\d{{2}}{_AZ_DATE}$")
 
 
 class BaseNewsHTMLScraper(BaseScraper):
@@ -21,6 +23,7 @@ class BaseNewsHTMLScraper(BaseScraper):
 
     listing_url: str = ""
     keywords: list[str] = KEYWORDS
+    triage_kind: str = "news"
     category: LeadCategory = LeadCategory.event
 
     def listing_urls(self) -> list[str]:
@@ -39,14 +42,15 @@ class BaseNewsHTMLScraper(BaseScraper):
             soup = BeautifulSoup(self.get(listing_url).text, "lxml")
             candidates.extend(self.article_links(soup))
 
-        leads: list[RawLead] = []
-        seen: set[str] = set()
+        unique: dict[str, str] = {}
         for url, title in candidates:
-            if url in seen or not title:
-                continue
-            seen.add(url)
+            if title and url not in unique:
+                unique[url] = title
+        keep = self.select_relevant(list(unique.values()), self.keywords, kind=self.triage_kind)
 
-            if not any(kw in az_lower(title) for kw in self.keywords):
+        leads: list[RawLead] = []
+        for (url, title), selected in zip(unique.items(), keep):
+            if not selected:
                 continue
 
             lead = RawLead(
@@ -115,17 +119,43 @@ class FedScraper(BaseNewsHTMLScraper):
     _article_re = re.compile(r"^/az/[a-z-]+/[a-z0-9-]+-\d+$")
 
     def article_links(self, soup: BeautifulSoup) -> list[tuple[str, str]]:
-        results = []
+        # Eyni məqalə səhifədə bir neçə kartda çıxır, mətnə kateqoriya/tarix yapışır:
+        # "Sənaye26 Sen 2026Başlıq", "Başlıq19:3626 Sen 2026". Təmiz başlıq həmişə
+        # ən qısa variantdır — URL başına onu saxlayırıq.
+        best: dict[str, str] = {}
         for a in soup.find_all("a", href=True):
             href = a["href"]
             if not self._article_re.match(href):
                 continue
             text = a.get_text(strip=True)
-            # Bəzi kartlarda "16:47Başlıq..." kimi vaxt prefiksi mətnə yapışır.
-            text = re.sub(r"^\d{1,2}:\d{2}", "", text).strip()
+            text = re.sub(r"^\d{1,2}:\d{2}", "", text)
+            text = _FED_CATEGORY_DATE_PREFIX.sub("", text)
+            text = _FED_TIME_DATE_SUFFIX.sub("", text).strip()
             if len(text) < 15:
                 continue
-            results.append((f"{self.base_url}{href}", text))
+            url = f"{self.base_url}{href}"
+            if url not in best or len(text) < len(best[url]):
+                best[url] = text
+        return list(best.items())
+
+
+class ReportSenayeScraper(BaseNewsHTMLScraper):
+    """report.az/senaye — ən böyük xəbər agentliyinin Sənaye bölməsi (2026-09-27
+    yoxlanıb; robots.txt yalnız /admin/ və /search/-i qadağan edir). Zavod, sənaye
+    parkı, genişlənmə xəbərləri — işçilərinə yemək lazım olacaq şirkətlər.
+    Kart: a.news__item > h2.news__title (kateqoriya/tarix ayrı elementlərdədir)."""
+
+    source_name = "report"
+    base_url = "https://report.az"
+    listing_url = "https://report.az/senaye/"
+    category = LeadCategory.corporate
+
+    def article_links(self, soup: BeautifulSoup) -> list[tuple[str, str]]:
+        results = []
+        for a in soup.select("a.news__item[href^='/senaye/']"):
+            title = a.select_one(".news__title")
+            if title:
+                results.append((f"{self.base_url}{a['href']}", title.get_text(" ", strip=True)))
         return results
 
 
@@ -143,6 +173,7 @@ class FedTenderScraper(FedScraper):
     max_pages = 2  # 48 yazı/səhifə ≈ 1 həftə; 2 saatlıq cədvəldə 2 səhifə artıqlaması ilə kifayətdir
     category = LeadCategory.tender
     keywords = TENDER_KEYWORDS
+    triage_kind = "tender"
     _tender_re = re.compile(r"^/az/tenderler/(?!\d+$)[a-z0-9-]+$")
 
     def listing_urls(self) -> list[str]:

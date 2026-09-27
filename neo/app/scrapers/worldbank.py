@@ -46,16 +46,25 @@ class WorldBankScraper(BaseScraper):
         })
         today = self.today().isoformat()
 
-        leads: list[RawLead] = []
+        candidates = []
         for notice in resp.json().get("procnotices") or []:
             if notice.get("notice_type") in SKIPPED_TYPES:
                 continue
             deadline = (notice.get("submission_date") or "")[:10]
             if deadline and deadline < today:
                 continue
-
             title = (notice.get("bid_description") or "").strip()
-            if not title or not contains_keyword(title, KEYWORDS):
+            if title:
+                candidates.append((notice, title, deadline))
+
+        keep = self.select_relevant(
+            [f"{title} — {notice.get('project_name') or ''}" for notice, title, _ in candidates],
+            KEYWORDS,
+            kind="tender",
+        )
+        leads: list[RawLead] = []
+        for (notice, title, deadline), selected in zip(candidates, keep):
+            if not selected:
                 continue
 
             project = notice.get("project_name") or ""

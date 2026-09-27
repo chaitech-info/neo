@@ -29,25 +29,72 @@ def az_lower(text: str) -> str:
     return text.translate(_AZ_UPPER_I).lower()
 
 
-# Tender başlıqları üçün catering/tədbir açar sözləri (fed.az tenderlər, şirkət saytları).
-TENDER_KEYWORDS = [
-    "keytrinq", "keytring", "catering", "iaşə", "yemək", "qida", "ərzaq",
-    "bufet", "banket", "tədbir", "qonaqlıq", "restoran", "konfrans",
-    "mərasim", "festival", "sərgi", "forum",
+def fold(text: str) -> str:
+    """Müqayisə üçün kiçik hərf: "İ"-nin görünməz nöqtəsi silinir, "ı" → "i".
+
+    str.lower() "VAKANSİYA"-nı "vakansi̇ya" edir, az_lower() isə "CATERING"-i
+    "caterıng" — hər iki tərəfi (mətn və açar söz) fold() etmək hər ikisini tutur.
+    """
+    return text.lower().replace("\u0307", "").replace("ı", "i")
+
+
+# Açar sözlər — "HEÇ BİR FÜRSƏT BURAXILMASIN" qaydası (2026-09-27): açar söz
+# uyğunluğu mütləq daxil edir (AI işləməsə belə), AI triajı (app/ai_triage.py)
+# əlavə olaraq açar söz görmədiklərini tutur. Uyğunluq sözün ƏVVƏLİNDƏ yoxlanır
+# (contains_keyword) — kök yazmaq kifayətdir: "qidalanma" → "qidalanması" ✓.
+# Etender testi: köhnə 5 sözlük axtarış 486 açıq tenderdən 0 real fürsət tapırdı.
+
+# Yemək/catering — az, ru, en.
+MEAL_KEYWORDS = [
+    "keytrinq", "keytring", "keyterinq", "katerinq", "katering", "catering",
+    "iaşə", "qidalanma", "qida məhsul", "ərzaq", "yemək", "nahar", "səhər yeməy",
+    "şam yeməy", "bufet", "banket", "ziyafət", "fürşet", "furşet", "kofe-brek",
+    "kofe brek", "qəhvə fasil", "çay süfrə", "süfrə", "qonaqlıq", "qonaqlama",
+    "питани", "кейтеринг", "обед", "столов", "банкет", "фуршет", "продовольств",
+    "food", "meal", "lunch", "canteen", "cafeteria", "coffee break", "banquet",
 ]
 
-# İngiliscə elanlar (Dünya Bankı, bp EDP) üçün əlavə sözlər.
-EN_TENDER_KEYWORDS = [
-    "catering", "food", "meal", "lunch", "canteen", "banquet", "hospitality",
-    "reception", "conference", "event", "coffee break",
+# Tədbir təşkili — təşkilatçı yemək də alır (etender testində bütün real
+# fürsətlər bu növdən idi: bayram, komandaqurma, festival, yubiley).
+# "müsabiqə" YOXDUR — tenderin özünün adıdır, hər başlığa uyğun gəlirdi.
+EVENT_KEYWORDS = [
+    "tədbir", "konfrans", "forum", "festival", "mərasim", "bayram", "yubiley",
+    "komandaqurma", "teambuilding", "team building", "qəbul", "sərgi", "seminar",
+    "təlim", "yarış", "turnir", "çempionat", "olimpiada", "konqres",
+    "sammit", "iftar", "novruz", "mükafatlandırma", "düşərgə",
+    "мероприяти", "конференц", "форум", "праздн",
+    "event", "conference", "reception", "ceremony", "hospitality", "workshop",
 ]
+
+# Genişlənmə — çoxlu işçisi olacaq obyekt (xəbərlər üçün). Tək "mədən"
+# "mədəniyyət"-i də tutardı — ona görə dar formalar.
+EXPANSION_KEYWORDS = [
+    "zavod", "fabrik", "istehsal müəssisə", "sənaye park", "sənaye zona",
+    "texnopark", "təməli qoyul", "yeni iş yeri", "iş yeri yaradıl", "iş yeri açıl",
+    "işə götür", "işçi qəbul", "ofis açıl", "yeni ofis", "filial açıl",
+    "logistika mərkəz", "anbar kompleks", "qızıl mədən", "mis mədən", "filiz",
+    "yatağında istehsal", "istehsala başla", "istehsalına başla",
+    "istehsalın başla", "istifadəyə veril", "tikiləcək", "inşa ediləcək",
+]
+
+# Tenderlər (etender, fed.az tenderlər, şirkət saytları, Dünya Bankı, bp EDP).
+TENDER_KEYWORDS = MEAL_KEYWORDS + EVENT_KEYWORDS
+
+# Xəbərlər (marja, 1news, oxu, fed, report). Tədbir sözləri xəbərlərdə dövlət
+# tədbiri reportajları ilə dolur (canlı test: 16 uyğunluqdan 15-i) və hər uyğunluq
+# məqalə səhifəsinin yüklənməsi deməkdir — ona görə burada yalnız dar tədbir
+# ifadələri; gələcək tədbirləri AI triajı tutur.
+NEWS_KEYWORDS = MEAL_KEYWORDS + EXPANSION_KEYWORDS + ["korporativ tədbir", "korporativ gecə"]
+
+# Geriyə uyğunluq: köhnə adla import edənlər üçün (Dünya Bankı, bp EDP).
+EN_TENDER_KEYWORDS: list[str] = []
 
 
 def contains_keyword(text: str, keywords: list[str]) -> bool:
     """Açar söz sözün ƏVVƏLİNDƏ olmalıdır: "tədbirlərin" ✓, "prevention"-da "event" ✗.
     Azərbaycan şəkilçiləri sonda gəldiyi üçün prefiks uyğunluğu kifayətdir."""
-    text = az_lower(text)
-    return any(re.search(r"(?<!\w)" + re.escape(kw), text) for kw in keywords)
+    text = fold(text)
+    return any(re.search(r"(?<!\w)" + re.escape(fold(kw)), text) for kw in keywords)
 
 
 # Azərbaycan 2016-dan bəri DST istifadə etmir — saat qurşağı göstərilməyən
@@ -172,6 +219,30 @@ class BaseScraper(abc.ABC):
         resp = getattr(self._client, method.lower())(url, **kwargs)
         resp.raise_for_status()
         return resp
+
+    def select_relevant(self, texts: list[str], keywords: list[str], kind: str) -> list[bool]:
+        """Hansı başlıqlar tam yoxlamaya getsin: açar söz VƏ YA AI triajı.
+
+        Açar söz uyğunluğu həmişə daxil edir (AI işləməsə də heç nə itmir); AI
+        triajı açar sözlərin görmədiyi fürsətləri əlavə edir. kind: "tender"|"news".
+        """
+        from app.ai_triage import triage  # scraper-lər AI modulu olmadan da import olunsun
+
+        by_keyword = [contains_keyword(t, keywords) for t in texts]
+        picked = triage(texts, kind=kind) if texts else set()
+        by_ai = [i in picked for i in range(len(texts))] if picked is not None else [False] * len(texts)
+        selected = [k or a for k, a in zip(by_keyword, by_ai)]
+        log.info(
+            "candidates_selected",
+            source=self.source_name,
+            total=len(texts),
+            keyword=sum(by_keyword),
+            ai=sum(by_ai),
+            ai_only=sum(a and not k for k, a in zip(by_keyword, by_ai)),
+            selected=sum(selected),
+            ai_available=picked is not None,
+        )
+        return selected
 
     def fetch_article(self, url: str) -> tuple[str, datetime | None]:
         """Məqalə səhifəsindən (tam mətn, dərc vaxtı). Sənəd §6: AI başlıq yox,

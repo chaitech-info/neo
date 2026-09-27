@@ -19,6 +19,8 @@ class LeadSource(str, Enum):
     worldbank = "worldbank"
     bp_edp = "bp_edp"
     corporate = "corporate"  # şirkət/agentliklərin öz tender səhifələri (app/scrapers/corporate.py)
+    report = "report"  # report.az/senaye — sənaye xəbərləri (app/scrapers/news.py)
+    boss = "boss"  # boss.az vakansiyalarından işçilərinə nahar verən şirkətlər (app/scrapers/boss.py)
 
 
 class LeadCategory(str, Enum):

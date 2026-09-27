@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -8,16 +10,18 @@ from dotenv import load_dotenv
 
 load_dotenv()
 from fastapi import FastAPI, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import sessionmaker
 
+from app import logbuffer
 from app.ai_filter import SCORE_THRESHOLD
 from app.db.engine import engine
 from app.db.models import Base
 from app.db.repository import LeadRepository
 from app.pipeline import reject_lead, restore_lead, run_pipeline, send_lead_to_crm
 from app.scrapers import (
+    BossAzScraper,
     BpEdpScraper,
     CorporateTenderScraper,
     EmlakScraper,
@@ -28,9 +32,11 @@ from app.scrapers import (
     MarjaScraper,
     News1Scraper,
     OxuScraper,
+    ReportSenayeScraper,
     WorldBankScraper,
 )
 
+logbuffer.setup()
 log = structlog.get_logger()
 
 SessionLocal = sessionmaker(bind=engine)
@@ -42,15 +48,50 @@ SOURCES = {
     "oxu": ("Oxu.az", OxuScraper),
     "fed": ("Fed.az", FedScraper),
     "fed_tenders": ("Fed.az Tenderlər", FedTenderScraper),
+    "report": ("Report.az Sənaye", ReportSenayeScraper),
     "etender": ("Etender.gov.az", EtenderScraper),
     "emlak": ("Emlak.gov.az", EmlakScraper),
     "corporate": ("Şirkət/agentlik tenderləri", CorporateTenderScraper),
     "worldbank": ("Dünya Bankı", WorldBankScraper),
     "bp_edp": ("bp EDP", BpEdpScraper),
+    "boss": ("boss.az — işçilərinə nahar verən şirkətlər", BossAzScraper),
     "linkedin": ("LinkedIn (Apify)", LinkedInScraper),
 }
 
 _last_run: dict[str, str] = {}
+
+# "Hamısını scrape et": hər mənbə ayrı thread-də, öz DB sessiyası ilə.
+# _running eyni mənbənin iki dəfə eyni vaxtda işləməsinin qarşısını alır.
+_running: set[str] = set()
+_running_lock = threading.Lock()
+_executor = ThreadPoolExecutor(max_workers=len(SOURCES), thread_name_prefix="scrape")
+
+
+def _claim(keys: list[str]) -> list[str]:
+    """İşləməyən mənbələri 'işləyir' kimi qeyd et, onları qaytar."""
+    with _running_lock:
+        free = [k for k in keys if k not in _running]
+        _running.update(free)
+    return free
+
+
+def _run_source(source_key: str) -> int | None:
+    label, scraper_cls = SOURCES[source_key]
+    logbuffer.bind_source(source_key)
+    session = SessionLocal()
+    try:
+        pending_count = run_pipeline(scraper_cls, session)
+        _last_run[source_key] = f"{datetime.now().strftime('%H:%M:%S')} — {pending_count} yeni lead validasiya gözləyir"
+        return pending_count
+    except Exception:
+        log.exception("scrape_failed", source=source_key)
+        _last_run[source_key] = f"{datetime.now().strftime('%H:%M:%S')} — XƏTA, loglara bax"
+        return None
+    finally:
+        session.close()
+        logbuffer.unbind_source()
+        with _running_lock:
+            _running.discard(source_key)
 
 app = FastAPI(title="Lead Scraping Admin")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -97,6 +138,7 @@ def dashboard(request: Request):
             "active": "dashboard",
             "sources": {k: v[0] for k, v in SOURCES.items()},
             "last_run": _last_run,
+            "running": set(_running),
             "stats": stats,
         },
     )
@@ -110,27 +152,56 @@ def scrape_now(source_key: str):
             url=f"/?err=Naməlum mənbə: {source_key}", status_code=303
         )
 
-    label, scraper_cls = SOURCES[source_key]
-    session = SessionLocal()
-    try:
-        pending_count = run_pipeline(scraper_cls, session)
-    except Exception:
-        log.exception("manual_scrape_failed", source=source_key)
+    label = SOURCES[source_key][0]
+    if not _claim([source_key]):
+        return RedirectResponse(url=f"/?err={label} artıq işləyir — Loglar səhifəsində izlə", status_code=303)
+
+    pending_count = _run_source(source_key)
+    if pending_count is None:
         return RedirectResponse(
-            url=f"/?err=Scrape zamanı xəta baş verdi ({label}) — logları yoxla",
+            url=f"/?err=Scrape zamanı xəta baş verdi ({label}) — Loglar səhifəsinə bax",
             status_code=303,
         )
-    finally:
-        session.close()
-
-    from datetime import datetime
-
-    _last_run[source_key] = f"{datetime.now().strftime('%H:%M:%S')} — {pending_count} yeni lead validasiya gözləyir"
-
     return RedirectResponse(
         url=f"/?msg={label}: {pending_count} yeni lead validasiya üçün əlavə olundu",
         status_code=303,
     )
+
+
+@app.post("/scrape-all")
+def scrape_all():
+    """Bütün mənbələri paralel, fonda işə salır — cavab dərhal qayıdır, gedişat
+    dashboard-da və /logs-da canlı görünür."""
+    started = _claim(list(SOURCES))
+    if not started:
+        return RedirectResponse(url="/?err=Bütün mənbələr artıq işləyir — Loglar səhifəsində izlə", status_code=303)
+
+    log.info("scrape_all_started", sources=",".join(started))
+    for key in started:
+        _last_run[key] = "işləyir…"
+        _executor.submit(_run_source, key)
+
+    skipped = len(SOURCES) - len(started)
+    note = f" ({skipped} mənbə artıq işləyirdi)" if skipped else ""
+    return RedirectResponse(url=f"/logs?msg={len(started)} mənbə paralel işə salındı{note}", status_code=303)
+
+
+@app.get("/logs")
+def logs_page(request: Request):
+    return templates.TemplateResponse(
+        "logs.html",
+        {"request": request, "active": "logs", "sources": {k: v[0] for k, v in SOURCES.items()}},
+    )
+
+
+@app.get("/api/logs")
+def logs_api(after: int = 0, source: str | None = None, level: str | None = None):
+    with _running_lock:
+        running = sorted(_running)
+    return JSONResponse({
+        "entries": logbuffer.entries(after=after, source=source or None, level=level or None),
+        "running": running,
+    })
 
 
 @app.get("/leads/pending_review")

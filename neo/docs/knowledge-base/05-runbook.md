@@ -22,9 +22,10 @@ uvicorn app.web:app --reload --port 8008
 
 Brauzerdə: http://127.0.0.1:8008
 
-- **Dashboard** (`/`) — hər mənbə üçün "Scrape indi" düyməsi
+- **Dashboard** (`/`) — hər mənbə üçün "Scrape indi" düyməsi; **"Hamısını scrape et"** bütün mənbələri paralel, fonda işə salır (hər mənbə ayrı thread + öz DB sessiyası; eyni mənbə iki dəfə eyni vaxtda işləmir). İşləyərkən kartlar "İşləyir…" göstərir, səhifə 5 saniyədən bir yenilənir. 13 mənbə ≈ 1-4 dəq (ən uzun: boss.az). ⚠️ LinkedIn də daxildir — Apify xərci (~$0.4/run).
 - **Validasiya** (`/leads/pending_review`) — Təsdiqlə → CRM / Rədd et
 - **Bütün lead-lər** (`/leads`) — son 200 lead, bütün statuslar
+- **Loglar** (`/logs`) — scraping prosesi başdan-sona canlı (2 saniyədən bir): hər HTTP sorğusu (sayt, robots.txt, Apify, OpenAI), `pipeline_started` → `scraper_completed` → `dedup_done` → hər lead üçün `ai_scored` (skor + status) → `pipeline_completed`, xətalar (exception mətni ilə). Mənbə/səviyyə/mətn filtri. Son 5000 yazı yaddaşda (`app/logbuffer.py`) — server yenidən başlayanda sıfırlanır; terminal logu əvvəlki kimidir. URL-dəki `token=`/`key=` dəyərləri `***` ilə gizlədilir. JSON: `GET /api/logs?after=<id>&source=<açar>&level=<səviyyə>`.
 
 DB defolt olaraq `./neo_leads.db` (SQLite). Sıfırdan başlamaq üçün: `rm neo_leads.db` (server yenidən başlayanda avtomatik yenidən yaradır).
 

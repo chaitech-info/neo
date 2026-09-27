@@ -70,6 +70,35 @@ Hər mənbənin **real** strukturu — brauzerlə birbaşa yoxlanılıb (ilkin s
 - **Ən güclü siqnal:** vakansiya elanlarında "Nahar şirkət tərəfindən təmin olunur" — işəgötürən özü lead-dir. Əksər elanlarda HR email-i var, domeni şirkəti müəyyən edir. Bax `04-decisions.md` → "İşçilərinə nahar verən şirkətlər".
 - **Kodda:** `app/scrapers/linkedin.py`
 
+## Boss.az (2026-09-27 əlavə olunub)
+
+- **Nə olduğu:** Azərbaycanın ən böyük iş elanı saytı (~660 aktiv vakansiya)
+- **robots.txt:** `Allow: /`, `/search/*`, `/vacancies/*`; qadağan yalnız admin/login/signup/profile/bookmarks
+- **Yanaşma:** Next.js SPA, məzmun `POST https://boss.az/graphql` ilə gəlir (`operationName: "Vacancies"`, `variables: {filter: {}, first: 24, after: <cursor>, sortBy: "RECOMMENDED"}`) — sorğu brauzerdə `fetch` tutularaq tapılıb
+- **⚠️ Tələ #1:** `?search[keyword]=nahar` URL-i və `filter.searchTerm` təsvirdə AXTARMIR — "nahar" 1 nəticə verir; səhifədəki "660 nəticə" sadəcə bütün aktiv elanların sayıdır. Ona görə bütün səhifələr (~28) oxunur, filtr lokal.
+- **⚠️ Tələ #2:** `createdAt`/`updatedAt` ictimai API-də `null` gəlir — tarix üçün `bumpedAt` (son yenilənmə)
+- **Sahələr:** `name` (şirkət adı — regex lazım deyil), `positionName`, `description`/`jobDescription`/`requirements`/`responsibilities` (HTML), `email`, `phones`, `location`
+- **Canlı nəticə:** 660 elan → 49-da nahar qeyd olunub → 39 unikal işəgötürən → filtrdən sonra 31 → AI-dan 29 `pending_review`
+- **Kodda:** `app/scrapers/boss.py`, ortaq məntiq `app/scrapers/employer_signal.py`
+
+## Report.az — Sənaye bölməsi (2026-09-27 əlavə olunub)
+
+- **Nə olduğu:** ən böyük xəbər agentliyinin `/senaye/` bölməsi (zavod, sənaye zonası, mədən xəbərləri)
+- **robots.txt:** yalnız `/admin/`, `/search/` və izləmə parametrləri qadağandır
+- **Seçici:** `a.news__item[href^='/senaye/'] > h2.news__title` (kateqoriya/tarix ayrı elementlərdədir — başlığa yapışmır). Dərc vaxtı `article:published_time` meta-da.
+- **Qeyd:** `/biznes/` bölməsi 404-dür.
+- **Kodda:** `app/scrapers/news.py::ReportSenayeScraper`
+
+## Yoxlanılıb, hələ qoşulmayıb
+
+| Sayt | robots.txt | Niyə hələ yox |
+| --- | --- | --- |
+| hellojob.az (www) | `Allow: /` | Server HTML, siyahıda 80 elan/səhifə, amma nahar qeydi yalnız detal səhifəsində → hər elana ayrı sorğu (80 × 2-5 san ≈ 5 dəq/səhifə). boss.az-dan sonra növbəti namizəd. |
+| jobsearch.az | `Allow: /` | Strukturu hələ yoxlanmayıb |
+| position.az | hər şeyə icazə | Strukturu hələ yoxlanmayıb |
+| busy.az | `/api/` və `?`-li URL-lər qadağan | Filtrli siyahı `?` tələb edir — məhdud |
+| smartjob.az | `/api/` qadağan | Yalnız HTML |
+
 ## Ümumi dərs
 
 İlk sənəd versiyası (development spec-in ilk qaralaması) hər saytın funksiyasını **görmədən, adından fərziyyə ilə** təsvir etmişdi (məs. "Marja.az = elan saytı", "Emlak.gov.az = qeydiyyat reyestri"). Bunların əksəriyyəti səhv çıxdı. **Nəticə:** yeni mənbə əlavə edərkən HƏMİŞƏ əvvəlcə brauzerdə real saytı aç, strukturu/API-ni tap, SONRA kodu yaz — adından güman etmə.

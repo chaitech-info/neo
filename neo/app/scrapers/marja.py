@@ -5,7 +5,7 @@ import re
 from bs4 import BeautifulSoup
 
 from app.models import LeadCategory, RawLead
-from app.scrapers.base import BaseScraper, az_lower
+from app.scrapers.base import NEWS_KEYWORDS, BaseScraper
 
 # marja.az əslində iqtisadi/biznes XƏBƏR saytıdır (elan saytı deyil — ilk
 # fərziyyə səhv idi, brauzerlə yoxlanıb düzəldilib). Məqalə linkləri:
@@ -13,10 +13,7 @@ from app.scrapers.base import BaseScraper, az_lower
 LISTING_URL = "https://marja.az"
 ARTICLE_RE = re.compile(r"^https://marja\.az/\d+/[a-z0-9-]+$")
 
-KEYWORDS = [
-    "tədbir", "banket", "korporativ", "konfrans", "açılış",
-    "ictimai iaşə", "restoran", "catering", "qonaqpərvərlik",
-]
+KEYWORDS = NEWS_KEYWORDS
 
 
 class MarjaScraper(BaseScraper):
@@ -40,11 +37,10 @@ class MarjaScraper(BaseScraper):
                 best_text[href] = text
             seen_urls.add(href)
 
-        for url in seen_urls:
-            title = best_text.get(url, "")
-            if not title:
-                continue
-            if not any(kw in az_lower(title) for kw in KEYWORDS):
+        candidates = [(url, best_text[url]) for url in sorted(seen_urls) if best_text.get(url)]
+        keep = self.select_relevant([title for _, title in candidates], KEYWORDS, kind="news")
+        for (url, title), selected in zip(candidates, keep):
+            if not selected:
                 continue
 
             lead = RawLead(

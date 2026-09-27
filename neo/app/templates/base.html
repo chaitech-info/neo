@@ -39,6 +39,29 @@
     form.inline { display: inline; }
     .score { font-weight: 700; }
     .actions { display: flex; gap: 8px; }
+    .btn[disabled] { opacity: 0.55; cursor: not-allowed; }
+    .btn-lg { padding: 11px 22px; font-size: 15px; }
+    .toolbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+    .toolbar h1 { margin-top: 0; }
+    .flash a { color: #7ca8ff; }
+    .card-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .card-running { border-color: #4C8DFF; box-shadow: 0 0 0 1px #4C8DFF inset; }
+    .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 12px 0; font-size: 14px; }
+    .filters select, .filters input[type=search] { background: #12182c; color: #e7e9ee; border: 1px solid #2a3555; border-radius: 8px; padding: 7px 10px; font-size: 14px; }
+    .log-wrap { background: #0f1424; border: 1px solid #232c47; border-radius: 10px; height: 62vh; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+    .log-row { display: grid; grid-template-columns: 70px 56px 110px 190px 1fr; gap: 10px; padding: 4px 12px; border-bottom: 1px solid #161d33; align-items: baseline; }
+    .log-row:hover { background: #141b31; }
+    .log-row .ev { color: #cbd3ec; font-weight: 600; overflow-wrap: anywhere; }
+    .log-row .det { color: #8d96b3; overflow-wrap: anywhere; }
+    .log-row .src { color: #7ca8ff; overflow-wrap: anywhere; }
+    .lvl-info { color: #7ca8ff; } .lvl-warning { color: #f5b454; } .lvl-error { color: #f97066; } .lvl-debug { color: #6a7391; }
+    .log-row.lvl-row-error { background: #1f1220; } .log-row.lvl-row-warning { background: #1d1a12; }
+    .running-pill { display: inline-block; padding: 3px 10px; border-radius: 100px; font-size: 12px; font-weight: 600; background: #12203a; color: #7ca8ff; margin: 2px 4px 2px 0; }
+    @media (max-width: 720px) {
+      .log-row { grid-template-columns: 62px 1fr; }
+      .log-row .lvl, .log-row .src { display: none; }
+      .log-row .det { grid-column: 1 / -1; }
+    }
   </style>
 </head>
 <body>
@@ -48,6 +71,7 @@
       <a href="/leads/pending_review" class="{{ 'active' if active == 'validation' else '' }}">Validasiya</a>
       <a href="/leads/ai_rejected" class="{{ 'active' if active == 'ai_rejected' else '' }}">AI rədd etdi</a>
       <a href="/leads" class="{{ 'active' if active == 'all' else '' }}">Bütün lead-lər</a>
+      <a href="/logs" class="{{ 'active' if active == 'logs' else '' }}">Loglar</a>
     </div>
     <span class="muted">Lead Scraping Admin</span>
   </header>
