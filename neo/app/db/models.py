@@ -24,7 +24,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 # Adlandırılmış constraint-lər: Alembic SQLite batch rejimində və Postgres-də
 # eyni adları görsün (adsız FK/CHECK-i sonradan dəyişmək/silmək olmur).
@@ -200,6 +200,12 @@ class LeadRecord(Base):
     ai_model: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     reviewed_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Dublikatın ilk lead-i (admin paneldə "ilk dəfə: <mənbə>"). joined — şablon
+    # sessiya bağlandıqdan sonra render olunur, lazy yükləmə orada işləməzdi.
+    original: Mapped[Optional["LeadRecord"]] = relationship(
+        remote_side=[dedupe_key], foreign_keys=[duplicate_of], lazy="joined", join_depth=1
+    )
 
 
 # --- CRM qatı ----------------------------------------------------------------

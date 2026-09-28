@@ -6,6 +6,7 @@ import structlog
 from fastapi.testclient import TestClient
 
 from app import logbuffer, web
+from app.pipeline import PipelineResult
 
 
 def _wait_idle(timeout=5.0):
@@ -53,10 +54,11 @@ def test_scrape_all_runs_every_source_in_parallel_and_reports_status(monkeypatch
     class FakeB:
         source_name = "b"
 
-    def fake_pipeline(scraper_cls, session):
+    def fake_pipeline(scraper_cls, session, **kwargs):
         barrier.wait()  # iki mənbə eyni vaxtda işləməsə, burada ilişib qalar
         structlog.get_logger().info("fake_run", source=scraper_cls.source_name)
-        return {"a": 3, "b": 0}[scraper_cls.source_name]
+        fresh = {"a": 3, "b": 0}[scraper_cls.source_name]
+        return PipelineResult(scraped=fresh, fresh=fresh, pending=fresh)
 
     monkeypatch.setattr(web, "SOURCES", {"src_a": ("A", FakeA), "src_b": ("B", FakeB)})
     monkeypatch.setattr(web, "run_pipeline", fake_pipeline)
@@ -96,7 +98,7 @@ def test_failed_source_is_reported_not_raised(monkeypatch):
     class Broken:
         source_name = "x"
 
-    def boom(scraper_cls, session):
+    def boom(scraper_cls, session, **kwargs):
         raise RuntimeError("site down")
 
     monkeypatch.setattr(web, "SOURCES", {"broken": ("Broken", Broken)})

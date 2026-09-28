@@ -17,9 +17,10 @@ from sqlalchemy.orm import sessionmaker
 from app import logbuffer
 from app.ai_filter import SCORE_THRESHOLD
 from app.db.engine import engine
+from app.db.backfill import backfill
 from app.db.migrate import upgrade_to_head
 from app.db.repository import LeadRepository
-from app.pipeline import reject_lead, restore_lead, run_pipeline, send_lead_to_crm
+from app.pipeline import PipelineResult, reject_lead, restore_lead, run_pipeline, send_lead_to_crm
 from app.scrapers import (
     BossAzScraper,
     BpEdpScraper,
@@ -75,14 +76,14 @@ def _claim(keys: list[str]) -> list[str]:
     return free
 
 
-def _run_source(source_key: str) -> int | None:
+def _run_source(source_key: str, trigger: str = "manual") -> PipelineResult | None:
     label, scraper_cls = SOURCES[source_key]
     logbuffer.bind_source(source_key)
     session = SessionLocal()
     try:
-        pending_count = run_pipeline(scraper_cls, session)
-        _last_run[source_key] = f"{datetime.now().strftime('%H:%M:%S')} — {pending_count} yeni lead validasiya gözləyir"
-        return pending_count
+        result = run_pipeline(scraper_cls, session, source_key=source_key, trigger=trigger)
+        _last_run[source_key] = f"{datetime.now().strftime('%H:%M:%S')} — {result.summary()}"
+        return result
     except Exception:
         log.exception("scrape_failed", source=source_key)
         _last_run[source_key] = f"{datetime.now().strftime('%H:%M:%S')} — XƏTA, loglara bax"
@@ -103,13 +104,20 @@ def _baku_time(value: datetime | None) -> str:
 
 
 templates.env.filters["baku_time"] = _baku_time
+templates.env.globals["utcnow"] = datetime.utcnow  # son tarixin keçib-keçmədiyi üçün
 
 
 @app.on_event("startup")
 def on_startup() -> None:
     # Baza Alembic miqrasiyaları ilə ən son sxemə gətirilir (köhnə baza da
-    # itkisiz yenilənir) — bax app/db/migrate.py.
+    # itkisiz yenilənir) — bax app/db/migrate.py. Sonra köhnə lead-lər yeni
+    # sahələrlə (son tarix, tender) doldurulur — idempotent, bax app/db/backfill.py.
     upgrade_to_head(engine)
+    session = SessionLocal()
+    try:
+        backfill(session)
+    finally:
+        session.close()
 
 
 def get_session():
@@ -118,6 +126,25 @@ def get_session():
         yield session
     finally:
         session.close()
+
+
+def _last_runs_from_db() -> dict[str, str]:
+    """Hər mənbənin bazadakı son işə salınması, dashboard kartı üçün mətn."""
+    session = SessionLocal()
+    try:
+        runs = LeadRepository(session).latest_runs()
+    finally:
+        session.close()
+    out = {}
+    for key, run in runs.items():
+        when = _baku_time(run.started_at)
+        if run.status == "failed":
+            out[key] = f"{when} — XƏTA, loglara bax"
+        elif run.status == "running":
+            out[key] = f"{when} — başladı, bitmədi"
+        else:
+            out[key] = f"{when} — {run.leads_new} yeni lead, {run.leads_pending} validasiyaya"
+    return out
 
 
 @app.get("/")
@@ -137,7 +164,8 @@ def dashboard(request: Request):
             "request": request,
             "active": "dashboard",
             "sources": {k: v[0] for k, v in SOURCES.items()},
-            "last_run": _last_run,
+            # Bu prosesdə işə salınanlar canlı; qalanları bazadan (server yenidən başlayanda itmir).
+            "last_run": {**_last_runs_from_db(), **_last_run},
             "running": set(_running),
             "stats": stats,
         },
@@ -156,14 +184,14 @@ def scrape_now(source_key: str):
     if not _claim([source_key]):
         return RedirectResponse(url=f"/?err={label} artıq işləyir — Loglar səhifəsində izlə", status_code=303)
 
-    pending_count = _run_source(source_key)
-    if pending_count is None:
+    result = _run_source(source_key)
+    if result is None:
         return RedirectResponse(
             url=f"/?err=Scrape zamanı xəta baş verdi ({label}) — Loglar səhifəsinə bax",
             status_code=303,
         )
     return RedirectResponse(
-        url=f"/?msg={label}: {pending_count} yeni lead validasiya üçün əlavə olundu",
+        url=f"/?msg={label}: {result.summary()}",
         status_code=303,
     )
 
@@ -179,7 +207,7 @@ def scrape_all():
     log.info("scrape_all_started", sources=",".join(started))
     for key in started:
         _last_run[key] = "işləyir…"
-        _executor.submit(_run_source, key)
+        _executor.submit(_run_source, key, "scrape_all")
 
     skipped = len(SOURCES) - len(started)
     note = f" ({skipped} mənbə artıq işləyirdi)" if skipped else ""

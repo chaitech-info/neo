@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.db.models import LeadRecord
+from app.db.models import LeadRecord, ScrapeRun
 from app.models import ContactInfo, RawLead
 
 
@@ -35,6 +35,7 @@ class LeadRepository:
             category=lead.category.value,
             location=lead.location,
             posted_at=lead.posted_at,
+            deadline_at=lead.deadline_at,
             scraped_at=lead.scraped_at,
             ai_score=lead.ai_score,
             ai_reason=lead.ai_reason,
@@ -94,6 +95,16 @@ class LeadRepository:
         )
         return list(self.session.execute(stmt).scalars().all())
 
+    def latest_runs(self) -> dict[str, ScrapeRun]:
+        """Hər mənbənin ən son `scrape_runs` sətri."""
+        newest = (
+            select(ScrapeRun.source_key, func.max(ScrapeRun.id).label("id"))
+            .group_by(ScrapeRun.source_key)
+            .subquery()
+        )
+        stmt = select(ScrapeRun).join(newest, ScrapeRun.id == newest.c.id)
+        return {run.source_key: run for run in self.session.execute(stmt).scalars()}
+
     def list_all(self, limit: int = 200) -> list[LeadRecord]:
         stmt = select(LeadRecord).order_by(LeadRecord.scraped_at.desc()).limit(limit)
         return list(self.session.execute(stmt).scalars().all())
@@ -118,6 +129,7 @@ class LeadRepository:
             category=record.category,
             location=record.location,
             posted_at=record.posted_at,
+            deadline_at=record.deadline_at,
             scraped_at=record.scraped_at,
             ai_score=record.ai_score,
             ai_reason=record.ai_reason,

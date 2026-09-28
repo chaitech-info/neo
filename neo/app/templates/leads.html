@@ -10,6 +10,7 @@
       <th>Mənbə</th>
       <th>Başlıq</th>
       <th>Dərc tarixi</th>
+      <th>Son tarix</th>
       <th>AI skor</th>
       <th>Əsaslandırma</th>
       <th>Status</th>
@@ -25,12 +26,18 @@
         {% endif %}
       </td>
       <td class="muted">{{ lead.posted_at|baku_time }}</td>
+      <td class="muted">
+        {% if lead.deadline_at %}{{ lead.deadline_at|baku_time }}{% if lead.deadline_at < utcnow() %}<br><span class="expired">bitib</span>{% endif %}{% else %}—{% endif %}
+      </td>
       <td class="score">{{ "%.2f"|format(lead.ai_score) if lead.ai_score is not none else "—" }}</td>
       <td class="muted">{{ lead.ai_reason or "—" }}</td>
       <td>
-        <span class="badge badge-{{ 'pending' if lead.status == 'pending_review' else ('sent' if lead.status == 'sent_to_crm' else ('rejected' if lead.status == 'rejected' else 'new')) }}">
+        <span class="badge badge-{{ 'pending' if lead.status == 'pending_review' else ('sent' if lead.status == 'sent_to_crm' else ('rejected' if lead.status == 'rejected' else ('duplicate' if lead.status == 'duplicate' else 'new'))) }}">
           {{ lead.status }}
         </span>
+        {% if lead.original %}
+        <div class="muted dup-note">ilk dəfə: <a href="{{ lead.original.source_url }}" target="_blank">{{ lead.original.source }}</a></div>
+        {% endif %}
       </td>
       {% if show_actions %}
       <td class="actions">
