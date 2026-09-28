@@ -52,7 +52,7 @@ def scrape_source(source_key: str) -> int:
     scraper_cls = SOURCE_TASKS[source_key]
     session = SessionLocal()
     try:
-        return run_pipeline(scraper_cls, session)
+        return run_pipeline(scraper_cls, session, source_key=source_key, trigger="schedule").pending
     finally:
         session.close()
 

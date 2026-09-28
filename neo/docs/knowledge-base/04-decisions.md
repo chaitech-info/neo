@@ -119,6 +119,12 @@
   5. **Açar sözlər maraq sahəsi + mənbə növü** (`applies_to`: all/news/tender/jobs) səviyyəsində, hər mənbəyə ayrıca siyahı yox. İlkin data koddakı siyahıların dəqiq nüsxəsidir (`MEAL` → all, `EVENT` → tender, `EXPANSION` → news).
 - **Mərhələlər:** PR 1 baza (Alembic, cədvəllər, ilkin data, `create_user`); PR 2 deadline + mənbələr arası dublikat; PR 3 giriş/rollar; PR 4 CRM ekranları və "Təsdiqlə → fürsət" (`sent_to_crm` → `converted` də onda).
 - **Kodda:** `app/db/models.py`, `migrations/`, `app/db/migrate.py`, `app/auth/`, `scripts/create_user.py`, testlər `tests/test_migrations.py`, `tests/test_auth.py`
+- **PR 2 (deadline + dublikat, 2026-09-28):**
+  - `deadline_at` scraper-lərin mətnə yazdığı "Son tarix: …" sətrindən oxunur (`app/deadlines.py`) — scraper-lərə toxunulmayıb. Saatsız son tarix = Bakı vaxtı 23:59; saxlama UTC.
+  - Mənbələr arası dublikat `tenders` ilə (`app/tenders.py`): eyni istinad nömrəsi (etender `eventId`, bp EDP nömrəsi, Dünya Bankı ID) və ya eyni barmaq izi (normal təşkilat + normal başlıq) + eyni son tarix (±1 gün). Dublikat silinmir: `duplicate` + `duplicate_of`, AI-yə göndərilmir.
+  - **Bilinən hədd:** fed.az məqaləsi ↔ etender elanı tutulmur — başlıqlar tam fərqlidir, etender siyahı API-si sifarişçi VÖEN-ini vermir. fed.az mətnindəki VÖEN `organizations`-a yazılır (CRM üçün). AI müqayisəsi Faza 2.
+  - Hər scrape `scrape_runs`-a yazılır; dashboard "Son nəticə" server yenidən başlayanda bazadan oxunur. Mesaj: "N yeni lead — X validasiyaya, Y AI rədd etdi, Z başqa mənbədə artıq var, W təkrar".
+  - Köhnə lead-lər server başlayanda idempotent doldurulur (`app/db/backfill.py`).
 
 ## Açıq suallar (hələ qərar verilməyib)
 

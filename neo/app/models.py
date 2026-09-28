@@ -59,6 +59,7 @@ class RawLead(BaseModel):
     location: str | None = None
 
     posted_at: datetime | None = None
+    deadline_at: datetime | None = None  # təklif son tarixi, naive UTC (app/deadlines.py)
     scraped_at: datetime = Field(default_factory=datetime.utcnow)
 
     ai_score: float | None = None
