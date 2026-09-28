@@ -17,7 +17,7 @@ from sqlalchemy.orm import sessionmaker
 from app import logbuffer
 from app.ai_filter import SCORE_THRESHOLD
 from app.db.engine import engine
-from app.db.models import Base
+from app.db.migrate import upgrade_to_head
 from app.db.repository import LeadRepository
 from app.pipeline import reject_lead, restore_lead, run_pipeline, send_lead_to_crm
 from app.scrapers import (
@@ -107,9 +107,9 @@ templates.env.filters["baku_time"] = _baku_time
 
 @app.on_event("startup")
 def on_startup() -> None:
-    # Development/test rahatlığı üçün cədvəllər avtomatik yaradılır.
-    # Production-da bunun əvəzinə `python -m scripts.init_db` + miqrasiya alətindən istifadə et.
-    Base.metadata.create_all(engine)
+    # Baza Alembic miqrasiyaları ilə ən son sxemə gətirilir (köhnə baza da
+    # itkisiz yenilənir) — bax app/db/migrate.py.
+    upgrade_to_head(engine)
 
 
 def get_session():

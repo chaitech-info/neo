@@ -1,8 +1,8 @@
-"""Cədvəlləri yaradır. İşə salma: python -m scripts.init_db"""
+"""Bazanı ən son sxemə gətirir (Alembic). İşə salma: python -m scripts.init_db"""
 
 from app.db.engine import engine
-from app.db.models import Base
+from app.db.migrate import upgrade_to_head
 
 if __name__ == "__main__":
-    Base.metadata.create_all(engine)
-    print("Cədvəllər yaradıldı.")
+    upgrade_to_head(engine)
+    print("Baza ən son sxemdədir.")

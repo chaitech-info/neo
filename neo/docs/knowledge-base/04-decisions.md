@@ -108,10 +108,23 @@
 - **Qalan risk:** xəbərlərdə yalnız başlıq yoxlanır (məqalə mətni yox). AI triaj başlıqda semantik uyğunluğu tutur, amma fürsət yalnız mətndədirsə buraxıla bilər. "AI rədd etdi" səhifəsi (`/leads/ai_rejected`) AI-nin rədd etdiklərini əl ilə yoxlamaq üçündür.
 - **Kodda:** `app/ai_triage.py`, `app/scrapers/base.py` (`fold`, keyword siyahıları, `select_relevant`), `app/scrapers/etender.py`, `app/scrapers/employer_signal.py`, `app/ai_filter.py` (`annotate_deadline`, prompt), testlər `tests/test_keyword_recall.py`
 
+### CRM baza sxemi (2026-09-28)
+- **Status:** Decided — icra PR-larla (`feature/crm-schema`)
+- **Qərar:** tək `leads` cədvəlinin üzərinə 10 cədvəl: toplama (`sources`, `scrape_runs`, `interest_areas`, `keywords`), lead (`organizations`, `tenders`, `leads`-ə yeni sütunlar), CRM (`roles`, `users`, `opportunities`, `tasks`). `leads`-dən heç nə silinmir. Sxem layihəsi Claude artifact "Neo CRM Sxemi"-dədir.
+- **Alt-qərarlar:**
+  1. **Öz CRM-imiz** — xarici CRM-ə göndərmə (`crm_client.py`) istifadədən çıxır; fürsətlər `opportunities`-də.
+  2. **Bir istifadəçi = bir rol** (`admin · manager · sales · viewer`).
+  3. **Fürsət mərhələləri:** `new → contacted → qualified → proposal → negotiation → won | lost`; tender mərhələləri atlayır (`new → qualified → proposal → won | lost`). `lost` səbəbi seçimdən (`price · competitor · no_response · not_eligible · deadline_missed · other`) — AI əks-əlaqəsi üçün.
+  4. **Hazırda SQLite, sonra PostgreSQL** — portativ tiplər (VARCHAR+CHECK enum, UTC `DateTime`, `JSON`), Alembic batch rejimi.
+  5. **Açar sözlər maraq sahəsi + mənbə növü** (`applies_to`: all/news/tender/jobs) səviyyəsində, hər mənbəyə ayrıca siyahı yox. İlkin data koddakı siyahıların dəqiq nüsxəsidir (`MEAL` → all, `EVENT` → tender, `EXPANSION` → news).
+- **Mərhələlər:** PR 1 baza (Alembic, cədvəllər, ilkin data, `create_user`); PR 2 deadline + mənbələr arası dublikat; PR 3 giriş/rollar; PR 4 CRM ekranları və "Təsdiqlə → fürsət" (`sent_to_crm` → `converted` də onda).
+- **Kodda:** `app/db/models.py`, `migrations/`, `app/db/migrate.py`, `app/auth/`, `scripts/create_user.py`, testlər `tests/test_migrations.py`, `tests/test_auth.py`
+
 ## Açıq suallar (hələ qərar verilməyib)
 
 ### CRM real endpoint-i
-- **Status:** Open
+- **Status:** Köhnəlib (2026-09-28) — öz CRM-imiz qərarı ilə xarici CRM endpoint-i artıq lazım deyil, bax "CRM baza sxemi". Aşağıdakı qeyd tarixçə üçün saxlanılır.
+- **Əvvəlki status:** Open
 - **Sual:** `/api/opportunities` endpoint-inin dəqiq yolu, request/response formatı, autentifikasiya üsulu (API key vs OAuth) nədir?
 - **Niyə açıqdır:** hazırkı `CRM_BASE_URL` (`.env`) placeholder-dir, real CRM komandası ilə hələ dəqiqləşdirilməyib.
 - **Kim qərar verməlidir:** CRM development komandası

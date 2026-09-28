@@ -24,7 +24,9 @@ app/
   web.py              Admin panel (FastAPI) — mənbəni əl ilə scrape etmək + validasiya UI
   templates/          admin panelin HTML şablonları
   db/                 SQLAlchemy modelləri + repository
-scripts/init_db.py    cədvəlləri yaradır
+scripts/init_db.py    bazanı ən son sxemə gətirir (Alembic)
+scripts/create_user.py  admin panel istifadəçisi yaradır
+migrations/           Alembic miqrasiyaları (sxem dəyişiklikləri yalnız buradan)
 tests/                pytest testləri (models, normalizer)
 ```
 
@@ -34,8 +36,17 @@ tests/                pytest testləri (models, normalizer)
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt   # requirements.txt + pytest
 cp .env.example .env   # dəyərləri doldur
-python -m scripts.init_db
+python -m scripts.init_db                 # baza → ən son sxem (köhnə baza itkisiz yenilənir)
+python -m scripts.create_user --email ad@sirket.az --name "Ad Soyad" --role admin   # şifrə gizli soruşulur
 ```
+
+## Baza sxemi və miqrasiyalar
+
+Sxem layihəsi və qərarlar: `docs/knowledge-base/04-decisions.md` → "CRM baza sxemi". Hazırda SQLite, sonra PostgreSQL — sxem hər ikisində dəyişmədən işləyir (native enum/citext/jsonb yoxdur).
+
+- Server başlayanda və `scripts.init_db` işləyəndə baza avtomatik ən son miqrasiyaya gətirilir (`app/db/migrate.py`). CRM-dən əvvəlki köhnə baza (yalnız `leads`) avtomatik tanınır və itkisiz yenilənir.
+- **Modeli dəyişdinsə, miqrasiya da yaz:** `alembic revision --autogenerate -m "qısa izah"`, yaranan faylı yoxla, sonra `alembic upgrade head`. `tests/test_migrations.py::test_models_match_migrations` model ilə miqrasiya uyğun gəlmirsə düşür.
+- Geri qaytarma: `alembic downgrade -1`.
 
 > Qeyd: Python 3.9-da `eval_type_backport` paketi (requirements.txt-də var) `str | None` tipli annotasiyalar üçün lazımdır. Python 3.10+ istifadə edən mühitlərdə bu paket çıxarıla bilər.
 
