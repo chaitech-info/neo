@@ -8,13 +8,20 @@
   <div class="toolbar">
     <div>
       <h1>Mənbələr</h1>
+      {% if has_role(request.state.user, 'manager') %}
       <p class="muted">Hər kartda "Scrape indi" düyməsi həmin mənbəni dərhal işə salır (nəticə Validasiya səhifəsinə düşür).</p>
+      {% else %}
+      <p class="muted">Mənbələrin son nəticələri. Scrape-i menecer və administrator işə salır.</p>
+      {% endif %}
     </div>
+    {% if has_role(request.state.user, 'manager') %}
     <form method="post" action="/scrape-all">
+      {{ csrf_field(request) }}
       <button class="btn btn-primary btn-lg" type="submit" {% if running|length == sources|length %}disabled{% endif %}>
         {% if running %}İşləyir: {{ running|length }}/{{ sources|length }} mənbə{% else %}Hamısını scrape et{% endif %}
       </button>
     </form>
+    {% endif %}
   </div>
   {% if running %}
     <div class="flash">{{ running|length }} mənbə paralel işləyir — gedişatı <a href="/logs">Loglar</a> səhifəsində canlı izlə. Səhifə hər 5 saniyədən bir yenilənir.</div>
@@ -25,11 +32,14 @@
         <h3>{{ label }}</h3>
         <span class="muted">Son nəticə: {{ last_run.get(key, 'hələ işə salınmayıb') }}</span>
         <div class="card-actions">
+          {% if has_role(request.state.user, 'manager') %}
           <form method="post" action="/scrape/{{ key }}">
+            {{ csrf_field(request) }}
             <button class="btn btn-primary" type="submit" {% if key in running %}disabled{% endif %}>
               {% if key in running %}İşləyir…{% else %}Scrape indi{% endif %}
             </button>
           </form>
+          {% endif %}
           <a class="btn btn-sm" href="/logs?source={{ key }}">Loglar</a>
         </div>
       </div>

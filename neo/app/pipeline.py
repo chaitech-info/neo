@@ -134,7 +134,7 @@ def _run(scraper_cls: type[BaseScraper], session: Session) -> PipelineResult:
     return result
 
 
-def send_lead_to_crm(dedupe_key: str, session: Session) -> str:
+def send_lead_to_crm(dedupe_key: str, session: Session, reviewer_id: int | None = None) -> str:
     """Admin panelində 'Approve' düyməsi çağırır. Sənəd §9 CRM inteqrasiyası.
 
     Qaytarır: "ok" | "not_found" | "crm_failed". "crm_failed" — CRM_BASE_URL
@@ -152,20 +152,21 @@ def send_lead_to_crm(dedupe_key: str, session: Session) -> str:
         return "crm_failed"
 
     repo.mark_sent_to_crm(dedupe_key, opportunity_id)
+    repo.mark_reviewed(dedupe_key, reviewer_id)
     return "ok"
 
 
-def restore_lead(dedupe_key: str, session: Session) -> bool:
+def restore_lead(dedupe_key: str, session: Session, reviewer_id: int | None = None) -> bool:
     """'AI rədd etdi' səhifəsində 'Validasiyaya qaytar' — AI-nin səhv rəddini insan düzəldir."""
     repo = LeadRepository(session)
     record = repo.get(dedupe_key)
     if record is None or record.status != "rejected":
         return False
-    repo.set_status(dedupe_key, "pending_review")
+    repo.set_status(dedupe_key, "pending_review", reviewer_id=reviewer_id)
     return True
 
 
-def reject_lead(dedupe_key: str, session: Session) -> bool:
+def reject_lead(dedupe_key: str, session: Session, reviewer_id: int | None = None) -> bool:
     """Admin panelində 'Reject' düyməsi çağırır.
 
     Yalnız pending_review rədd edilə bilər — artıq CRM-ə göndərilmiş lead-in
@@ -175,5 +176,5 @@ def reject_lead(dedupe_key: str, session: Session) -> bool:
     record = repo.get(dedupe_key)
     if record is None or record.status != "pending_review":
         return False
-    repo.set_status(dedupe_key, "rejected")
+    repo.set_status(dedupe_key, "rejected", reviewer_id=reviewer_id)
     return True

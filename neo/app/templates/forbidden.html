@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}İcazə yoxdur — Lead Scraping Admin{% endblock %}
+{% block content %}
+  <div class="auth-card">
+    <h1>İcazə yoxdur</h1>
+    <p>Bu əməliyyat üçün ən azı <b>{{ required_name }}</b> rolu lazımdır. Sənin rolun: <b>{{ current_name }}</b>.</p>
+    <p class="muted">Rolunu dəyişmək üçün admin-ə müraciət et.</p>
+    <a class="btn" href="/">Dashboard-a qayıt</a>
+  </div>
+{% endblock %}

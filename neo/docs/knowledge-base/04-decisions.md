@@ -125,6 +125,12 @@
   - **Bilinən hədd:** fed.az məqaləsi ↔ etender elanı tutulmur — başlıqlar tam fərqlidir, etender siyahı API-si sifarişçi VÖEN-ini vermir. fed.az mətnindəki VÖEN `organizations`-a yazılır (CRM üçün). AI müqayisəsi Faza 2.
   - Hər scrape `scrape_runs`-a yazılır; dashboard "Son nəticə" server yenidən başlayanda bazadan oxunur. Mesaj: "N yeni lead — X validasiyaya, Y AI rədd etdi, Z başqa mənbədə artıq var, W təkrar".
   - Köhnə lead-lər server başlayanda idempotent doldurulur (`app/db/backfill.py`).
+- **PR 3 (giriş və rollar, 2026-09-28):**
+  - Bütün səhifələr giriş tələb edir; ilk admin brauzerdən `/setup` ilə (yalnız istifadəçi yoxdursa), qalanları admin "İstifadəçilər" səhifəsindən.
+  - Rollar iyerarxikdir: viewer < sales (validasiya) < manager (scrape) < admin (istifadəçilər). Düymələr rola görə gizlənir, route-lar ayrıca qorunur (`app/auth/security.py`).
+  - Sessiya imzalı cookie (Starlette `SessionMiddleware`, `itsdangerous`), 12 saat; şifrə dəyişəndə/deaktivdə sessiya etibarsız olur (cookie-də şifrə hash-inin sonu). CSRF token bütün POST formlarında; SameSite=Lax. 5 səhv cəhd → 15 dəq blok (proses yaddaşında).
+  - `leads.reviewed_by_id/reviewed_at` təsdiq/rədd/qaytarmada yazılır.
+  - Testlər: `tests/conftest.py` admin panel testləri üçün "daxil olmuş admin" təyin edir; auth testləri `@pytest.mark.real_auth` ilə real məntiqdən keçir.
 
 ## Açıq suallar (hələ qərar verilməyib)
 

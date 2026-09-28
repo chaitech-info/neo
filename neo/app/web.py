@@ -4,17 +4,23 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import quote
 
 import structlog
 from dotenv import load_dotenv
 
 load_dotenv()
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
+from starlette.middleware.sessions import SessionMiddleware
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import sessionmaker
 
 from app import logbuffer
+from app.auth import security
+from app.auth.routes import router as auth_router
+from app.auth.security import REQUIRE, ROLE_NAMES, CsrfFailed, LoginRequired, PermissionDenied, verify_csrf
+from app.db.models import User
 from app.ai_filter import SCORE_THRESHOLD
 from app.db.engine import engine
 from app.db.backfill import backfill
@@ -96,6 +102,40 @@ def _run_source(source_key: str, trigger: str = "manual") -> PipelineResult | No
 
 app = FastAPI(title="Lead Scraping Admin")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+app.state.templates = templates
+# Giriş sessiyası imzalı cookie-də; SameSite=Lax + formlarda CSRF token.
+app.add_middleware(
+    SessionMiddleware, secret_key=security.session_secret(), session_cookie="neo_session",
+    max_age=security.SESSION_MAX_AGE, same_site="lax",
+)
+app.include_router(auth_router)
+templates.env.globals.update(
+    csrf_field=security.csrf_field, has_role=security.has_role, role_names=ROLE_NAMES,
+)
+
+
+@app.exception_handler(LoginRequired)
+def _login_required(request: Request, exc: LoginRequired):
+    if request.url.path.startswith("/api/"):
+        return JSONResponse({"error": "login_required"}, status_code=401)
+    target = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+    if request.method != "GET":
+        target = "/"
+    return RedirectResponse(url=f"/login?next={quote(target)}", status_code=303)
+
+
+@app.exception_handler(PermissionDenied)
+def _permission_denied(request: Request, exc: PermissionDenied):
+    user = request.state.user
+    return templates.TemplateResponse("forbidden.html", {
+        "request": request, "required_name": ROLE_NAMES[exc.required],
+        "current_name": ROLE_NAMES[user.role_code] if user else "—",
+    }, status_code=403)
+
+
+@app.exception_handler(CsrfFailed)
+def _csrf_failed(request: Request, exc: CsrfFailed):
+    return RedirectResponse(url=f"/?err={quote('Forma köhnəlib — səhifəni yenilə və yenidən cəhd et')}", status_code=303)
 
 
 def _baku_time(value: datetime | None) -> str:
@@ -148,7 +188,7 @@ def _last_runs_from_db() -> dict[str, str]:
 
 
 @app.get("/")
-def dashboard(request: Request):
+def dashboard(request: Request, user: User = Depends(REQUIRE["viewer"])):
     session = SessionLocal()
     try:
         repo = LeadRepository(session)
@@ -172,8 +212,8 @@ def dashboard(request: Request):
     )
 
 
-@app.post("/scrape/{source_key}")
-def scrape_now(source_key: str):
+@app.post("/scrape/{source_key}", dependencies=[Depends(verify_csrf)])
+def scrape_now(source_key: str, user: User = Depends(REQUIRE["manager"])):
     """'Scrape indi' düyməsi — validation göstərilir: naməlum mənbə istəyi rədd edilir."""
     if source_key not in SOURCES:
         return RedirectResponse(
@@ -196,8 +236,8 @@ def scrape_now(source_key: str):
     )
 
 
-@app.post("/scrape-all")
-def scrape_all():
+@app.post("/scrape-all", dependencies=[Depends(verify_csrf)])
+def scrape_all(user: User = Depends(REQUIRE["manager"])):
     """Bütün mənbələri paralel, fonda işə salır — cavab dərhal qayıdır, gedişat
     dashboard-da və /logs-da canlı görünür."""
     started = _claim(list(SOURCES))
@@ -215,7 +255,7 @@ def scrape_all():
 
 
 @app.get("/logs")
-def logs_page(request: Request):
+def logs_page(request: Request, user: User = Depends(REQUIRE["viewer"])):
     return templates.TemplateResponse(
         "logs.html",
         {"request": request, "active": "logs", "sources": {k: v[0] for k, v in SOURCES.items()}},
@@ -223,7 +263,7 @@ def logs_page(request: Request):
 
 
 @app.get("/api/logs")
-def logs_api(after: int = 0, source: str | None = None, level: str | None = None):
+def logs_api(after: int = 0, source: str | None = None, level: str | None = None, user: User = Depends(REQUIRE["viewer"])):
     with _running_lock:
         running = sorted(_running)
     return JSONResponse({
@@ -233,7 +273,7 @@ def logs_api(after: int = 0, source: str | None = None, level: str | None = None
 
 
 @app.get("/leads/pending_review")
-def leads_pending(request: Request):
+def leads_pending(request: Request, user: User = Depends(REQUIRE["viewer"])):
     session = SessionLocal()
     try:
         repo = LeadRepository(session)
@@ -255,7 +295,7 @@ def leads_pending(request: Request):
 
 
 @app.get("/leads/ai_rejected")
-def leads_ai_rejected(request: Request):
+def leads_ai_rejected(request: Request, user: User = Depends(REQUIRE["viewer"])):
     session = SessionLocal()
     try:
         repo = LeadRepository(session)
@@ -281,7 +321,7 @@ def leads_ai_rejected(request: Request):
 
 
 @app.get("/leads")
-def leads_all(request: Request):
+def leads_all(request: Request, user: User = Depends(REQUIRE["viewer"])):
     session = SessionLocal()
     try:
         repo = LeadRepository(session)
@@ -302,15 +342,15 @@ def leads_all(request: Request):
     )
 
 
-@app.post("/leads/{dedupe_key}/approve")
-def approve_lead(dedupe_key: str):
+@app.post("/leads/{dedupe_key}/approve", dependencies=[Depends(verify_csrf)])
+def approve_lead(dedupe_key: str, user: User = Depends(REQUIRE["sales"])):
     # Validation: mövcud olmayan və ya artıq emal edilmiş lead üçün aydın xəta.
     if not dedupe_key or len(dedupe_key) != 64:
         return RedirectResponse(url="/leads/pending_review?err=Yanlış lead ID", status_code=303)
 
     session = SessionLocal()
     try:
-        result = send_lead_to_crm(dedupe_key, session)
+        result = send_lead_to_crm(dedupe_key, session, reviewer_id=user.id)
     finally:
         session.close()
 
@@ -327,14 +367,14 @@ def approve_lead(dedupe_key: str):
     return RedirectResponse(url="/leads/pending_review?msg=Lead CRM-ə göndərildi", status_code=303)
 
 
-@app.post("/leads/{dedupe_key}/restore")
-def restore_lead_route(dedupe_key: str):
+@app.post("/leads/{dedupe_key}/restore", dependencies=[Depends(verify_csrf)])
+def restore_lead_route(dedupe_key: str, user: User = Depends(REQUIRE["sales"])):
     if not dedupe_key or len(dedupe_key) != 64:
         return RedirectResponse(url="/leads/ai_rejected?err=Yanlış lead ID", status_code=303)
 
     session = SessionLocal()
     try:
-        ok = restore_lead(dedupe_key, session)
+        ok = restore_lead(dedupe_key, session, reviewer_id=user.id)
     finally:
         session.close()
 
@@ -346,14 +386,14 @@ def restore_lead_route(dedupe_key: str):
     return RedirectResponse(url="/leads/ai_rejected?msg=Lead Validasiyaya qaytarıldı", status_code=303)
 
 
-@app.post("/leads/{dedupe_key}/reject")
-def reject_lead_route(dedupe_key: str):
+@app.post("/leads/{dedupe_key}/reject", dependencies=[Depends(verify_csrf)])
+def reject_lead_route(dedupe_key: str, user: User = Depends(REQUIRE["sales"])):
     if not dedupe_key or len(dedupe_key) != 64:
         return RedirectResponse(url="/leads/pending_review?err=Yanlış lead ID", status_code=303)
 
     session = SessionLocal()
     try:
-        ok = reject_lead(dedupe_key, session)
+        ok = reject_lead(dedupe_key, session, reviewer_id=user.id)
     finally:
         session.close()
 

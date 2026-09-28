@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}İstifadəçilər — Lead Scraping Admin{% endblock %}
+{% block content %}
+  <h1>İstifadəçilər</h1>
+  <p class="muted">Rollar: <b>Müşahidəçi</b> — yalnız baxır · <b>Satış</b> — lead-ləri təsdiqləyir/rədd edir · <b>Menecer</b> — üstəlik scrape-i işə salır · <b>Administrator</b> — üstəlik istifadəçiləri idarə edir.</p>
+
+  <div class="panel">
+    <h3 style="margin-top:0">Yeni istifadəçi</h3>
+    <form method="post" action="/users" class="form-row">
+      {{ csrf_field(request) }}
+      <div class="field"><label for="new_name">Ad Soyad</label><input id="new_name" name="full_name" required></div>
+      <div class="field"><label for="new_email">Email</label><input id="new_email" name="email" type="email" required></div>
+      <div class="field"><label for="new_role">Rol</label>
+        <select id="new_role" name="role_code">{% for code, name in roles %}<option value="{{ code }}" {% if code == 'sales' %}selected{% endif %}>{{ name }}</option>{% endfor %}</select>
+      </div>
+      <div class="field"><label for="new_password">Şifrə</label><input id="new_password" name="password" type="password" minlength="{{ min_length }}" autocomplete="new-password" required></div>
+      <button class="btn btn-primary" type="submit">Yarat</button>
+    </form>
+    <p class="hint" style="margin-bottom:0">Şifrə ən azı {{ min_length }} simvol. İstifadəçiyə şifrəni özün çatdır — sistem email göndərmir.</p>
+  </div>
+
+  <table>
+    <tr><th>Ad</th><th>Email</th><th>Rol</th><th>Status</th><th>Son giriş</th><th>Şifrəni dəyiş</th></tr>
+    {% for u in users %}
+    <tr class="{{ '' if u.is_active else 'inactive' }}">
+      <td>{{ u.full_name }}{% if u.id == me.id %} <span class="muted">(sən)</span>{% endif %}</td>
+      <td>{{ u.email }}</td>
+      <td>
+        <form class="inline" method="post" action="/users/{{ u.id }}/role">
+          {{ csrf_field(request) }}
+          <select class="input" name="role_code" aria-label="{{ u.email }} rolu" onchange="this.form.submit()">
+            {% for code, name in roles %}<option value="{{ code }}" {% if code == u.role_code %}selected{% endif %}>{{ name }}</option>{% endfor %}
+          </select>
+        </form>
+      </td>
+      <td>
+        {% if u.id == me.id %}
+          <span class="badge badge-sent">aktiv</span>
+        {% else %}
+        <form class="inline" method="post" action="/users/{{ u.id }}/active">
+          {{ csrf_field(request) }}
+          <button class="btn btn-sm {{ 'btn-reject' if u.is_active else 'btn-approve' }}" type="submit">{{ 'Deaktiv et' if u.is_active else 'Aktiv et' }}</button>
+        </form>
+        {% endif %}
+      </td>
+      <td class="muted">{{ u.last_login_at|baku_time }}</td>
+      <td>
+        <form class="inline form-row" method="post" action="/users/{{ u.id }}/password">
+          {{ csrf_field(request) }}
+          <input class="input" name="password" type="password" minlength="{{ min_length }}" placeholder="Yeni şifrə" aria-label="{{ u.email }} yeni şifrə" autocomplete="new-password" required>
+          <button class="btn btn-sm" type="submit">Dəyiş</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+{% endblock %}

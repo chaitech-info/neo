@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -65,12 +67,20 @@ class LeadRepository:
     def get(self, dedupe_key: str) -> LeadRecord | None:
         return self.session.get(LeadRecord, dedupe_key)
 
-    def set_status(self, dedupe_key: str, status: str) -> None:
+    def set_status(self, dedupe_key: str, status: str, reviewer_id: int | None = None) -> None:
         record = self.session.get(LeadRecord, dedupe_key)
         if record is None:
             return
         record.status = status
+        if reviewer_id is not None:
+            record.reviewed_by_id, record.reviewed_at = reviewer_id, datetime.utcnow()
         self.session.commit()
+
+    def mark_reviewed(self, dedupe_key: str, reviewer_id: int | None) -> None:
+        record = self.session.get(LeadRecord, dedupe_key)
+        if record is not None and reviewer_id is not None:
+            record.reviewed_by_id, record.reviewed_at = reviewer_id, datetime.utcnow()
+            self.session.commit()
 
     def list_by_status(self, status: str) -> list[LeadRecord]:
         stmt = (

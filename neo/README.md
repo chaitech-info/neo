@@ -40,6 +40,21 @@ python -m scripts.init_db                 # baza → ən son sxem (köhnə baza 
 python -m scripts.create_user --email ad@sirket.az --name "Ad Soyad" --role admin   # şifrə gizli soruşulur
 ```
 
+## Giriş və rollar
+
+Admin panelin bütün səhifələri giriş tələb edir. **İlk dəfə** açanda (bazada istifadəçi yoxdursa) `/setup` səhifəsi ilk **admin** hesabını yaratmağı təklif edir; bir hesab yarananda bu səhifə bağlanır. Digər istifadəçiləri admin **İstifadəçilər** səhifəsindən yaradır (CLI da işləyir: `python -m scripts.create_user`).
+
+| Rol | Nə edə bilir |
+|---|---|
+| Müşahidəçi (`viewer`) | yalnız baxır |
+| Satış (`sales`) | + lead-ləri təsdiqləyir / rədd edir / validasiyaya qaytarır |
+| Menecer (`manager`) | + scrape-i işə salır |
+| Administrator (`admin`) | + istifadəçiləri yaradır, rolunu dəyişir, deaktiv edir, şifrəsini sıfırlayır |
+
+- Sessiya imzalı cookie-dədir (12 saat). Açar: `.env`-dəki `SESSION_SECRET`; yoxdursa bir dəfə yaradılıb `neo/.session_secret`-ə yazılır (gitignore-da). **Production-da `.env`-də təyin et.**
+- Şifrə dəyişəndə və ya istifadəçi deaktiv ediləndə onun açıq sessiyaları avtomatik bağlanır. 5 səhv cəhddən sonra giriş 15 dəqiqə bloklanır. Bütün POST formları CSRF token ilə qorunur.
+- Sonuncu aktiv admin-i deaktiv etmək və ya rolunu endirmək olmur.
+
 ## Baza sxemi və miqrasiyalar
 
 Sxem layihəsi və qərarlar: `docs/knowledge-base/04-decisions.md` → "CRM baza sxemi". Hazırda SQLite, sonra PostgreSQL — sxem hər ikisində dəyişmədən işləyir (native enum/citext/jsonb yoxdur).
