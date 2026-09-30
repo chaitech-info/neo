@@ -186,8 +186,8 @@ class LeadRecord(Base):
 
     ai_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     ai_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    # Hələ sərbəst sətir: `sent_to_crm` → `converted` keçidi "Təsdiqlə" axını ilə
-    # birlikdə (PR 4) edilir; CHECK də onda əlavə olunacaq.
+    # Sərbəst sətir: new/pending_review/rejected/duplicate/converted (+ köhnə sent_to_crm).
+    # `converted` — "Təsdiqlə" lead-i fürsətə çevirəndə (app/crm.py).
     status: Mapped[str] = mapped_column(String(16), default="new")
 
     crm_opportunity_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)

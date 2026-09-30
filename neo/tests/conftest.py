@@ -9,6 +9,50 @@ def no_real_ai_triage(monkeypatch):
     monkeypatch.setattr("app.ai_triage.triage", lambda titles, kind="news", client=None: None)
 
 
+@pytest.fixture(autouse=True)
+def keywords_from_code(monkeypatch):
+    """Testlər real lokal bazanın açar sözlərini oxumasın: defolt olaraq "baza yoxdur"
+    — scraper-lər və AI koddakı siyahılarla işləyir. Bazadan oxumanı yoxlayan test
+    `app.keywords.snapshot`-u öz fixture-i ilə əvəz edir."""
+    from app import keywords
+
+    keywords.invalidate()
+    monkeypatch.setattr("app.keywords.snapshot", lambda: None)
+
+
+class _FakeLock:
+    def __init__(self, held):
+        self.held, self.key = held, None
+
+    def acquire(self):
+        if self.key in self.held:
+            return False
+        self.held.add(self.key)
+        return True
+
+    def release(self):
+        self.held.discard(self.key)
+
+
+class FakeRedis:
+    """Yaddaşda Redis kilidi — testlər real (lokal) Redis-ə getməsin."""
+
+    def __init__(self):
+        self.held = set()
+
+    def lock(self, key, timeout=None, blocking=True):
+        lock = _FakeLock(self.held)
+        lock.key = key
+        return lock
+
+
+@pytest.fixture(autouse=True)
+def fake_redis(monkeypatch):
+    fake = FakeRedis()
+    monkeypatch.setattr("app.locks._redis", lambda: fake)
+    return fake
+
+
 def pytest_configure(config):
     config.addinivalue_line("markers", "real_auth: giriş/rol/CSRF yoxlamasını əvəz etmə (auth testləri)")
 

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import structlog
 from celery.schedules import crontab
 from sqlalchemy.orm import sessionmaker
 
 from app.celery_app import celery_app
+from app.locks import source_lock
 from app.db.engine import engine
 from app.pipeline import run_pipeline
 from app.scrapers import (
@@ -23,6 +25,7 @@ from app.scrapers import (
 )
 
 SessionLocal = sessionmaker(bind=engine)
+log = structlog.get_logger()
 
 # Sənəd §7 Scheduling:
 # - Xəbər/elan saytları: hər 1-2 saatdan bir
@@ -48,13 +51,19 @@ SOURCE_TASKS = {
 
 
 @celery_app.task(name="scrape_source")
-def scrape_source(source_key: str) -> int:
+def scrape_source(source_key: str) -> int | None:
+    """Planlı scrape. Mənbə artıq işləyirsə (paneldən və ya əvvəlki planlı run hələ
+    bitməyib) — atlanır, None qaytarır."""
     scraper_cls = SOURCE_TASKS[source_key]
-    session = SessionLocal()
-    try:
-        return run_pipeline(scraper_cls, session, source_key=source_key, trigger="schedule").pending
-    finally:
-        session.close()
+    with source_lock(source_key) as acquired:
+        if not acquired:
+            log.info("scheduled_scrape_skipped", source=source_key, reason="artıq işləyir")
+            return None
+        session = SessionLocal()
+        try:
+            return run_pipeline(scraper_cls, session, source_key=source_key, trigger="schedule").pending
+        finally:
+            session.close()
 
 
 celery_app.conf.beat_schedule = {

@@ -132,6 +132,17 @@
   - `leads.reviewed_by_id/reviewed_at` təsdiq/rədd/qaytarmada yazılır.
   - Testlər: `tests/conftest.py` admin panel testləri üçün "daxil olmuş admin" təyin edir; auth testləri `@pytest.mark.real_auth` ilə real məntiqdən keçir.
 
+- **PR 4 (fürsət/tapşırıq ekranları, açar sözlər bazadan, 24/7 Celery, 2026-09-30):**
+  - **"Təsdiqlə" → fürsət + ilk tapşırıq** (`app/crm.py::convert_lead`). Əvvəl xarici CRM-ə göndərirdi və həmişə xəta verirdi — `crm_client.py` silindi, `.env`-dən `CRM_*` çıxarıldı. Lead statusu `converted`, `crm_opportunity_id` = fürsət ID. Təşkilat `organizations`-da tapılır/yaradılır (`app/tenders.py::organization_for`), əlaqə məlumatı lead-dən köçürülür.
+  - **İlk tapşırıq:** tender → "Tender sənədlərini yoxla və təklif hazırla", son tarixdən 2 gün əvvəl (ən azı indidən 4 saat sonra), son tarixə ≤3 gün qalıbsa prioritet yüksək; digər lead → "İlk əlaqə: <təşkilat>", 1 gün, AI skoru ≥0.8-dirsə yüksək. Məsul — təsdiqləyən istifadəçi; `created_by_id` boş = sistem.
+  - **Ekranlar:** `/opportunities` (mərhələ filtrləri, "mənimkilər", növbəti tapşırığın vaxtı, gecikən qırmızı), `/opportunities/{id}` (mərhələ, uduzma səbəbi, dəyər, məsul, tapşırıqlar, mənbə lead), `/tasks` (təcililər yuxarıda). Rollar: viewer baxır, sales dəyişir, məsulu başqasına yalnız manager+ verir.
+  - **Mərhələ qaydaları:** tender fürsətində `contacted`/`negotiation` yoxdur; `lost` səbəbsiz olmaz; `won`/`lost` bağlayanda açıq tapşırıqlar `cancelled` olur; yenidən açmaq mümkündür.
+  - **Açar sözlər bazadan** (`app/keywords.py`): scraper-lər (`BaseScraper.select_relevant`) `kind`-ə uyğun (`tender` → all+tender, `news` → all+news) aktiv terminləri oxuyur; **mənfi söz** başlığı həm açar söz, həm AI yolunda bağlayır; `match`: prefix/word/phrase. AI promptları şirkət profilini **maraq sahələrindən** qurur (ad, prioritet, AI təsviri + ilk 20 siqnal sözü); triaj keşi prompt versiyası ilə açarlanır — təsvir dəyişəndə köhnə qərarlar keçərsiz. 60 san keş; panel dəyişiklikdə təmizləyir, Celery worker ≤1 dəq görür. Baza əlçatan deyilsə koddakı siyahılar (fallback). Emlak-ın hərrac sözləri mənbəyə xasdır — `extra` kimi əlavə olunur.
+  - **Panel:** `/settings/keywords` — maraq sahələri (ad, AI təsviri, prioritet, aktiv), yeni sahə, açar sözlər (bir neçəsi birdən, dil avtomatik, dublikat atlanır), söndür/sil, filtr. Redaktə: manager+.
+  - **24/7:** Redis (`brew services`, yalnız 127.0.0.1) + `scripts/run_worker.sh` (worker + beat, threads pool). Canlı yoxlanıb: tapşırıq Redis → worker → `scrape_runs` (`trigger=schedule`, `ok`). Planlı və əl ilə scrape eyni mənbədə üst-üstə düşmür — Redis kilidi (`app/locks.py`); Redis yoxdursa kilid atlanır.
+  - **Açıq:** worker-in kompüter yenidən başlayanda özü qalxması (launchd agent) — hələ qurulmayıb, istifadəçi qərarı; worker logları panelin "Loglar" səhifəsinə düşmür.
+  - **Kodda:** `app/crm.py`, `app/crm_routes.py`, `app/keywords.py`, `app/keyword_routes.py`, `app/locks.py`, `app/scheduler.py`, `scripts/run_worker.sh`, şablonlar `opportunities.html`, `opportunity.html`, `tasks.html`, `keywords.html`; testlər `tests/test_crm.py`, `tests/test_keywords_db.py`, `tests/test_locks_and_scheduler.py`
+
 ## Açıq suallar (hələ qərar verilməyib)
 
 ### CRM real endpoint-i

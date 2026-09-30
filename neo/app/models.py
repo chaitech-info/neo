@@ -34,7 +34,8 @@ class LeadCategory(str, Enum):
 class LeadStatus(str, Enum):
     new = "new"
     pending_review = "pending_review"
-    sent_to_crm = "sent_to_crm"
+    sent_to_crm = "sent_to_crm"  # köhnə: xarici CRM-ə göndərilmiş (yeni lead-lər bunu almır)
+    converted = "converted"  # təsdiqlənib → fürsət yaradılıb (app/crm.py)
     rejected = "rejected"
     duplicate = "duplicate"
 

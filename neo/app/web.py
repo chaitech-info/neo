@@ -13,6 +13,7 @@ load_dotenv()
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import sessionmaker
 
@@ -26,7 +27,11 @@ from app.db.engine import engine
 from app.db.backfill import backfill
 from app.db.migrate import upgrade_to_head
 from app.db.repository import LeadRepository
-from app.pipeline import PipelineResult, reject_lead, restore_lead, run_pipeline, send_lead_to_crm
+from app import crm
+from app.crm_routes import router as crm_router
+from app.keyword_routes import router as keyword_router
+from app.locks import source_lock
+from app.pipeline import PipelineResult, reject_lead, restore_lead, run_pipeline
 from app.scrapers import (
     BossAzScraper,
     BpEdpScraper,
@@ -85,9 +90,18 @@ def _claim(keys: list[str]) -> list[str]:
 def _run_source(source_key: str, trigger: str = "manual") -> PipelineResult | None:
     label, scraper_cls = SOURCES[source_key]
     logbuffer.bind_source(source_key)
-    session = SessionLocal()
     try:
-        result = run_pipeline(scraper_cls, session, source_key=source_key, trigger=trigger)
+        with source_lock(source_key) as acquired:
+            if not acquired:
+                # Avtomatik (Celery) scrape həmin mənbəni indi işlədir — ikinci run lazım deyil.
+                _last_run[source_key] = f"{datetime.now().strftime('%H:%M:%S')} — atlandı: avtomatik scrape artıq işləyir"
+                log.info("manual_scrape_skipped", source=source_key, reason="avtomatik scrape işləyir")
+                return PipelineResult()
+            session = SessionLocal()
+            try:
+                result = run_pipeline(scraper_cls, session, source_key=source_key, trigger=trigger)
+            finally:
+                session.close()
         _last_run[source_key] = f"{datetime.now().strftime('%H:%M:%S')} — {result.summary()}"
         return result
     except Exception:
@@ -95,7 +109,6 @@ def _run_source(source_key: str, trigger: str = "manual") -> PipelineResult | No
         _last_run[source_key] = f"{datetime.now().strftime('%H:%M:%S')} — XƏTA, loglara bax"
         return None
     finally:
-        session.close()
         logbuffer.unbind_source()
         with _running_lock:
             _running.discard(source_key)
@@ -109,9 +122,47 @@ app.add_middleware(
     max_age=security.SESSION_MAX_AGE, same_site="lax",
 )
 app.include_router(auth_router)
+app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
+app.include_router(crm_router)
+app.include_router(keyword_router)
 templates.env.globals.update(
     csrf_field=security.csrf_field, has_role=security.has_role, role_names=ROLE_NAMES,
 )
+
+# Mənbənin növü — dashboard və validasiya qəbzlərində rəng/etiket.
+SOURCE_KIND = {
+    "etender": "tender", "fed_tenders": "tender", "corporate": "tender", "worldbank": "tender", "bp_edp": "tender",
+    "boss": "employer", "linkedin": "employer",
+}
+KIND_NAMES = {"tender": "Tender", "employer": "İşəgötürən", "news": "Xəbər"}
+
+
+def lead_kind(source: str) -> str:
+    return SOURCE_KIND.get(source, "news")
+
+
+def nav_counts(user: User | None) -> dict[str, int]:
+    """Sol menyudakı sayğaclar: validasiyada gözləyən, mənim açıq/gecikən tapşırıqlarım."""
+    from sqlalchemy import func, select
+
+    from app.db.models import LeadRecord, Task
+
+    if user is None:
+        return {}
+    try:
+        with SessionLocal() as db:
+            pending = db.scalar(select(func.count()).select_from(LeadRecord).where(LeadRecord.status == "pending_review"))
+            mine = select(func.count()).select_from(Task).where(
+                Task.assignee_id == user.id, Task.status.in_(("open", "in_progress")))
+            open_tasks = db.scalar(mine)
+            late = db.scalar(mine.where(Task.due_at < datetime.utcnow()))
+    except Exception:
+        log.warning("nav_counts_failed", exc_info=True)
+        return {}
+    return {"pending": pending or 0, "tasks": open_tasks or 0, "late": late or 0}
+
+
+templates.env.globals.update(nav_counts=nav_counts, lead_kind=lead_kind, kind_names=KIND_NAMES)
 
 
 @app.exception_handler(LoginRequired)
@@ -187,27 +238,73 @@ def _last_runs_from_db() -> dict[str, str]:
     return out
 
 
+def _schedule_text(cron) -> str:
+    """Celery crontab → "hər saat, :20" / "2 saatdan bir, :25" / "hər gün 06:00"."""
+    minute, hour = str(cron._orig_minute), str(cron._orig_hour)
+    mm = f":{int(minute):02d}" if minute.isdigit() else ""
+    hours = hour.split(",")
+    if hour == "*" or "*/1" in hours:
+        return f"hər saat{', ' + mm if mm else ''}"
+    if hour.startswith("*/") and len(hours) == 1:
+        return f"{hour[2:]} saatdan bir{', ' + mm if mm else ''}"
+    if all(h.isdigit() for h in hours):
+        times = ", ".join(f"{int(h):02d}{mm or ':00'}" for h in hours)
+        return f"hər gün {times}" if len(hours) == 1 else f"gündə {len(hours)} dəfə: {times}"
+    return str(cron)
+
+
+def _short_time(value: datetime | None) -> str | None:
+    """Bu gündürsə yalnız saat ("21:00"), əks halda "29.09 21:00" (Bakı vaxtı)."""
+    if value is None:
+        return None
+    local, today = value + timedelta(hours=4), (datetime.utcnow() + timedelta(hours=4)).date()
+    return local.strftime("%H:%M") if local.date() == today else local.strftime("%d.%m %H:%M")
+
+
+def _schedules() -> dict[str, str]:
+    try:
+        from app.scheduler import celery_app
+
+        return {v["args"][0]: _schedule_text(v["schedule"]) for v in celery_app.conf.beat_schedule.values()}
+    except Exception:
+        log.warning("schedule_text_failed", exc_info=True)
+        return {}
+
+
 @app.get("/")
 def dashboard(request: Request, user: User = Depends(REQUIRE["viewer"])):
+    from sqlalchemy import func, select
+
+    from app.db.models import Opportunity, ScrapeRun
+
     session = SessionLocal()
     try:
         repo = LeadRepository(session)
-        stats: dict[str, int] = {}
-        for status in ["new", "pending_review", "sent_to_crm", "rejected", "duplicate"]:
-            stats[status] = len(repo.list_by_status(status))
+        stats = {status: len(repo.list_by_status(status))
+                 for status in ["new", "pending_review", "converted", "rejected", "duplicate"]}
+        open_opps = session.scalar(select(func.count()).select_from(Opportunity)
+                                   .where(Opportunity.stage.notin_(("won", "lost"))))
+        last_auto = session.scalar(select(func.max(ScrapeRun.started_at)).where(ScrapeRun.trigger == "schedule"))
     finally:
         session.close()
 
+    last_run = {**_last_runs_from_db(), **_last_run}  # bu prosesdə işə salınanlar canlı, qalanı bazadan
+    schedules = _schedules()
+    sources = [
+        {"key": k, "label": label, "kind": lead_kind(k), "schedule": schedules.get(k, "—"),
+         "last": last_run.get(k)}
+        for k, (label, _) in SOURCES.items()
+    ]
     return templates.TemplateResponse(
         "dashboard.html",
         {
             "request": request,
             "active": "dashboard",
-            "sources": {k: v[0] for k, v in SOURCES.items()},
-            # Bu prosesdə işə salınanlar canlı; qalanları bazadan (server yenidən başlayanda itmir).
-            "last_run": {**_last_runs_from_db(), **_last_run},
+            "sources": sources,
             "running": set(_running),
             "stats": stats,
+            "open_opps": open_opps or 0,
+            "last_auto": _short_time(last_auto),
         },
     )
 
@@ -287,7 +384,7 @@ def leads_pending(request: Request, user: User = Depends(REQUIRE["viewer"])):
             "request": request,
             "active": "validation",
             "heading": "Validasiya",
-            "subtitle": "AI tərəfindən uyğun sayılan lead-lər — CRM-ə göndərməzdən əvvəl təsdiqlə və ya rədd et.",
+            "subtitle": "AI-nin satış fürsəti saydığı lead-lər. Uyğundursa fürsət yarat — ilk tapşırıq avtomatik açılır; deyilsə rədd et.",
             "leads": leads,
             "show_actions": True,
         },
@@ -310,8 +407,8 @@ def leads_ai_rejected(request: Request, user: User = Depends(REQUIRE["viewer"]))
             "active": "ai_rejected",
             "heading": "AI rədd etdi",
             "subtitle": (
-                f"AI skoru {SCORE_THRESHOLD} eşiyindən aşağı olan lead-lər. "
-                "Səhv rədd görsən, Validasiyaya qaytar."
+                f"AI skoru {int(SCORE_THRESHOLD * 100)}-dən aşağı olan lead-lər. "
+                "Fürsət görsən, Validasiyaya qaytar."
             ),
             "leads": leads,
             "show_actions": False,
@@ -335,7 +432,7 @@ def leads_all(request: Request, user: User = Depends(REQUIRE["viewer"])):
             "request": request,
             "active": "all",
             "heading": "Bütün lead-lər",
-            "subtitle": "Son 200 scrape olunmuş lead (bütün statuslar).",
+            "subtitle": "Son 200 lead, bütün statuslar.",
             "leads": leads,
             "show_actions": False,
         },
@@ -350,21 +447,15 @@ def approve_lead(dedupe_key: str, user: User = Depends(REQUIRE["sales"])):
 
     session = SessionLocal()
     try:
-        result = send_lead_to_crm(dedupe_key, session, reviewer_id=user.id)
+        conversion = crm.convert_lead(session, dedupe_key, user.id)
+        opp_id = conversion.opportunity.id
+    except crm.CrmError as exc:
+        return RedirectResponse(url=f"/leads/pending_review?err={quote(str(exc))}", status_code=303)
     finally:
         session.close()
 
-    if result == "not_found":
-        return RedirectResponse(
-            url="/leads/pending_review?err=Lead tapılmadı və ya artıq emal olunub (yalnız pending_review təsdiqlənə bilər)",
-            status_code=303,
-        )
-    if result == "crm_failed":
-        return RedirectResponse(
-            url="/leads/pending_review?err=CRM-ə göndərilmədi — CRM_BASE_URL hələ real endpoint-ə işarə etmir (bax .env, sənəd §9)",
-            status_code=303,
-        )
-    return RedirectResponse(url="/leads/pending_review?msg=Lead CRM-ə göndərildi", status_code=303)
+    msg = quote(f"Fürsət #{opp_id} və ilk tapşırıq yaradıldı")
+    return RedirectResponse(url=f"/leads/pending_review?msg={msg}&opp={opp_id}", status_code=303)
 
 
 @app.post("/leads/{dedupe_key}/restore", dependencies=[Depends(verify_csrf)])

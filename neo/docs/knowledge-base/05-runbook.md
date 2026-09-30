@@ -51,14 +51,22 @@ for l in leads:
 
 Hər scraper sinifi asanlıqla belə tək-tək çağırıla bilər — `app/scrapers/__init__.py::ALL_SCRAPERS` siyahısında hamısı var.
 
-## Production (Celery, avtomatik 24/7)
+## Avtomatik 24/7 scraping (Redis + Celery)
 
 ```bash
-celery -A app.celery_app worker --loglevel=info
-celery -A app.scheduler beat --loglevel=info
+brew install redis
+brew services start redis        # arxa fon xidməti, kompüter açılanda özü başlayır; yalnız 127.0.0.1-də dinləyir
+redis-cli ping                   # PONG
+./scripts/run_worker.sh          # Celery worker + beat bir prosesdə (threads pool, 4 paralel mənbə)
 ```
 
-Bunun üçün Redis işlək olmalıdır (`REDIS_URL` `.env`-də) və `DATABASE_URL` Postgres-ə işarə etməlidir.
+- **Cədvəl:** `app/scheduler.py::beat_schedule` (Bakı vaxtı) — xəbərlər saatlıq, fed/report tenderləri 2 saatdan bir, etender/emlak/Dünya Bankı/bp/LinkedIn/boss gündə 1, şirkət saytları gündə 2 dəfə. Hər planlı run `scrape_runs`-a `trigger=schedule` ilə yazılır, dashboard "Son nəticə"-də görünür.
+- **Əl ilə bir tapşırıq göndərmək (test):** `celery -A app.scheduler:celery_app call scrape_source --args='["report"]'`
+- **Üst-üstə düşmə yoxdur:** planlı və paneldən "Scrape indi" eyni mənbəni eyni vaxtda işlətmir — Redis kilidi `neo:scrape:<mənbə>` (`app/locks.py`). Redis yoxdursa kilid atlanır, scrape dayanmır.
+- **Köhnə əmr işləmir:** `celery -A app.celery_app worker` `scrape_source` tapşırığını qeydiyyata salmır (tapşırıq `app/scheduler.py`-dadır) — həmişə `run_worker.sh` və ya `-A app.scheduler:celery_app`.
+- **Loglar:** worker-in logu öz terminalındadır; panelin "Loglar" səhifəsi yalnız paneldən işə salınan scrape-ləri göstərir.
+- **Kompüter yenidən başlayanda:** Redis özü qalxır; worker-i yenidən `./scripts/run_worker.sh` ilə başlat (və ya launchd agenti qur — bax 04-decisions.md → "CRM PR 4").
+- **Production:** `DATABASE_URL` Postgres-ə işarə etməlidir (SQLite bir neçə yazan prosesə görə deyil).
 
 ## Tez-tez rast gəlinən problemlər
 
@@ -66,7 +74,6 @@ Bunun üçün Redis işlək olmalıdır (`REDIS_URL` `.env`-də) və `DATABASE_U
 | --- | --- | --- |
 | Bütün scraper-lər "0 yeni lead" qaytarır | Normaldır ola bilər — keyword filtrinə uyğun məzmun yoxdursa | `python -c "..."` ilə scraper-i tək-tək çağırıb `fetch_leads()`-in özünün nə qaytardığına bax (keyword filtrindən ƏVVƏL, bax `03-site-research.md`-dəki "candidate link" debug üsulu) |
 | Bir scraper həmişə 0 qaytarır, digərləri işləyir | Sayt strukturu dəyişib | Brauzerdə saytı aç, `app/scrapers/<fayl>.py`-dəki seçici/regex-i yenilə, `03-site-research.md`-i güncəllə |
-| "CRM-ə göndərilmədi" xətası | `CRM_BASE_URL` hələ real endpoint deyil (gözlənilən) | `04-decisions.md` → "CRM real endpoint-i" bax, CRM komandası ilə əlaqə saxla |
 | Validasiya səhifəsi boşdur, amma scrape "N yeni lead" dedi | Adətən normal — sadəcə səhifəni yenilə (`/leads/pending_review`) | — |
 | `Address already in use` (port 8008) | Köhnə uvicorn prosesi hələ işləyir | `lsof -ti:8008 \| xargs kill -9` |
 | Pydantic/SQLAlchemy `TypeError: unsupported operand type(s) for \|` | Python 3.9-da `str \| None` sintaksisi | `eval_type_backport` quraşdırılıb-quraşdırılmadığını yoxla; yeni fayl yazırsansa, DB modellərində `Optional[str]` istifadə et (`str \| None` yox) — bax `app/db/models.py` |

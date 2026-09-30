@@ -7,7 +7,6 @@ import structlog
 from sqlalchemy.orm import Session
 
 from app.ai_filter import AIFilter
-from app.crm_client import CRMClient
 from app.db.models import ScrapeRun
 from app.db.repository import LeadRepository
 from app.deadlines import extract_deadline
@@ -132,28 +131,6 @@ def _run(scraper_cls: type[BaseScraper], session: Session) -> PipelineResult:
         cross_source_duplicates=result.tender_duplicates,
     )
     return result
-
-
-def send_lead_to_crm(dedupe_key: str, session: Session, reviewer_id: int | None = None) -> str:
-    """Admin panelində 'Approve' düyməsi çağırır. Sənəd §9 CRM inteqrasiyası.
-
-    Qaytarır: "ok" | "not_found" | "crm_failed". "crm_failed" — CRM_BASE_URL
-    hələ real endpoint-ə işarə etmirsə (sənəd §9 açıq sual) gözlənilən haldır.
-    """
-    repo = LeadRepository(session)
-    record = repo.get(dedupe_key)
-    if record is None or record.status != "pending_review":
-        return "not_found"
-
-    crm = CRMClient()
-    lead = repo.to_raw_lead(record)
-    opportunity_id = crm.create_opportunity(lead)
-    if not opportunity_id:
-        return "crm_failed"
-
-    repo.mark_sent_to_crm(dedupe_key, opportunity_id)
-    repo.mark_reviewed(dedupe_key, reviewer_id)
-    return "ok"
 
 
 def restore_lead(dedupe_key: str, session: Session, reviewer_id: int | None = None) -> bool:

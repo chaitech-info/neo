@@ -220,18 +220,33 @@ class BaseScraper(abc.ABC):
         resp.raise_for_status()
         return resp
 
-    def select_relevant(self, texts: list[str], keywords: list[str], kind: str) -> list[bool]:
-        """Hansı başlıqlar tam yoxlamaya getsin: açar söz VƏ YA AI triajı.
+    def select_relevant(
+        self, texts: list[str], fallback: list[str], kind: str, extra: list[str] = ()
+    ) -> list[bool]:
+        """Hansı başlıqlar tam yoxlamaya getsin: açar söz VƏ YA AI triajı, mənfi söz istisna.
 
+        Açar sözlər bazadandır (paneldə redaktə olunur, app/keywords.py) — `kind`
+        ("tender"|"news") həmin növə aid terminləri seçir. Baza əlçatan deyilsə
+        `fallback` (koddakı siyahı) işlədilir. `extra` — mənbəyə xas əlavə sözlər
+        (məs. emlak-ın hərrac sözləri), həmişə keçərlidir.
         Açar söz uyğunluğu həmişə daxil edir (AI işləməsə də heç nə itmir); AI
-        triajı açar sözlərin görmədiyi fürsətləri əlavə edir. kind: "tender"|"news".
+        triajı açar sözlərin görmədiyi fürsətləri əlavə edir; mənfi söz hər ikisini bağlayır.
         """
-        from app.ai_triage import triage  # scraper-lər AI modulu olmadan da import olunsun
+        from app import keywords as kw_store  # gec import: baza modulu scraper-lərdən asılı olmasın
+        from app.ai_triage import triage
 
-        by_keyword = [contains_keyword(t, keywords) for t in texts]
+        db_terms = kw_store.terms_for(kind)
+        extra_terms = [kw_store.Term(t) for t in extra]
+        if db_terms is None:
+            positive, negative = [kw_store.Term(t) for t in fallback] + extra_terms, []
+        else:
+            positive, negative = db_terms[0] + extra_terms, db_terms[1]
+
+        by_keyword = [kw_store.any_match(t, positive) for t in texts]
+        blocked = [kw_store.any_match(t, negative) for t in texts] if negative else [False] * len(texts)
         picked = triage(texts, kind=kind) if texts else set()
         by_ai = [i in picked for i in range(len(texts))] if picked is not None else [False] * len(texts)
-        selected = [k or a for k, a in zip(by_keyword, by_ai)]
+        selected = [(k or a) and not b for k, a, b in zip(by_keyword, by_ai, blocked)]
         log.info(
             "candidates_selected",
             source=self.source_name,
@@ -239,8 +254,10 @@ class BaseScraper(abc.ABC):
             keyword=sum(by_keyword),
             ai=sum(by_ai),
             ai_only=sum(a and not k for k, a in zip(by_keyword, by_ai)),
+            negative=sum(blocked),
             selected=sum(selected),
             ai_available=picked is not None,
+            keywords_from="db" if db_terms is not None else "code",
         )
         return selected
 

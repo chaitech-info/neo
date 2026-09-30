@@ -56,14 +56,6 @@ class LeadRepository:
         record.status = lead.status.value
         self.session.commit()
 
-    def mark_sent_to_crm(self, dedupe_key: str, crm_opportunity_id: str) -> None:
-        record = self.session.get(LeadRecord, dedupe_key)
-        if record is None:
-            return
-        record.status = "sent_to_crm"
-        record.crm_opportunity_id = crm_opportunity_id
-        self.session.commit()
-
     def get(self, dedupe_key: str) -> LeadRecord | None:
         return self.session.get(LeadRecord, dedupe_key)
 

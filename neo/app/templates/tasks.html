@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Tapşırıqlar — Neo{% endblock %}
+{% block content %}
+  {% set can_edit = has_role(request.state.user, 'sales') %}
+  {% set now = utcnow() %}
+  {% set back = '/tasks?who=' ~ who ~ '&status=' ~ status %}
+
+  {% macro task_row(t, opp, org, assignee) %}
+    {% set late = t.due_at and t.due_at < now and t.status in ('open', 'in_progress') %}
+    <div class="task">
+      <div class="what {{ 'task-done' if t.status in ('done', 'cancelled') else '' }}">
+        <b class="{{ 'prio-high' if t.priority == 'high' else '' }}">{{ t.title }}</b>
+        <a href="/opportunities/{{ opp.id }}">#{{ opp.id }} {{ (org.name if org else opp.title)[:70] }}</a>
+      </div>
+      <div class="when {{ 'overdue' if late else '' }}">{{ t.due_at|baku_time if t.due_at else 'Tarixsiz' }}</div>
+      <div class="who">{{ assignee.full_name if assignee else 'Məsul yoxdur' }}</div>
+      <div>
+        {% if can_edit and t.status in ('open', 'in_progress') %}
+        <form method="post" action="/tasks/{{ t.id }}/status">
+          {{ csrf_field(request) }}<input type="hidden" name="status" value="done"><input type="hidden" name="back" value="{{ back }}">
+          <button class="btn btn-sm btn-approve" type="submit">Bitdi</button>
+        </form>
+        {% elif t.status == 'done' %}<span class="badge badge-sent">Bitib</span>
+        {% else %}<span class="badge">{{ task_status_names[t.status] }}</span>{% endif %}
+      </div>
+    </div>
+  {% endmacro %}
+
+  <div class="page-head">
+    <div>
+      <h1>{{ 'Tapşırıqlarım' if who == 'me' else 'Bütün tapşırıqlar' }}</h1>
+      <p>Hər fürsət yarananda ilk tapşırıq avtomatik açılır. Bitəni qeyd et ki, növbəti addım görünsün.</p>
+    </div>
+    <div class="actions">
+      <div class="seg" role="group" aria-label="Kimin">
+        <a class="{{ 'on' if who == 'me' else '' }}" href="/tasks?who=me&status={{ status }}">Mənimkilər</a>
+        <a class="{{ 'on' if who != 'me' else '' }}" href="/tasks?who=all&status={{ status }}">Hamısı</a>
+      </div>
+      <div class="seg" role="group" aria-label="Status">
+        <a class="{{ 'on' if status == 'open' else '' }}" href="/tasks?who={{ who }}&status=open">Açıq</a>
+        <a class="{{ 'on' if status == 'done' else '' }}" href="/tasks?who={{ who }}&status=done">Bitmiş</a>
+      </div>
+    </div>
+  </div>
+
+  {% if not rows %}
+    <div class="empty"><b>{{ 'Açıq tapşırıq yoxdur' if status == 'open' else 'Bitmiş tapşırıq yoxdur' }}</b>{% if status == 'open' %}Yeni tapşırıqlar Validasiyada fürsət yaradanda və ya fürsət səhifəsindən əlavə olunur.{% endif %}</div>
+  {% elif status == 'open' %}
+    {% set groups = [
+      ('late', 'Vaxtı keçib', rows|selectattr('0.due_at')|selectattr('0.due_at', 'lt', now)|list),
+      ('today', 'Bu gün', rows|selectattr('0.due_at')|selectattr('0.due_at', 'ge', now)|selectattr('0.due_at', 'lt', today_end)|list),
+      ('later', 'Sonra', rows|selectattr('0.due_at')|selectattr('0.due_at', 'ge', today_end)|list),
+      ('none', 'Tarixsiz', rows|rejectattr('0.due_at')|list),
+    ] %}
+    {% for key, title, items in groups if items %}
+    <section class="task-group {{ key }}">
+      <h2>{{ title }}<span>{{ items|length }}</span></h2>
+      <div class="task-list {{ 'no-who' if who == 'me' else '' }}">
+        {% for t, opp, org, assignee in items %}{{ task_row(t, opp, org, assignee) }}{% endfor %}
+      </div>
+    </section>
+    {% endfor %}
+  {% else %}
+    <div class="task-list {{ 'no-who' if who == 'me' else '' }}">
+      {% for t, opp, org, assignee in rows %}{{ task_row(t, opp, org, assignee) }}{% endfor %}
+    </div>
+  {% endif %}
+{% endblock %}
