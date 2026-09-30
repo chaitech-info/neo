@@ -23,7 +23,7 @@ from app.auth.routes import router as auth_router
 from app.auth.security import REQUIRE, ROLE_NAMES, CsrfFailed, LoginRequired, PermissionDenied, verify_csrf
 from app.db.models import User
 from app.ai_filter import SCORE_THRESHOLD
-from app.db.engine import engine
+from app.db.engine import SERVERLESS, engine
 from app.db.backfill import backfill
 from app.db.migrate import upgrade_to_head
 from app.db.repository import LeadRepository
@@ -203,6 +203,10 @@ def on_startup() -> None:
     # Baza Alembic miqrasiyaları ilə ən son sxemə gətirilir (köhnə baza da
     # itkisiz yenilənir) — bax app/db/migrate.py. Sonra köhnə lead-lər yeni
     # sahələrlə (son tarix, tender) doldurulur — idempotent, bax app/db/backfill.py.
+    # Vercel-də hər soyuq başlanğıcda miqrasiya etmirik (yavaş, paralel instansiyalar
+    # üst-üstə düşər) — orada baza bir dəfə `python -m scripts.init_db` ilə hazırlanır.
+    if SERVERLESS:
+        return
     upgrade_to_head(engine)
     session = SessionLocal()
     try:
@@ -309,6 +313,23 @@ def dashboard(request: Request, user: User = Depends(REQUIRE["viewer"])):
     )
 
 
+def _enqueue(keys: list[str]) -> str | None:
+    """Vercel-də scrape funksiyanın içində işləyə bilməz (cavabdan sonra fon işi
+    öldürülür, uzun mənbələr vaxt limitini keçir) — tapşırıq Redis növbəsinə
+    qoyulur, Celery worker (ayrıca serverdə) götürür. Xəta mətni və ya None."""
+    try:
+        from app.scheduler import scrape_source
+
+        for key in keys:
+            scrape_source.apply_async(args=[key], retry=False)
+    except Exception:
+        log.exception("enqueue_failed", sources=",".join(keys))
+        return ("Növbəyə qoyulmadı: bu serverdən worker-in Redis-inə çatmaq olmur "
+                "(Vercel-də REDIS_URL hosted Redis-ə, məs. Upstash, işarə etməlidir). "
+                "Avtomatik cədvəl worker-də işləməyə davam edir.")
+    return None
+
+
 @app.post("/scrape/{source_key}", dependencies=[Depends(verify_csrf)])
 def scrape_now(source_key: str, user: User = Depends(REQUIRE["manager"])):
     """'Scrape indi' düyməsi — validation göstərilir: naməlum mənbə istəyi rədd edilir."""
@@ -318,6 +339,11 @@ def scrape_now(source_key: str, user: User = Depends(REQUIRE["manager"])):
         )
 
     label = SOURCES[source_key][0]
+    if SERVERLESS:
+        err = _enqueue([source_key])
+        if err:
+            return RedirectResponse(url=f"/?err={quote(err)}", status_code=303)
+        return RedirectResponse(url=f"/?msg={quote(f'{label} növbəyə qoyuldu — worker bir neçə dəqiqəyə yoxlayacaq')}", status_code=303)
     if not _claim([source_key]):
         return RedirectResponse(url=f"/?err={label} artıq işləyir — Loglar səhifəsində izlə", status_code=303)
 
@@ -337,6 +363,11 @@ def scrape_now(source_key: str, user: User = Depends(REQUIRE["manager"])):
 def scrape_all(user: User = Depends(REQUIRE["manager"])):
     """Bütün mənbələri paralel, fonda işə salır — cavab dərhal qayıdır, gedişat
     dashboard-da və /logs-da canlı görünür."""
+    if SERVERLESS:
+        err = _enqueue(list(SOURCES))
+        if err:
+            return RedirectResponse(url=f"/?err={quote(err)}", status_code=303)
+        return RedirectResponse(url=f"/?msg={quote(f'{len(SOURCES)} mənbə növbəyə qoyuldu — worker yoxlayacaq')}", status_code=303)
     started = _claim(list(SOURCES))
     if not started:
         return RedirectResponse(url="/?err=Bütün mənbələr artıq işləyir — Loglar səhifəsində izlə", status_code=303)

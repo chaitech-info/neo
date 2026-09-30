@@ -49,6 +49,9 @@ def session_secret() -> str:
     secret = os.environ.get("SESSION_SECRET")
     if secret:
         return secret
+    if os.environ.get("VERCEL"):
+        # Vercel-də fayla yazmaq olmur və hər instansiya fərqli açar yaradardı.
+        raise RuntimeError("Vercel-də SESSION_SECRET təyin edilməyib (Project Settings → Environment Variables)")
     if SECRET_FILE.exists():
         return SECRET_FILE.read_text().strip()
     secret = secrets.token_urlsafe(48)
