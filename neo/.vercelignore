@@ -8,3 +8,5 @@ neo_leads.db
 __pycache__/
 tests/
 docs/
+.env.local
+.env.*.local

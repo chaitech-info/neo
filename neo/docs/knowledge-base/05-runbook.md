@@ -68,6 +68,32 @@ redis-cli ping                   # PONG
 - **Kompüter yenidən başlayanda:** Redis özü qalxır; worker-i yenidən `./scripts/run_worker.sh` ilə başlat (və ya launchd agenti qur — bax 04-decisions.md → "CRM PR 4").
 - **Production:** `DATABASE_URL` Postgres-ə işarə etməlidir (SQLite bir neçə yazan prosesə görə deyil).
 
+## Production: Vercel (panel) + Modal (scraping) + Neon (baza)
+
+Panel Vercel-də (serverless), baza Neon Postgres-də, scraping iki yerdə:
+- **Modal** (`modal_app.py`) — 8 mənbə 24/7 (marja, 1news, boss, emlak, bp_edp, worldbank, corporate, linkedin).
+- **Mac worker** (Celery + lokal Redis, `NEO_SCRAPE_ROLE=local`) — Modal-ın ABŞ/AB IP-lərini bloklayan 5 mənbə: etender, fed, fed_tenders, oxu, report (`app/scheduler.py::LOCAL_ONLY`; 2026-09-30: 403/timeout). Mac sönülüdürsə bunlar işləmir; qoşulanda `./scripts/run_worker.sh`.
+- Apify proxy-si (AZ residential) FREE planda xaricdən işləmir (403) — pullu plan olsa LOCAL_ONLY mənbələri Modal-a proxy ilə köçürmək olar.
+
+- **Sxem (bir dəfə və hər yeni miqrasiyadan sonra, lokal kompüterdən):** Alembic üçün *birbaşa* host (`-pooler` olmadan):
+  `DATABASE_URL="<neon URL, -pooler silinmiş>" python -m scripts.init_db`
+  Vercel-də startup miqrasiya işlətmir (`SERVERLESS` → `on_startup` erkən qayıdır).
+- **Lokal `.env`:** `DATABASE_URL="<neon pooled URL>"` (dırnaqda — `&` shell-i pozur), `SESSION_SECRET`, `TRIGGER_TOKEN`, `NEO_SCRAPE_ROLE=local`, `MODAL_PROFILE=neo`. Worker üçün `pip install -r requirements-worker.txt` (modal paketi). `NEO_SCRAPE_ROLE=local` olmadan worker bütün mənbələri işlədər və Modal ilə dublikat scrape olar.
+- **Versiya fərqi:** Vercel və Modal Python 3.12 + ən son paketlər (SQLAlchemy 2.1, Starlette 1.x), lokal venv 3.9-dur. Deploydan əvvəl testləri 3.12-də də işlət: `uv venv -p 3.12 /tmp/v312 && uv pip install -p /tmp/v312/bin/python -r requirements.txt pytest && /tmp/v312/bin/python -m pytest -q`.
+
+### Vercel (panel)
+- Layihə `neo` (emil0510s-projects), URL https://neo-omega-five.vercel.app. Git-ə bağlı deyil — deploy CLI ilə, `neo/neo` qovluğundan: `vercel deploy --prod` (`.vercelignore` `.env`, `*.db` fayllarını yükləmir). Giriş nöqtəsi `api/index.py`, marşrutlar `vercel.json`.
+- Env: `DATABASE_URL` (Neon pooled), `SESSION_SECRET` (lokal `.env`-dəki ilə eyni), `MODAL_TRIGGER_URL`, `TRIGGER_TOKEN` (lokal `.env`-dəki ilə eyni).
+- İlk admin: `/setup`. Loglar səhifəsi Vercel-də boşdur — scrape logları Modal dashboard-dadır.
+
+### Modal (scraping)
+- App `neo-scraper`, Modal profili `neo` (əsas profil deyil — hər əmrdə `MODAL_PROFILE=neo`). Deploy: `MODAL_PROFILE=neo modal deploy modal_app.py` (modal ≥1.6, Python 3.12 venv).
+- `tick` — 10 dəqiqədən bir cron; `app/scheduler.py::beat_schedule`-a görə vaxtı çatan mənbələri `scrape_source.spawn` ilə başladır (cədvəl bir yerdədir, Celery ilə ortaq). Mənbə başına kilid `modal.Dict` `neo-scrape-locks`-dadır.
+- `trigger` — web endpoint (`https://emil-abdurahmanli-project--neo-scraper-trigger.modal.run`); panelin "Scrape indi"/"Hamısını scrape et" düymələri bura POST edir (`app/triggers.py`), Bearer `TRIGGER_TOKEN` olmadan 401. LOCAL_ONLY mənbələri `modal.Queue` `neo-local-requests`-ə qoyur — Mac worker-in `local-bridge` thread-i oradan götürür (Mac sönülüdürsə sorğu növbədə gözləyir).
+- Scraper xətası (403 və s.) indi `scrape_runs.status=failed` + `error` kimi yazılır (əvvəl "ok, 0 elan" görünürdü).
+- Secret `neo-secrets`: `DATABASE_URL`, `OPENAI_API_KEY`, `APIFY_TOKEN`, `TRIGGER_TOKEN` (+ istəyə görə `AI_MODEL`). Açar dəyişəndə: `.env`-i yenilə, secret-i `modal secret create neo-secrets --from-json ... --force` ilə yenidən yarat.
+- Loglar: `MODAL_PROFILE=neo modal app logs neo-scraper` və ya Modal dashboard.
+
 ## Tez-tez rast gəlinən problemlər
 
 | Simptom | Səbəb | Həll |

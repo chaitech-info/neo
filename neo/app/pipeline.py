@@ -27,6 +27,7 @@ class PipelineResult:
     tender_duplicates: int = 0  # başqa mənbədən artıq tapılmış tender — `duplicate`
     pending: int = 0          # AI: validasiyaya
     rejected: int = 0         # AI: rədd
+    error: str | None = None  # scraper xətası (məs. sayt 403 qaytardı) — run "failed" sayılır
 
     def summary(self) -> str:
         """Məs. "3 yeni lead — 1 validasiyaya, 2 AI rədd etdi" (+ dublikatlar)."""
@@ -71,7 +72,11 @@ def run_pipeline(
         session.commit()
         raise
 
-    run.status, run.finished_at = "ok", datetime.utcnow()
+    # Scraper xətanı udur (bir mənbə digərlərini dayandırmasın), amma heç nə gətirməyibsə
+    # run uğursuzdur — yoxsa bloklanmış mənbə dashboard-da "ok, 0 elan" kimi görünür.
+    failed = bool(result.error) and not result.scraped
+    run.status, run.finished_at = ("failed" if failed else "ok"), datetime.utcnow()
+    run.error = result.error if failed else None
     run.items_seen, run.leads_new, run.leads_pending = result.scraped, result.fresh, result.pending
     run.leads_duplicate = result.url_duplicates + result.tender_duplicates
     session.commit()
@@ -87,6 +92,7 @@ def _run(scraper_cls: type[BaseScraper], session: Session) -> PipelineResult:
     log.info("pipeline_started", source=scraper_cls.source_name)
     scraper = scraper_cls()
     raw_leads = scraper.run()
+    result.error = getattr(scraper, "error", None)
     for lead in raw_leads:
         lead.deadline_at = lead.deadline_at or extract_deadline(lead.raw_text)
     fresh_leads = normalizer.process(raw_leads)

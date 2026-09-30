@@ -47,6 +47,13 @@ class FakeRedis:
 
 
 @pytest.fixture(autouse=True)
+def no_deploy_env(monkeypatch):
+    """Lokal .env production dəyişənləri (Mac worker rolu, Modal kilidi, trigger) testlərə sızmasın."""
+    for name in ("NEO_SCRAPE_ROLE", "NEO_LOCK_BACKEND", "MODAL_TRIGGER_URL", "TRIGGER_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def fake_redis(monkeypatch):
     fake = FakeRedis()
     monkeypatch.setattr("app.locks._redis", lambda: fake)

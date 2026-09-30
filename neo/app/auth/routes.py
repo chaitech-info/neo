@@ -19,7 +19,7 @@ router = APIRouter()
 
 def _render(request: Request, name: str, context: dict, status_code: int = 200):
     return request.app.state.templates.TemplateResponse(
-        name, {"request": request, **context}, status_code=status_code
+        request, name, {"request": request, **context}, status_code=status_code
     )
 
 

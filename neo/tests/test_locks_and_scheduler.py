@@ -42,3 +42,159 @@ def test_manual_scrape_skips_when_schedule_is_running(monkeypatch):
         result = web._run_source("report")
     assert result.fresh == 0
     assert "atlandı" in web._last_run["report"]
+
+
+
+def test_vercel_scrape_button_posts_to_modal(monkeypatch):
+    sent = []
+
+    class _Resp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"queued": 1}
+
+    monkeypatch.setattr("app.triggers.httpx.post",
+                        lambda url, json, headers, timeout: sent.append((url, json, headers)) or _Resp())
+    monkeypatch.setenv("MODAL_TRIGGER_URL", "https://neo--trigger.modal.run")
+    monkeypatch.setenv("TRIGGER_TOKEN", "t0k")
+    monkeypatch.setattr(web, "SERVERLESS", True)
+
+    from fastapi.testclient import TestClient
+    r = TestClient(web.app).post("/scrape/report", follow_redirects=False)
+    assert "err=" not in r.headers["location"]
+    assert sent == [("https://neo--trigger.modal.run", {"sources": ["report"], "trigger": "manual"},
+                     {"Authorization": "Bearer t0k"})]
+
+
+def test_vercel_scrape_without_modal_config_shows_error(monkeypatch):
+    monkeypatch.delenv("MODAL_TRIGGER_URL", raising=False)
+    monkeypatch.setattr(web, "SERVERLESS", True)
+    from fastapi.testclient import TestClient
+    r = TestClient(web.app).post("/scrape-all", follow_redirects=False)
+    assert "err=" in r.headers["location"]
+
+
+def test_modal_trigger_checks_token_and_sources(monkeypatch):
+    from app import triggers
+
+    monkeypatch.setenv("TRIGGER_TOKEN", "t0k")
+    spawned = []
+    known = set(scheduler.SOURCE_TASKS)
+    body = {"sources": ["report", "report", "../etc", "oxu"], "trigger": "scrape_all"}
+
+    assert triggers.handle(body, "Bearer wrong", known, lambda *a: spawned.append(a))[0] == 401
+    assert triggers.handle(body, None, known, lambda *a: spawned.append(a))[0] == 401
+    assert triggers.handle({"sources": ["oxu"], "trigger": "schedule"}, "Bearer t0k", known,
+                           lambda *a: spawned.append(a))[0] == 400
+    assert spawned == []
+
+    assert triggers.handle(body, "Bearer t0k", known, lambda *a: spawned.append(a)) == (200, {"queued": 2})
+    assert spawned == [("report", "scrape_all"), ("oxu", "scrape_all")]
+
+
+def test_modal_trigger_refuses_everything_without_token(monkeypatch):
+    from app import triggers
+
+    monkeypatch.delenv("TRIGGER_TOKEN", raising=False)
+    assert triggers.handle({"sources": ["oxu"], "trigger": "manual"}, "Bearer ", {"oxu"}, print)[0] == 401
+
+
+def test_due_sources_follow_beat_schedule():
+    from datetime import datetime
+
+    # 10 dəqiqəlik pəncərə: (06:21, 06:30] — emlak 06:30, report */2 saat :25 (6 cüt)
+    assert set(scheduler.due_sources(datetime(2026, 10, 1, 6, 30), 10)) == {"emlak", "report"}
+    # (07:51, 08:00] — marja/1news hər saat :00
+    assert set(scheduler.due_sources(datetime(2026, 10, 1, 8, 0), 10)) == {"marja", "1news"}
+    # (07:01, 07:10] — heç nə (worldbank/linkedin 07:00 əvvəlki pəncərədədir)
+    assert scheduler.due_sources(datetime(2026, 10, 1, 7, 10), 10) == []
+
+
+def test_modal_lock_refuses_second_holder(monkeypatch):
+    class _Dict(dict):
+        def put(self, key, value, skip_if_exists=False):
+            if skip_if_exists and key in self:
+                return False
+            self[key] = value
+            return True
+
+    fake = _Dict()
+    monkeypatch.setenv("NEO_LOCK_BACKEND", "modal")
+    monkeypatch.setattr(locks, "_modal_dict", lambda: fake)
+    with locks.source_lock("etender") as first:
+        with locks.source_lock("etender") as second:
+            assert first is True and second is False
+    assert "etender" not in fake
+    fake["oxu"] = 0.0                       # ölmüş konteynerdən qalan köhnə kilid
+    with locks.source_lock("oxu") as stale:
+        assert stale is True
+
+
+def test_blocked_sources_run_on_mac_not_modal(monkeypatch):
+    from datetime import datetime
+
+    at_0640 = datetime(2026, 10, 1, 6, 40)  # (06:31, 06:40] — fed (hər saat :40)
+    assert scheduler.due_sources(at_0640, 10) == ["fed"]
+    monkeypatch.setenv("NEO_SCRAPE_ROLE", "modal")
+    assert scheduler.due_sources(at_0640, 10) == []                   # Modal atlayır
+    assert scheduler.scrape_source("etender") is None                 # işə düşmür
+    monkeypatch.setenv("NEO_SCRAPE_ROLE", "local")
+    assert scheduler.runs_here("etender") and not scheduler.runs_here("marja")
+
+    queued = []
+    monkeypatch.setattr(scheduler.scrape_source, "apply_async", lambda args: queued.append(tuple(args)))
+    scheduler._dispatch_local("oxu", "manual")
+    scheduler._dispatch_local("marja", "manual")                       # Modal-ın işidir
+    scheduler._dispatch_local("oxu", "schedule")                       # yalnız paneldən gələn
+    assert queued == [("oxu", "manual")]
+
+
+def test_scraper_error_marks_run_failed(tmp_path):
+    from sqlalchemy import create_engine, select
+    from sqlalchemy.orm import Session
+
+    from app.db.migrate import upgrade_to_head
+    from app.db.models import ScrapeRun
+    from app.pipeline import run_pipeline
+    from app.scrapers.base import BaseScraper
+
+    class Blocked(BaseScraper):
+        source_name = "blocked"
+
+        def fetch_leads(self):
+            raise RuntimeError("403 Forbidden")
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'r.db'}")
+    upgrade_to_head(engine)
+    with Session(engine) as session:
+        result = run_pipeline(Blocked, session, source_key="oxu", trigger="schedule")
+        run = session.scalars(select(ScrapeRun)).one()
+        assert result.scraped == 0
+        assert run.status == "failed" and "403 Forbidden" in run.error
+    engine.dispose()
+
+
+def test_local_bridge_survives_idle_timeouts(monkeypatch):
+    import queue as stdqueue
+
+    from app import triggers
+
+    items = [stdqueue.Empty(), stdqueue.Empty(), ("oxu", "manual"), SystemExit()]
+
+    class _Queue:
+        def get(self, timeout):
+            item = items.pop(0)
+            if isinstance(item, BaseException):
+                raise item
+            return item
+
+    monkeypatch.setattr(triggers, "local_queue", lambda: _Queue())
+    monkeypatch.setattr(triggers.time, "sleep", lambda s: (_ for _ in ()).throw(AssertionError("xəta yolu")))
+    got = []
+    try:
+        triggers._bridge_loop(lambda k, t: got.append((k, t)))
+    except SystemExit:
+        pass
+    assert got == [("oxu", "manual")]

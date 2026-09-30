@@ -9,6 +9,11 @@ from sqlalchemy.pool import NullPool
 # .env-də DATABASE_URL verilməyibsə, yerli admin panel testi üçün SQLite
 # faylına düşür — heç bir əlavə qurulum tələb etmir.
 DATABASE_URL = os.environ.get("DATABASE_URL") or "sqlite:///./neo_leads.db"
+# Sürücü açıq yazılır: SQLAlchemy 2.1 "postgresql://" üçün defolt olaraq psycopg (v3)
+# axtarır, biz isə psycopg2-binary quraşdırırıq (Vercel-də 2.1 düşür → ModuleNotFoundError).
+for _prefix in ("postgres://", "postgresql://"):
+    if DATABASE_URL.startswith(_prefix):
+        DATABASE_URL = "postgresql+psycopg2://" + DATABASE_URL[len(_prefix):]
 
 # timeout: "Hamısını scrape et" 13 mənbəni paralel işlədir — SQLite yazıları
 # bir-birini gözləsin ("database is locked" xətası verməsin).

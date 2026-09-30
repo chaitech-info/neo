@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import os
+from datetime import datetime, timedelta
+
 import structlog
 from celery.schedules import crontab
+from celery.signals import worker_ready
 from sqlalchemy.orm import sessionmaker
 
+from app import triggers
 from app.celery_app import celery_app
 from app.locks import source_lock
 from app.db.engine import engine
@@ -49,19 +54,38 @@ SOURCE_TASKS = {
     "linkedin": LinkedInScraper,
 }
 
+# Modal-ın (ABŞ/AB datacenter) IP-lərini bloklayan mənbələr — 403 və ya timeout
+# (2026-09-30 yoxlanıb; report ABŞ IP-dən 403, AB-dən bəzən 200 — qeyri-sabit). Bunlar Azərbaycan IP-si olan maşında (lokal Mac worker) işləyir.
+LOCAL_ONLY = frozenset({"etender", "fed", "fed_tenders", "oxu", "report"})
+
+
+def runs_here(source_key: str) -> bool:
+    """NEO_SCRAPE_ROLE: "modal" — LOCAL_ONLY-dən başqa hamısı; "local" — yalnız
+    LOCAL_ONLY; boş (lokal inkişaf) — hamısı."""
+    role = os.environ.get("NEO_SCRAPE_ROLE", "")
+    if role == "modal":
+        return source_key not in LOCAL_ONLY
+    if role == "local":
+        return source_key in LOCAL_ONLY
+    return True
+
 
 @celery_app.task(name="scrape_source")
-def scrape_source(source_key: str) -> int | None:
-    """Planlı scrape. Mənbə artıq işləyirsə (paneldən və ya əvvəlki planlı run hələ
-    bitməyib) — atlanır, None qaytarır."""
+def scrape_source(source_key: str, trigger: str = "schedule") -> int | None:
+    """Planlı scrape (və ya Vercel panelindən gələn sorğu — trigger manual/scrape_all).
+    Mənbə artıq işləyirsə — atlanır, None qaytarır."""
     scraper_cls = SOURCE_TASKS[source_key]
+    if not runs_here(source_key):
+        # Mac worker-in beat-i bütün cədvəli göndərir — Modal-ın mənbələrini burada atlayırıq.
+        log.debug("scrape_skipped_other_host", source=source_key, role=os.environ.get("NEO_SCRAPE_ROLE"))
+        return None
     with source_lock(source_key) as acquired:
         if not acquired:
             log.info("scheduled_scrape_skipped", source=source_key, reason="artıq işləyir")
             return None
         session = SessionLocal()
         try:
-            return run_pipeline(scraper_cls, session, source_key=source_key, trigger="schedule").pending
+            return run_pipeline(scraper_cls, session, source_key=source_key, trigger=trigger).pending
         finally:
             session.close()
 
@@ -134,3 +158,33 @@ celery_app.conf.beat_schedule = {
         "args": ("boss",),
     },
 }
+
+
+def due_sources(now: datetime, window_min: int) -> list[str]:
+    """Modal cron-u (modal_app.py::tick) üçün: `now`-dan əvvəlki `window_min`
+    dəqiqədə (now daxil) cədvəli düşən mənbələr. `now` — Bakı vaxtı. Eyni
+    beat_schedule həm Celery-də, həm Modal-da işləyir."""
+    minutes = [now - timedelta(minutes=i) for i in range(window_min)]
+    due = []
+    for entry in celery_app.conf.beat_schedule.values():
+        cron, key = entry["schedule"], entry["args"][0]
+        if key in due or not runs_here(key):
+            continue
+        if any(t.minute in cron.minute and t.hour in cron.hour
+               and (t.isoweekday() % 7) in cron.day_of_week for t in minutes):
+            due.append(key)
+    return due
+
+
+def _dispatch_local(source_key: str, trigger: str) -> None:
+    if source_key not in LOCAL_ONLY or trigger not in ("manual", "scrape_all"):
+        log.warning("local_request_ignored", source=source_key, trigger=trigger)
+        return
+    scrape_source.apply_async(args=[source_key, trigger])
+
+
+@worker_ready.connect
+def _start_local_bridge(**_) -> None:
+    # Mac worker: Vercel panelindən LOCAL_ONLY mənbələr üçün "Scrape indi" (Modal Queue).
+    if os.environ.get("NEO_SCRAPE_ROLE") == "local":
+        triggers.start_local_bridge(_dispatch_local)

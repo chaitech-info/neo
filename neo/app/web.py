@@ -23,6 +23,7 @@ from app.auth.routes import router as auth_router
 from app.auth.security import REQUIRE, ROLE_NAMES, CsrfFailed, LoginRequired, PermissionDenied, verify_csrf
 from app.db.models import User
 from app.ai_filter import SCORE_THRESHOLD
+from app import triggers
 from app.db.engine import SERVERLESS, engine
 from app.db.backfill import backfill
 from app.db.migrate import upgrade_to_head
@@ -178,7 +179,7 @@ def _login_required(request: Request, exc: LoginRequired):
 @app.exception_handler(PermissionDenied)
 def _permission_denied(request: Request, exc: PermissionDenied):
     user = request.state.user
-    return templates.TemplateResponse("forbidden.html", {
+    return templates.TemplateResponse(request, "forbidden.html", {
         "request": request, "required_name": ROLE_NAMES[exc.required],
         "current_name": ROLE_NAMES[user.role_code] if user else "—",
     }, status_code=403)
@@ -300,7 +301,7 @@ def dashboard(request: Request, user: User = Depends(REQUIRE["viewer"])):
         for k, (label, _) in SOURCES.items()
     ]
     return templates.TemplateResponse(
-        "dashboard.html",
+        request, "dashboard.html",
         {
             "request": request,
             "active": "dashboard",
@@ -313,20 +314,16 @@ def dashboard(request: Request, user: User = Depends(REQUIRE["viewer"])):
     )
 
 
-def _enqueue(keys: list[str]) -> str | None:
+def _enqueue(keys: list[str], trigger: str) -> str | None:
     """Vercel-də scrape funksiyanın içində işləyə bilməz (cavabdan sonra fon işi
-    öldürülür, uzun mənbələr vaxt limitini keçir) — tapşırıq Redis növbəsinə
-    qoyulur, Celery worker (ayrıca serverdə) götürür. Xəta mətni və ya None."""
+    öldürülür, uzun mənbələr vaxt limitini keçir) — sorğu Modal-a gedir, scrape
+    orada fonda işləyir (app/triggers.py, modal_app.py). Xəta mətni və ya None."""
     try:
-        from app.scheduler import scrape_source
-
-        for key in keys:
-            scrape_source.apply_async(args=[key], retry=False)
+        triggers.request(keys, trigger)
     except Exception:
         log.exception("enqueue_failed", sources=",".join(keys))
-        return ("Növbəyə qoyulmadı: bu serverdən worker-in Redis-inə çatmaq olmur "
-                "(Vercel-də REDIS_URL hosted Redis-ə, məs. Upstash, işarə etməlidir). "
-                "Avtomatik cədvəl worker-də işləməyə davam edir.")
+        return ("Növbəyə qoyulmadı: panel Modal-a çata bilmir — Vercel-də MODAL_TRIGGER_URL və "
+                "TRIGGER_TOKEN yoxlanmalıdır. Planlı scraping Modal-da işləməyə davam edir.")
     return None
 
 
@@ -340,10 +337,10 @@ def scrape_now(source_key: str, user: User = Depends(REQUIRE["manager"])):
 
     label = SOURCES[source_key][0]
     if SERVERLESS:
-        err = _enqueue([source_key])
+        err = _enqueue([source_key], "manual")
         if err:
             return RedirectResponse(url=f"/?err={quote(err)}", status_code=303)
-        return RedirectResponse(url=f"/?msg={quote(f'{label} növbəyə qoyuldu — worker bir neçə dəqiqəyə yoxlayacaq')}", status_code=303)
+        return RedirectResponse(url=f"/?msg={quote(f'{label} işə salındı — nəticə bir neçə dəqiqəyə dashboard-da görünəcək')}", status_code=303)
     if not _claim([source_key]):
         return RedirectResponse(url=f"/?err={label} artıq işləyir — Loglar səhifəsində izlə", status_code=303)
 
@@ -364,10 +361,10 @@ def scrape_all(user: User = Depends(REQUIRE["manager"])):
     """Bütün mənbələri paralel, fonda işə salır — cavab dərhal qayıdır, gedişat
     dashboard-da və /logs-da canlı görünür."""
     if SERVERLESS:
-        err = _enqueue(list(SOURCES))
+        err = _enqueue(list(SOURCES), "scrape_all")
         if err:
             return RedirectResponse(url=f"/?err={quote(err)}", status_code=303)
-        return RedirectResponse(url=f"/?msg={quote(f'{len(SOURCES)} mənbə növbəyə qoyuldu — worker yoxlayacaq')}", status_code=303)
+        return RedirectResponse(url=f"/?msg={quote(f'{len(SOURCES)} mənbə işə salındı — nəticələr bir neçə dəqiqəyə dashboard-da görünəcək')}", status_code=303)
     started = _claim(list(SOURCES))
     if not started:
         return RedirectResponse(url="/?err=Bütün mənbələr artıq işləyir — Loglar səhifəsində izlə", status_code=303)
@@ -385,7 +382,7 @@ def scrape_all(user: User = Depends(REQUIRE["manager"])):
 @app.get("/logs")
 def logs_page(request: Request, user: User = Depends(REQUIRE["viewer"])):
     return templates.TemplateResponse(
-        "logs.html",
+        request, "logs.html",
         {"request": request, "active": "logs", "sources": {k: v[0] for k, v in SOURCES.items()}},
     )
 
@@ -410,7 +407,7 @@ def leads_pending(request: Request, user: User = Depends(REQUIRE["viewer"])):
         session.close()
 
     return templates.TemplateResponse(
-        "leads.html",
+        request, "leads.html",
         {
             "request": request,
             "active": "validation",
@@ -432,7 +429,7 @@ def leads_ai_rejected(request: Request, user: User = Depends(REQUIRE["viewer"]))
         session.close()
 
     return templates.TemplateResponse(
-        "leads.html",
+        request, "leads.html",
         {
             "request": request,
             "active": "ai_rejected",
@@ -458,7 +455,7 @@ def leads_all(request: Request, user: User = Depends(REQUIRE["viewer"])):
         session.close()
 
     return templates.TemplateResponse(
-        "leads.html",
+        request, "leads.html",
         {
             "request": request,
             "active": "all",

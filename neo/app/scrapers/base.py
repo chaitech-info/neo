@@ -184,6 +184,7 @@ class BaseScraper(abc.ABC):
     article_body_selector: str | None = None
 
     def __init__(self, client: httpx.Client | None = None) -> None:
+        self.error: str | None = None  # run() xətanı udanda — scrape_runs-a "failed" yazılsın
         self._client = client or httpx.Client(
             headers={"User-Agent": DEFAULT_USER_AGENT},
             timeout=20.0,
@@ -292,8 +293,9 @@ class BaseScraper(abc.ABC):
             leads = self.fetch_leads()
             log.info("scraper_completed", source=self.source_name, count=len(leads))
             return leads
-        except Exception:
+        except Exception as exc:
             log.exception("scraper_failed", source=self.source_name)
+            self.error = f"{type(exc).__name__}: {exc}"[:500]
             return []
         finally:
             self._client.close()

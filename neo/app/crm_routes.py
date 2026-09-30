@@ -24,7 +24,7 @@ BAKU_OFFSET = timedelta(hours=4)
 
 
 def _render(request: Request, name: str, context: dict):
-    return request.app.state.templates.TemplateResponse(name, {"request": request, **context})
+    return request.app.state.templates.TemplateResponse(request, name, {"request": request, **context})
 
 
 def _go(path: str, *, msg: str | None = None, err: str | None = None) -> RedirectResponse:

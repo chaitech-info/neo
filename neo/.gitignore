@@ -11,3 +11,5 @@ neo_leads.db
 .claude/
 .session_secret
 .celerybeat-schedule*
+.vercel
+.env.local

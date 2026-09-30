@@ -58,7 +58,7 @@ def keywords_page(request: Request, area: str = "", scope: str = "", q: str = ""
         if q.strip():
             query = query.where(Keyword.term.ilike(f"%{q.strip()}%"))
         rows = list(db.scalars(query))
-    return request.app.state.templates.TemplateResponse("keywords.html", {
+    return request.app.state.templates.TemplateResponse(request, "keywords.html", {
         "request": request, "active": "keywords", "areas": areas, "area_by_id": {a.id: a for a in areas},
         "counts": counts, "rows": rows, "area": area, "scope": scope, "q": q,
         "scope_names": SCOPE_NAMES, "match_names": MATCH_NAMES, "languages": KEYWORD_LANGUAGES,
