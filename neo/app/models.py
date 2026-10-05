@@ -66,6 +66,7 @@ class RawLead(BaseModel):
 
     ai_score: float | None = None
     ai_reason: str | None = None
+    tier: str | None = None  # A | B | C (v2), rədd edilənlərdə None
     status: LeadStatus = LeadStatus.new
 
     def dedupe_key(self) -> str:

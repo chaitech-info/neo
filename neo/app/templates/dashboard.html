@@ -72,6 +72,7 @@
   <h2>Lead-lər statusa görə</h2>
   <div class="actions">
     <a class="badge badge-pending" href="/leads/pending_review">Validasiyada: {{ stats.pending_review }}</a>
+    {% for t in ["A", "B", "C"] %}{% if tier_counts[t] %}<a class="badge" href="/leads/pending_review?tier={{ t }}"><span class="tier tier-{{ t }}">{{ t }}</span> {{ tier_counts[t] }}</a>{% endif %}{% endfor %}
     <span class="badge badge-sent">Fürsətə çevrilib: {{ stats.converted }}</span>
     <a class="badge badge-rejected" href="/leads/ai_rejected">Rədd edilib: {{ stats.rejected }}</a>
     <span class="badge">Dublikat: {{ stats.duplicate }}</span>

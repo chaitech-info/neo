@@ -186,6 +186,17 @@
 - **Kod qaydası:** adı "market/mağaza/store" olan təşkilat yemək biznesi sayılmır (model OBA-nı promptdakı açıq qeydə baxmayaraq "food_business" sayırdı).
 - **Reqressiya ölçüsü** (bütün dəyişikliklərdən sonra): v2 P 0.925 / R 0.961 (bütün dəst), test 0.875 / 0.933.
 
+### A/B/C kateqoriyası — panel və meyarlar (2026-10-06)
+- **Status:** Decided, deploy olunub (Neon miqrasiya 0007).
+- **Meyarlar** (`app/ai_scoring.py::compute_score`, paneldə "Kateqoriyalar nə deməkdir?"):
+  - **A — birbaşa tələbat:** catering/yemək/iaşə tenderi, ərzaq alışı, yeməyi açıq yazan tədbir tenderi.
+  - **B — güclü dolayı:** tədbir təşkili tenderi; işçilərinə nahar verən böyük/orta şirkət və ya 3+ vakansiya; adı çəkilən yeni zavod/obyekt; sərgi təqvimi.
+  - **C — zəif/erkən:** ölçüsü bilinməyən və ya kiçik işəgötürən (1-2 vakansiya), xəbərdə yeməyi qeyd olunan tədbir, erkən layihə.
+- **Ölçü:** qızıl kateqoriya ilə razılıq 0.48 → **0.87** (test 28/28). Əvvəl ölçüsü bilinməyən işəgötürənlər B-yə düşürdü — qızıl dəstdə onların 46/54-ü C-dir. `python -m scripts.eval_filter tiers` (çarpaz cədvəl).
+- **Panel:** `leads.tier` sütunu (əvvəl yalnız `ai_reason`-da "[A] " prefiksi idi); Validasiya A → B → C → kateqoriyasız, daxilində skor və yaxın son tarix; tablar (`?tier=A|B|C|none`) saylarla; dashboard-da A/B/C sayları; bütün lead-lər cədvəlində nişan.
+- **İstehsal növbəsi** yeni qaydalarla yenidən skorlandı: A 7 · B 60 · C 77 (əvvəl A 7 · B 136 · C 4).
+- **Mobil düzəliş:** `.main { min-width: 0 }` — grid elementi geniş məzmunla (tab paneli) ekrandan genişlənirdi.
+
 ## Açıq suallar (hələ qərar verilməyib)
 
 ### CRM real endpoint-i

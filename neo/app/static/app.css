@@ -341,3 +341,23 @@ a.metric:hover { background: var(--steel-3); }
   .task .who { display: none; }
   .task .when { grid-column: 1; }
 }
+
+/* A/B/C kommersiya kateqoriyası */
+.tier { display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding: 0 5px; border-radius: 6px;
+  font-weight: 700; font-size: 12.5px; line-height: 1; letter-spacing: .02em; }
+.tier-A { background: var(--herb); color: #fff; }
+.tier-B { background: var(--saffron-wash); color: var(--saffron-ink); }
+.tier-C { background: var(--steel-2); color: var(--ink-2); }
+.stamp .tier { margin-top: 6px; }
+.tier-bar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin: 4px 0 14px; }
+.tier-bar > * { min-width: 0; max-width: 100%; }
+.tier-bar .seg { overflow-x: auto; scrollbar-width: none; }
+.tier-bar .seg a { display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; flex: 0 0 auto; }
+.tier-bar .seg b { font-weight: 600; color: var(--ink-3); }
+.tier-help summary { cursor: pointer; color: var(--ink-3); font-size: 14px; }
+.tier-help dl { margin: 8px 0 0; display: grid; grid-template-columns: max-content 1fr; gap: 6px 12px; font-size: 14px; }
+.tier-help dt { font-weight: 600; display: flex; gap: 6px; align-items: center; }
+.tier-help dd { margin: 0; color: var(--ink-2); }
+
+/* .shell grid-dir: məzmun (geniş tab paneli və s.) əsas sütunu ekrandan genişləndirməsin */
+.main { min-width: 0; }

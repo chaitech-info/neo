@@ -315,7 +315,8 @@ def _score_items(scorer: str, model: str, items: list[dict]) -> list[dict]:
         else:
             lead = f.score(lead)
             usage = f.last_usage
-        return {"id": item["id"], "score": lead.ai_score, "reason": lead.ai_reason,
+        return {"id": item["id"], "score": lead.ai_score, "reason": lead.ai_reason, "tier": getattr(lead, "tier", None),
+                "facts": getattr(f, "last_facts", None),
                 "tokens_in": getattr(usage, "prompt_tokens", 0), "tokens_out": getattr(usage, "completion_tokens", 0)}
 
     with ThreadPoolExecutor(4) as pool:   # 8 paralel → yeni hesabda 429 (dəqiqəlik limit)
@@ -429,6 +430,25 @@ def run() -> None:
                   f"pred {pred.get('score')}")
 
 
+def tiers() -> None:
+    """A/B/C razılığı: qızıl kateqoriya vs model (yalnız hər ikisinin relevant saydığı)."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--run", default="score_v2_gpt-4.1-mini_all")
+    parser.add_argument("--split", choices=["all", "dev", "test"], default="all")
+    args = parser.parse_args()
+    gold = {g["id"]: g for g in read_jsonl(GOLD) if g.get("v") == GOLD_VERSION}
+    rows = [r for r in read_jsonl(RESULTS / f"{args.run}.jsonl") if r["id"] in gold and in_split(r["id"], args.split)]
+    both = [(gold[r["id"]]["tier"], r.get("tier") or "none") for r in rows
+            if gold[r["id"]]["relevant"] and (r.get("score") or 0) >= 0.6]
+    labels = ["A", "B", "C", "none"]
+    print(f"{args.run} [{args.split}] — sətir: qızıl, sütun: model ({len(both)} element)")
+    print("      " + "".join(f"{p:>6}" for p in labels))
+    for g in labels[:3]:
+        print(f"{g:>6}" + "".join(f"{sum(1 for a, b in both if a == g and b == p):>6}" for p in labels))
+    agree = sum(1 for a, b in both if a == b)
+    print(f"razılıq: {agree}/{len(both)} = {agree / max(len(both), 1):.2f}")
+
+
 def export() -> None:
     """Satış komandası üçün: model etiketi + səbəb; "relevant" sütununu düzəldib
     human_labels.csv kimi saxlasınlar."""
@@ -464,7 +484,7 @@ def report() -> None:
                   f"{m['f1']:>6} {keep:>6.3f}")
 
 
-COMMANDS = {"collect": collect, "label": label, "run": run, "export": export, "report": report}
+COMMANDS = {"collect": collect, "label": label, "run": run, "export": export, "report": report, "tiers": tiers}
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

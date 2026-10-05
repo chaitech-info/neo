@@ -20,6 +20,8 @@ def facts(signal, **kw):
     (facts("event_tender"), (0.7, "B")),
     (facts("event_tender", food_mentioned=True), (0.85, "A")),
     (facts("employer_meal_signal", workforce="large"), (0.8, "B")),
+    (facts("employer_meal_signal", workforce="medium"), (0.7, "B")),
+    (facts("employer_meal_signal"), (0.65, "C")),                       # ölçü bilinmir
     (facts("employer_meal_signal", workforce="small"), (0.62, "C")),
     (facts("new_facility", workforce="large"), (0.8, "B")),
     (facts("expansion_hiring"), (0.5, "C")),
@@ -39,6 +41,11 @@ def test_event_in_news_is_not_a_tender():
     assert compute_score(facts("event_tender"), "x", is_tender=False) == (0.5, "C")
     assert compute_score(facts("event_tender", food_mentioned=True), "x", is_tender=False) == (0.65, "C")
     assert compute_score(facts("event_tender"), "x", is_tender=True) == (0.7, "B")
+
+
+def test_many_vacancies_lift_unknown_employer_to_b():
+    text = "[SİQNAL]\nboss.az-da nahar qeyd olunan aktiv vakansiyalar (4): fəhlə, operator"
+    assert compute_score(facts("employer_meal_signal"), text) == (0.7, "B")
 
 
 def test_retail_chain_is_not_a_food_business():
@@ -76,7 +83,7 @@ def test_structured_filter_scores_and_tags_tier():
     client = _Client(facts("event_tender", food_mentioned=True, organization="Şabran RİH", reason="Bayram tədbiri, fürşet"))
     lead = StructuredAIFilter(client=client, model="gpt-4.1-mini").score(_lead())
     assert (lead.ai_score, lead.status) == (0.85, LeadStatus.pending_review)
-    assert lead.ai_reason == "[A] Bayram tədbiri, fürşet" and lead.entity_name == "Şabran RİH"
+    assert (lead.ai_reason, lead.tier) == ("Bayram tədbiri, fürşet", "A") and lead.entity_name == "Şabran RİH"
     call = client.calls[0]
     assert call["response_format"]["type"] == "json_schema" and call["temperature"] == 0
 

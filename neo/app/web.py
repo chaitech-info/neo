@@ -259,13 +259,16 @@ def _crons() -> dict[str, object]:
 def dashboard(request: Request, user: User = Depends(REQUIRE["viewer"])):
     from sqlalchemy import func, select
 
-    from app.db.models import Opportunity, ScrapeRun
+    from app.db.models import LeadRecord, Opportunity, ScrapeRun
 
     session = SessionLocal()
     try:
         repo = LeadRepository(session)
         stats = {status: len(repo.list_by_status(status))
                  for status in ["new", "pending_review", "converted", "rejected", "duplicate"]}
+        tier_counts = dict(session.execute(
+            select(LeadRecord.tier, func.count()).where(LeadRecord.status == "pending_review",
+                                                        LeadRecord.tier.is_not(None)).group_by(LeadRecord.tier)).all())
         open_opps = session.scalar(select(func.count()).select_from(Opportunity)
                                    .where(Opportunity.stage.notin_(("won", "lost"))))
         last_auto = session.scalar(select(func.max(ScrapeRun.started_at)).where(ScrapeRun.trigger == "schedule"))
@@ -289,6 +292,7 @@ def dashboard(request: Request, user: User = Depends(REQUIRE["viewer"])):
             "running": set(_running),
             "stats": stats,
             "open_opps": open_opps or 0,
+            "tier_counts": tier_counts,
             "last_auto": _short_time(last_auto),
         },
     )
@@ -377,14 +381,33 @@ def logs_api(after: int = 0, source: str | None = None, level: str | None = None
     })
 
 
+TIER_ORDER = {"A": 0, "B": 1, "C": 2}
+# Kateqoriya meyarları (app/ai_scoring.py::compute_score) — paneldə izah kimi göstərilir.
+TIER_INFO = {
+    "A": ("Birbaşa tələbat", "yemək/catering/iaşə tenderi, ərzaq alışı, yeməyi açıq yazan tədbir tenderi"),
+    "B": ("Güclü dolayı", "tədbir təşkili tenderi, işçilərinə nahar verən orta/böyük şirkət, yeni zavod/obyekt, sərgi"),
+    "C": ("Zəif / erkən", "kiçik işəgötürən, erkən mərhələli layihə, xəbərdə yeməyi qeyd olunan tədbir"),
+}
+
+
+def tier_sort_key(lead) -> tuple:
+    """A → B → C → kateqoriyasız (v1/skorsuz); daxilində yüksək skor və yaxın son tarix əvvəl."""
+    deadline = lead.deadline_at.timestamp() if lead.deadline_at else float("inf")
+    return (TIER_ORDER.get(lead.tier, 3), -(lead.ai_score or 0), deadline)
+
+
 @app.get("/leads/pending_review")
-def leads_pending(request: Request, user: User = Depends(REQUIRE["viewer"])):
+def leads_pending(request: Request, tier: str = "", user: User = Depends(REQUIRE["viewer"])):
     session = SessionLocal()
     try:
         repo = LeadRepository(session)
-        leads = repo.list_by_status("pending_review")
+        all_leads = sorted(repo.list_by_status("pending_review"), key=tier_sort_key)
     finally:
         session.close()
+    tier_counts = {t: sum(1 for lead in all_leads if lead.tier == t) for t in TIER_ORDER}
+    tier_counts["none"] = len(all_leads) - sum(tier_counts.values())
+    tier = tier if tier in tier_counts else ""
+    leads = [lead for lead in all_leads if not tier or (lead.tier or "none") == tier]
 
     return templates.TemplateResponse(
         request, "leads.html",
@@ -392,9 +415,12 @@ def leads_pending(request: Request, user: User = Depends(REQUIRE["viewer"])):
             "request": request,
             "active": "validation",
             "heading": "Validasiya",
-            "subtitle": "AI-nin satış fürsəti saydığı lead-lər. Uyğundursa fürsət yarat — ilk tapşırıq avtomatik açılır; deyilsə rədd et.",
+            "subtitle": "AI-nin satış fürsəti saydığı lead-lər, A → B → C sırası ilə. Uyğundursa fürsət yarat — ilk tapşırıq avtomatik açılır; deyilsə rədd et.",
             "leads": leads,
             "show_actions": True,
+            "tier": tier,
+            "tier_counts": tier_counts,
+            "tier_info": TIER_INFO,
         },
     )
 

@@ -159,3 +159,28 @@ def test_dashboard_shows_health_column():
 
     page = TestClient(web.app).get("/")
     assert page.status_code == 200 and "Vəziyyət" in page.text
+
+
+def test_validation_queue_sorts_and_filters_by_tier():
+    from datetime import datetime
+
+    from fastapi.testclient import TestClient
+    from sqlalchemy.orm import Session
+
+    from app import web
+    from app.db.engine import engine
+
+    with Session(engine) as s:
+        for i, (tier, score) in enumerate([("C", 0.62), (None, 0.9), ("A", 0.82), ("B", 0.7)]):
+            s.add(LeadRecord(dedupe_key=f"tierq{i}".ljust(64, "0"), source="oxu", source_url=f"https://o/t{i}",
+                             title=f"Lead {tier or 'v1'}", raw_text="x", category="other", status="pending_review",
+                             scraped_at=datetime.utcnow(), ai_score=score, tier=tier))
+        s.commit()
+    client = TestClient(web.app)
+    page = client.get("/leads/pending_review").text
+    order = [page.index(f"Lead {t}") for t in ("A", "B", "C", "v1")]
+    assert order == sorted(order)                                  # A → B → C → kateqoriyasız
+    only_b = client.get("/leads/pending_review?tier=B").text
+    assert "Lead B" in only_b and "Lead A" not in only_b and "Lead v1" not in only_b
+    assert "Lead v1" in client.get("/leads/pending_review?tier=none").text
+    assert client.get("/").status_code == 200

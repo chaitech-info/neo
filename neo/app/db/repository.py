@@ -41,6 +41,7 @@ class LeadRepository:
             scraped_at=lead.scraped_at,
             ai_score=lead.ai_score,
             ai_reason=lead.ai_reason,
+            tier=lead.tier,
             status=lead.status.value,
         )
         self.session.add(record)
@@ -54,6 +55,7 @@ class LeadRepository:
         record.ai_score = lead.ai_score
         record.ai_reason = lead.ai_reason
         record.status = lead.status.value
+        record.tier = lead.tier
         if lead.entity_name and not record.entity_name:
             record.entity_name = lead.entity_name  # v2 təşkilat adını çıxarır — dublikat yoxlaması üçün
         if ai_model:

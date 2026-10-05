@@ -62,6 +62,7 @@ BASE = {
 LOW = 0.10
 # Pərakəndə/supermarket şəbəkələri ərzaq SATIR, işçisinə yemək bişirmir — model promptdakı
 # qeydə baxmayaraq OBA-nı "food_business" sayırdı (2026-10-05). Adına görə kodla düzəlir.
+_VACANCY_COUNT = re.compile(r"vakansiyalar?\s*\((\d+)\)|\((\d+)\s+vakansiya")
 _RETAIL_NAME = re.compile(r"market|mağaza|magaza|maqaz|store|супермаркет|магазин", re.IGNORECASE)
 
 SCHEMA = {
@@ -169,7 +170,19 @@ def compute_score(facts: dict, text: str, is_tender: bool = True, listing: bool 
         score, tier = (0.65, "C") if facts.get("food_mentioned") else (0.50, "C")
     elif signal == "event_tender" and facts.get("food_mentioned"):
         score, tier = 0.85, "A"          # tədbir tenderi yeməyi açıq yazır → birbaşa tələbat
-    elif signal in ("employer_meal_signal", "new_facility"):
+    elif signal == "employer_meal_signal":
+        # 2026-10-06 qızıl etiketlərlə razılaşdırılıb: ölçüsü bilinməyən tək-iki vakansiyalı
+        # işəgötürən C-dir (54-dən 46-sı); B — böyük/orta və ya bir neçə vakansiyalı şirkət.
+        vacancies = max((int(a or b) for a, b in _VACANCY_COUNT.findall(text)), default=1)
+        if workforce == "large":
+            score, tier = 0.80, "B"
+        elif workforce == "medium" or vacancies >= 3:
+            score, tier = 0.70, "B"
+        elif workforce == "small":
+            score, tier = 0.62, "C"
+        else:
+            score, tier = 0.65, "C"
+    elif signal == "new_facility":
         if workforce == "large":
             score += 0.10
         elif workforce == "small":
@@ -204,6 +217,7 @@ class StructuredAIFilter:
         self._client = client
         self.model = model or os.environ.get("AI_MODEL_V2") or DEFAULT_MODEL
         self.last_usage = None
+        self.last_facts: dict | None = None  # ölçmə üçün (scripts/eval_filter.py)
 
     @property
     def client(self) -> OpenAI:
@@ -244,11 +258,13 @@ class StructuredAIFilter:
             return lead
         try:
             facts = self.facts(lead)
+            self.last_facts = {k: v for k, v in facts.items() if k != "_text"}
             score, tier = compute_score(facts, facts.pop("_text"), is_tender=lead.category.value in ("tender", "event_listing"),
                                          listing=lead.category.value == "event_listing")
             lead.ai_score = score
             org = facts.get("organization") or ""
-            lead.ai_reason = f"[{tier}] {facts.get('reason', '')}" if tier != "none" else facts.get("reason", "")
+            lead.ai_reason = facts.get("reason", "")
+            lead.tier = tier if tier != "none" and score >= SCORE_THRESHOLD else None
             if org and not lead.entity_name:
                 lead.entity_name = org[:200]
             lead.status = LeadStatus.pending_review if score >= SCORE_THRESHOLD else LeadStatus.rejected

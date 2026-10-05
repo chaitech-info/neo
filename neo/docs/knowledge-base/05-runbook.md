@@ -109,6 +109,7 @@ python -m scripts.eval_filter label       # yalnız yeni elementlər etiketləni
 python -m scripts.eval_filter run --scorer v2 --model gpt-4.1-mini   # tam mətn qiymətləndirməsi
 python -m scripts.eval_filter run --level triage --model gpt-4.1-mini # başlıq süzgəci
 python -m scripts.eval_filter report      # bütün nəticələr: all / dev / test
+python -m scripts.eval_filter tiers       # A/B/C razılığı (qızıl vs model, çarpaz cədvəl)
 python -m scripts.eval_filter export      # satış komandası üçün CSV → human_labels.csv
 ```
 Qərarı **test** hissəsinə görə ver; tənzimləməni **dev** səhvlərinə baxaraq et. OpenAI krediti bitəndə ölçü özü dayanır.

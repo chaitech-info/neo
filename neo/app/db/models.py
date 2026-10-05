@@ -210,6 +210,8 @@ class LeadRecord(Base):
     tender_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tenders.id"), index=True, nullable=True)
     duplicate_of: Mapped[Optional[str]] = mapped_column(ForeignKey("leads.dedupe_key"), nullable=True)
     ai_model: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    # A/B/C — kommersiya kateqoriyası (0007, v2 qiymətləndirmə); None = v1 və ya rədd.
+    tier: Mapped[Optional[str]] = mapped_column(String(1), nullable=True, index=True)
     reviewed_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 

@@ -24,6 +24,21 @@
     {% if leads %}<span class="muted">{{ leads|length }} lead</span>{% endif %}
   </div>
 
+  {% if tier_counts %}
+  <div class="tier-bar">
+    <div class="seg" role="group" aria-label="Kateqoriya">
+      <a class="{{ 'on' if not tier else '' }}" href="/leads/pending_review">Hamısı <b>{{ tier_counts.values()|sum }}</b></a>
+      {% for t in ["A", "B", "C"] %}
+      <a class="{{ 'on' if tier == t else '' }}" href="/leads/pending_review?tier={{ t }}" title="{{ tier_info[t][1] }}"><span class="tier tier-{{ t }}">{{ t }}</span> {{ tier_info[t][0] }} <b>{{ tier_counts[t] }}</b></a>
+      {% endfor %}
+      {% if tier_counts.none %}<a class="{{ 'on' if tier == 'none' else '' }}" href="/leads/pending_review?tier=none" title="Köhnə qiymətləndirmə və ya AI skoru yoxdur">Kateqoriyasız <b>{{ tier_counts.none }}</b></a>{% endif %}
+    </div>
+    <details class="tier-help"><summary>Kateqoriyalar nə deməkdir?</summary>
+      <dl>{% for t in ["A", "B", "C"] %}<dt><span class="tier tier-{{ t }}">{{ t }}</span> {{ tier_info[t][0] }}</dt><dd>{{ tier_info[t][1] }}</dd>{% endfor %}</dl>
+    </details>
+  </div>
+  {% endif %}
+
   {% if leads and show_actions %}
   <div class="legend" aria-label="Rəng izahı">
     <span><i style="background:var(--saffron)"></i>Tender</span>
@@ -39,6 +54,7 @@
           <span class="n {{ 'hi' if lead.ai_score >= 0.8 else 'mid' }}">{{ (lead.ai_score * 100)|round|int }}</span>
         {% else %}<span class="n na">—</span>{% endif %}
         <span class="t">AI skoru</span>
+        {% if lead.tier %}<span class="tier tier-{{ lead.tier }}" title="{{ tier_info[lead.tier][0] if tier_info else '' }}">{{ lead.tier }}</span>{% endif %}
       </div>
       <div class="ticket-body">
         <h3 class="ticket-title"><a href="{{ lead.source_url }}" target="_blank" rel="noopener">{{ lead.title }}</a></h3>
@@ -93,7 +109,7 @@
         <td class="muted">
           {% if lead.deadline_at %}{{ lead.deadline_at|baku_time }}{% if lead.deadline_at < utcnow() %}<br><span class="expired">keçib</span>{% endif %}{% else %}—{% endif %}
         </td>
-        <td class="score">{{ (lead.ai_score * 100)|round|int if lead.ai_score is not none else "—" }}</td>
+        <td class="score">{{ (lead.ai_score * 100)|round|int if lead.ai_score is not none else "—" }}{% if lead.tier %} <span class="tier tier-{{ lead.tier }}">{{ lead.tier }}</span>{% endif %}</td>
         <td class="muted" style="max-width:320px">{{ lead.ai_reason or "—" }}</td>
         <td>
           <span class="badge badge-{{ status_badge.get(lead.status, 'new') }}">{{ status_names.get(lead.status, lead.status) }}</span>
