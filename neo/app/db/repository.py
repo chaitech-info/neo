@@ -54,6 +54,8 @@ class LeadRepository:
         record.ai_score = lead.ai_score
         record.ai_reason = lead.ai_reason
         record.status = lead.status.value
+        if lead.entity_name and not record.entity_name:
+            record.entity_name = lead.entity_name  # v2 təşkilat adını çıxarır — dublikat yoxlaması üçün
         self.session.commit()
 
     def get(self, dedupe_key: str) -> LeadRecord | None:

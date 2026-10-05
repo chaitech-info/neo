@@ -156,6 +156,24 @@
 - **Nəticə (canlı yoxlanıb):** 1news ok (24 gətirdi), 41 skorsuz lead skorlandı, oxu 37-dən 4-ü seçildi, bütün 13 mənbə "OK".
 - **Kodda:** `app/health.py`, `app/pipeline.py`, `app/db/repository.py`, `app/ai_triage.py`, `app/scheduler.py`, `app/db/engine.py`, `migrations/versions/0003_run_items_fetched.py`, `tests/test_pipeline_recovery.py`.
 
+### Phase 1 — filtr modeli: ölçmə, v2 qiymətləndirmə, triaj, dublikatlar (2026-10-05)
+- **Status:** Decided, deploy olunub (Modal + Mac worker; Neon miqrasiya 0004, 0005)
+- **Ölçmə aləti:** `scripts/eval_filter.py` (`collect` → `label` → `run` → `report`, `export`). Data `eval_data/`-dadır (git-də yox — lead mətnlərində əlaqə məlumatı var). 1317 element: 428 lead (tam mətn) + 889 başlıq (süzgəcdən ƏVVƏL tutulub). Qızıl etiket `gpt-5.2` (rubrika `GOLD_RUBRIC`, versiya g1) — insan düzəlişləri `eval_data/human_labels.csv`-də modeldən üstündür (`export` satış üçün CSV verir). Sabit bölgü: 70% dev (tənzimləmə), 30% test (yekun). Skorsuz/AI xətası >5% olsa ölçü dayanır (kredit bitəndə yanlış rəqəm verirdi).
+- **Nəticə (test hissəsi):**
+  | | Precision | Recall |
+  |---|---|---|
+  | v1 (gpt-4o-mini, köhnə prompt) | 0.82 | 0.77 |
+  | **v2 + gpt-4.1-mini** | **0.90** | **0.93** |
+  Bütün dəstdə v2: P 0.90 / R 0.96. gpt-5-mini v2: R 0.97, amma P 0.76; gpt-4.1-nano zəif (0.72/0.70).
+  Triaj (başlıq süzgəci, 945 başlıqlıq indiki kəsik): recall 0.54 → **0.81**, seçilən pay 9.8%.
+- **v2 qiymətləndirmə** (`app/ai_scoring.py`, defolt; `AI_SCORER=v1` geri qaytarır): model yalnız faktları sahələrə ayırır (siqnal, təşkilat, AZ-dadırmı, yemək biznesidirmi, işçi sayı, yemək qeyd olunubmu, sübut, səbəb); skor və A/B/C `compute_score`-da kodla. `ai_reason` `[A]/[B]/[C]` ilə başlayır; təşkilat adı `entity_name`-ə yazılır.
+- **Kod qaydaları (prompt etibarsız çıxdı):** xəbərdəki tədbir tender deyil (yemək yazılmayıbsa eşikdən aşağı); `expansion_hiring` eşikdən aşağı (qızıl dəstdə relevant yoxdur; fed.az tək vakansiyaları "kütləvi" sayılırdı); son tarix keçib → 0.1; xaricdə / yemək biznesi → 0.05.
+- **Triaj:** model gpt-4.1-mini (`AI_TRIAGE_MODEL`); cavab nömrə→0/1 obyekti, 20-lik partiya (40-lıq massivdə model sıranı itirirdi); boş tender başlığı ("T E N D E R — Azərenerji ASC", "Bildiriş-Uzatma") kodla həmişə daxil (`uninformative_title`); qaydalar genişləndi (içməli su, liqa/turnir təşkili, tender icmalı, hab).
+- **Açar sözlər:** 0004 — "təşkili", "keçirilməsi" (tender, tədbirlər); 0005 — mənfi "mətbəə" (gpt-4.1-mini "mətbəə"ni "mətbəx" sanıb çap tenderini 0.82 verirdi).
+- **Dublikatlar** (`app/story_dedup.py`): skorlamadan sonra, keçən lead üçün — eyni təşkilat (normalize_org) və ya başlıq üst-üstə düşməsi ≥75%, 14 gün → `duplicate` + `duplicate_of`.
+- **Testlər:** OpenAI açarı test mühitindən silinir — heç bir test real API-yə gedə bilməz.
+- **Açıq:** satış komandasının etiket yoxlaması (`eval_data/for_sales_review.csv`); köhnə (v1) lead-lərin v2 ilə yenidən skorlanması — qərar gözləyir; A/B/C panel filtri — növbəti scope.
+
 ## Açıq suallar (hələ qərar verilməyib)
 
 ### CRM real endpoint-i

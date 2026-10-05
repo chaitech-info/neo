@@ -101,6 +101,18 @@ Panel Vercel-də (serverless), baza Neon Postgres-də, scraping iki yerdə:
 - Secret `neo-secrets`: `DATABASE_URL`, `OPENAI_API_KEY`, `APIFY_TOKEN`, `TRIGGER_TOKEN` (+ istəyə görə `AI_MODEL`). Açar dəyişəndə: `.env`-i yenilə, secret-i `modal secret create neo-secrets --from-json ... --force` ilə yenidən yarat.
 - Loglar: `MODAL_PROFILE=neo modal app logs neo-scraper` və ya Modal dashboard.
 
+## Filtr keyfiyyətini ölçmək (`scripts/eval_filter.py`)
+Prompt, model, açar söz və ya qayda dəyişəndə — əvvəl və sonra ölç:
+```bash
+python -m scripts.eval_filter collect     # bazadakı lead-lər + saytlardakı başlıqlar (eval_data/)
+python -m scripts.eval_filter label       # yalnız yeni elementlər etiketlənir (gpt-5.2, ~$0.05/100)
+python -m scripts.eval_filter run --scorer v2 --model gpt-4.1-mini   # tam mətn qiymətləndirməsi
+python -m scripts.eval_filter run --level triage --model gpt-4.1-mini # başlıq süzgəci
+python -m scripts.eval_filter report      # bütün nəticələr: all / dev / test
+python -m scripts.eval_filter export      # satış komandası üçün CSV → human_labels.csv
+```
+Qərarı **test** hissəsinə görə ver; tənzimləməni **dev** səhvlərinə baxaraq et. OpenAI krediti bitəndə ölçü özü dayanır.
+
 ## Tez-tez rast gəlinən problemlər
 
 | Simptom | Səbəb | Həll |

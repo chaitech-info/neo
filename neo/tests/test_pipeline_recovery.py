@@ -36,7 +36,7 @@ def fake_ai(monkeypatch):
             scored.append(lead.source_url)
         return leads
 
-    monkeypatch.setattr("app.pipeline.AIFilter.score_batch", score_batch)
+    monkeypatch.setattr("app.pipeline.make_scorer", lambda: type("Fake", (), {"score_batch": score_batch})())
     return scored
 
 

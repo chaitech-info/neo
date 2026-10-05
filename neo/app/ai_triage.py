@@ -25,7 +25,7 @@ from app.ai_filter import OPENAI_MAX_RETRIES
 
 log = structlog.get_logger()
 
-BATCH_SIZE = 40
+BATCH_SIZE = 20  # 40-lıq partiyada model sıranı itirirdi (2026-10-05 ölçüsü)
 CACHE_MAX = 20000
 
 _DEFAULT_COMPANY = """\
@@ -38,10 +38,12 @@ qəbul, bayram yeməkləri; kofe-brek, bufet, fürşet.
 _TENDER_RULES = """\
 Sənə nömrələnmiş TENDER/SATINALMA başlıqları veriləcək (alıcı təşkilat ilə).
 Başlıq "1"-dir, əgər alıcı bu alış çərçivəsində yemək ala bilər:
-- yemək, qidalanma, iaşə, catering, nahar, bufet, ərzaq/qida məhsulları, içki;
-- tədbir, konfrans, forum, festival, yarış/turnir, mərasim, bayram, yubiley,
-  komandaqurma, təlim/seminar, qəbul, sərgi TƏŞKİLİ və ya keçirilməsi;
-- qonaqların/iştirakçıların qəbulu, yerləşdirilməsi, qonaqlama;
+- yemək, qidalanma, iaşə, catering, nahar, bufet, ərzaq/qida məhsulları, içki,
+  içməli su, çay/qəhvə;
+- tədbir, konfrans, forum, festival, yarış, turnir, liqa, olimpiada, çempionat,
+  mərasim, bayram, yubiley, komandaqurma, təlim/seminar, qəbul, sərgi —
+  TƏŞKİLİ, KEÇİRİLMƏSİ, təşkili və keçirilməsi xidməti;
+- qonaqların/iştirakçıların qəbulu, yerləşdirilməsi, qonaqlama, nümayəndə heyəti;
 - düşərgə, yataqxana, məktəb, uşaq bağçası, xəstəxana, hərbi hissənin QİDALANMASI.
 "0": tikinti, təmir, abadlıq, yol, bina quraşdırılması (işçi olsa belə — alıcı
 yemək almır), avadanlıq, mebel, nəqliyyat, ehtiyat hissəsi, İT/proqram, çap,
@@ -52,17 +54,22 @@ mühafizə, təmizlik, dərman/tibb vasitəsi, xəstəliklə "mübarizə tədbir
 _NEWS_RULES = """\
 Sənə nömrələnmiş XƏBƏR/ELAN başlıqları veriləcək.
 Başlıq "1"-dir, əgər satış komandası bu xəbərə görə kiməsə zəng edə bilər:
-- konkret şirkət/qurum yemək, catering, iaşə xidməti axtarır və ya alır;
-- Azərbaycanda yeni zavod, fabrik, mədən, istehsal müəssisəsi, sənaye parkı,
-  logistika mərkəzi, ofis, filial açılır, tikilir, genişlənir, istehsala başlayır;
-  yeni iş yerləri, kütləvi işə qəbul;
-- GƏLƏCƏKDƏ keçiriləcək korporativ tədbir, konfrans, festival, banket.
+- konkret şirkət/qurum yemək, catering, iaşə xidməti, ərzaq, içki, içməli su alır
+  və ya axtarır;
+- TENDER xəbəri və tender icmalı ("N yeni tender elan edib", "TENDER ELAN EDİR",
+  "... alır – TENDER") — içində yemək/tədbir tenderi ola bilər;
+- Azərbaycanda yeni zavod, fabrik, mədən/yataq, istehsal müəssisəsi, sənaye parkı,
+  hab, logistika/tədqiqat mərkəzi, ofis, filial açılır, tikilir, yaradılır,
+  genişlənir, istehsala başlayır; yeni iş yerləri, kütləvi işə qəbul;
+- GƏLƏCƏKDƏ keçiriləcək korporativ/dövlət tədbiri, konfrans, festival, şou,
+  banket — xüsusən "N milyon xərclənəcək" kimi büdcəsi açıqlananlar.
 "0": keçmiş tədbirin reportajı, dövlət rəsmilərinin görüşləri, siyasət, idman
 nəticələri, cinayət, hava, valyuta/birja, ümumi statistika, xarici ölkə xəbəri.
 Şübhə edəndə "1".
 """
 
-_FORMAT = 'Yalnız JSON: {"r": [hər başlıq üçün sıra ilə 1 və ya 0]} — massivdə dəqiq N element.'
+_FORMAT = ('Yalnız JSON: {"r": {"0": 1, "1": 0, ...}} — HƏR başlıq nömrəsi açar kimi, '
+           'dəyəri 1 və ya 0; dəqiq N açar.')
 
 _RULES = {"tender": _TENDER_RULES, "news": _NEWS_RULES}
 
@@ -85,8 +92,11 @@ def _client() -> OpenAI:
     return OpenAI(api_key=os.environ.get("OPENAI_API_KEY"), max_retries=OPENAI_MAX_RETRIES)
 
 
+DEFAULT_MODEL = "gpt-4.1-mini"  # 2026-10-05: gpt-4o-mini ilə eyni recall, iki dəfə az başlıq seçir
+
+
 def _model() -> str:
-    return os.environ.get("AI_MODEL") or "gpt-4o-mini"
+    return os.environ.get("AI_TRIAGE_MODEL") or DEFAULT_MODEL
 
 
 MIN_SPLIT = 5  # bundan kiçik pozuq partiya artıq bölünmür — hamısı daxil edilir
@@ -114,18 +124,23 @@ def _ask(client: OpenAI, kind: str, system: str, titles: list[str]) -> list[bool
 
 def _ask_once(client: OpenAI, kind: str, system: str, titles: list[str]) -> list[bool] | None:
     numbered = f"N = {len(titles)}\n" + "\n".join(f"{i}. {t}" for i, t in enumerate(titles))
-    resp = client.chat.completions.create(
-        model=_model(),
-        temperature=0,
-        max_tokens=600,
-        response_format={"type": "json_object"},
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": numbered},
-        ],
-    )
+    model = _model()
+    kwargs = {"model": model, "response_format": {"type": "json_object"},
+              "messages": [{"role": "system", "content": system}, {"role": "user", "content": numbered}]}
+    if model.startswith("gpt-5"):
+        kwargs["reasoning_effort"] = "minimal"
+    else:
+        kwargs.update(temperature=0, max_tokens=900)
+    resp = client.chat.completions.create(**kwargs)
     answers = json.loads(resp.choices[0].message.content).get("r", [])
-    if len(answers) != len(titles):
+    # Nömrə→cavab obyekti: mövqe səhvi olmur (massivdə model 40 elementin sırasını itirirdi).
+    if isinstance(answers, dict):
+        answers = [answers.get(str(i), answers.get(i)) for i in range(len(titles))]
+        if any(a is None for a in answers):
+            log.info("ai_triage_count_mismatch", kind=kind, expected=len(titles),
+                     got=sum(a is not None for a in answers))
+            return None
+    elif len(answers) != len(titles):
         log.info("ai_triage_count_mismatch", kind=kind, expected=len(titles), got=len(answers))
         return None
     return [str(a).strip() in ("1", "true", "True") for a in answers]

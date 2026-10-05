@@ -122,6 +122,10 @@ def annotate_deadline(text: str, today: date) -> str:
     return f"{text}\n\n[SON TARİX: BİTİB — {-days} gün əvvəl]"
 
 
+def today_baku() -> date:
+    return datetime.now(BAKU_TZ).date()
+
+
 class AIFilter:
     """Sənəd §6 Lead scoring & AI filtering-in tətbiqi."""
 
@@ -139,7 +143,7 @@ class AIFilter:
 
     @staticmethod
     def today() -> date:
-        return datetime.now(BAKU_TZ).date()
+        return today_baku()
 
     def system_prompt(self) -> str:
         # .replace — prompt-dakı JSON nümunəsinin {} mötərizələri .format-ı sındırardı.

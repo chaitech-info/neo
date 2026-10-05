@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -7,11 +8,13 @@ import structlog
 from sqlalchemy.orm import Session
 
 from app.ai_filter import AIFilter
+from app.ai_scoring import StructuredAIFilter
 from app.db.models import ScrapeRun
 from app.db.repository import LeadRepository
 from app.deadlines import extract_deadline
 from app.normalizer import Normalizer
 from app.scrapers.base import BaseScraper
+from app.story_dedup import mark_story_duplicate
 from app.tenders import link_tender
 
 log = structlog.get_logger()
@@ -35,6 +38,7 @@ class PipelineResult:
     error: str | None = None  # scraper xətası (məs. sayt 403 qaytardı) — run "failed" sayılır
     fetched: int = 0          # filtrdən ƏVVƏL saytdan gələn elan (0 = sayt/selector sınıb ola bilər)
     recovered: int = 0        # əvvəlki qırılmış run-dan skorsuz qalan lead-lər, indi skorlandı
+    story_duplicates: int = 0  # eyni şirkət/hekayə artıq validasiyadadır — `duplicate` (app/story_dedup.py)
 
     def summary(self) -> str:
         """Məs. "3 yeni lead — 1 validasiyaya, 2 AI rədd etdi" (+ dublikatlar)."""
@@ -44,9 +48,20 @@ class PipelineResult:
             parts += [f"{self.pending} validasiyaya", f"{self.rejected} AI rədd etdi"]
         if self.tender_duplicates:
             parts.append(f"{self.tender_duplicates} başqa mənbədə artıq var")
+        if self.story_duplicates:
+            parts.append(f"{self.story_duplicates} eyni şirkət artıq validasiyada")
         if self.url_duplicates:
             parts.append(f"{self.url_duplicates} təkrar (artıq bazada)")
         return f"{text} — {', '.join(parts)}" if parts else text
+
+
+def make_scorer():
+    """Defolt v2 — strukturlaşdırılmış qiymətləndirmə (app/ai_scoring.py). 2026-10-05 ölçüsü
+    (scripts/eval_filter.py, test hissəsi): v1 P 0.82 / R 0.77 → v2 + gpt-4.1-mini P 0.90 / R 0.93-0.97.
+    AI_SCORER=v1 köhnə qiymətləndirməyə qaytarır."""
+    if os.environ.get("AI_SCORER", "v2") == "v1":
+        return AIFilter()
+    return StructuredAIFilter()
 
 
 def run_pipeline(
@@ -90,7 +105,7 @@ def run_pipeline(
     run.error = result.error if failed else None
     run.items_seen, run.leads_new, run.leads_pending = result.scraped, result.fresh, result.pending
     run.items_fetched = result.fetched
-    run.leads_duplicate = result.url_duplicates + result.tender_duplicates
+    run.leads_duplicate = result.url_duplicates + result.tender_duplicates + result.story_duplicates
     session.commit()
     return result
 
@@ -98,7 +113,7 @@ def run_pipeline(
 def _run(scraper_cls: type[BaseScraper], session: Session) -> PipelineResult:
     repo = LeadRepository(session)
     normalizer = Normalizer(repo)
-    ai_filter = AIFilter()
+    ai_filter = make_scorer()
     result = PipelineResult()
 
     log.info("pipeline_started", source=scraper_cls.source_name)
@@ -146,10 +161,14 @@ def _run(scraper_cls: type[BaseScraper], session: Session) -> PipelineResult:
 
     for lead in ai_filter.score_batch(to_score):
         repo.update_after_scoring(lead.dedupe_key(), lead)
-        if lead.status.value == "pending_review":
-            result.pending += 1
-        else:
+        if lead.status.value != "pending_review":
             result.rejected += 1
+            continue
+        record = repo.get(lead.dedupe_key())
+        if record is not None and mark_story_duplicate(session, record):
+            result.story_duplicates += 1
+        else:
+            result.pending += 1
 
     log.info(
         "pipeline_completed",

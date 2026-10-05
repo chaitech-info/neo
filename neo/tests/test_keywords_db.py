@@ -54,7 +54,7 @@ def test_seeded_scopes_match_the_code_lists(db):
     assert "zavod" not in tender                                   # EXPANSION yalnız xəbərdə
     assert {"keytrinq", "zavod", "korporativ tədbir"} <= news
     assert "komandaqurma" not in news
-    assert tender_neg == []
+    assert [t.text for t in tender_neg] == ["mətbəə"]  # 0005
 
 
 def test_match_modes():

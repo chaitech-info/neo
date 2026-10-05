@@ -78,7 +78,10 @@ EXPANSION_KEYWORDS = [
 ]
 
 # Tenderlər (etender, fed.az tenderlər, şirkət saytları, Dünya Bankı, bp EDP).
-TENDER_KEYWORDS = MEAL_KEYWORDS + EVENT_KEYWORDS
+# Tender başlığında "təşkili/keçirilməsi" demək olar həmişə tədbir/xidmət təşkilidir
+# (miqrasiya 0004; 2026-10-05 ölçüsü: AI triajı belə tədbir tenderlərini buraxırdı).
+EVENT_ORGANIZATION_TERMS = ["təşkili", "keçirilməsi"]
+TENDER_KEYWORDS = MEAL_KEYWORDS + EVENT_KEYWORDS + EVENT_ORGANIZATION_TERMS
 
 # Xəbərlər (marja, 1news, oxu, fed, report). Tədbir sözləri xəbərlərdə dövlət
 # tədbiri reportajları ilə dolur (canlı test: 16 uyğunluqdan 15-i) və hər uyğunluq
@@ -164,6 +167,21 @@ def _article_text(soup: BeautifulSoup, body_selector: str | None) -> str:
     return text[:ARTICLE_MAX_CHARS]
 
 
+_GENERIC_TITLE_WORDS = {"tender", "elan", "elanı", "bildiriş", "bildirişi", "uzatma", "dəyişiklik",
+                        "procurement", "notice", "specific", "general", "announcement", "invitation",
+                        "satınalma", "satinalma", "müsabiqə", "kotirovka", "sorğusu", "açıq", "i", "ii"}
+
+
+def uninformative_title(title: str) -> bool:
+    """Tender başlığı nə alındığını demirsə ("T E N D E R — Azərenerji ASC", "Bildiriş-Uzatma",
+    "Specific Procurement Notice") — AI də, açar söz də qərar verə bilməz: tam oxunmalıdır.
+    Təşkilat adı ("— X ASC") nəzərə alınmır."""
+    subject = fold(title.split(" — ")[0])
+    subject = re.sub(r"(?<=\b\w) (?=\w\b)", "", subject)       # "t e n d e r" → "tender"
+    words = [w for w in re.findall(r"\w+", subject) if not w.isdigit()]
+    return bool(words) and all(w in _GENERIC_TITLE_WORDS for w in words)
+
+
 class BaseScraper(abc.ABC):
     """Hər mənbə üçün ortaq skelet. Bax: sənəd §3 Architecture, §7 Scheduling.
 
@@ -247,7 +265,8 @@ class BaseScraper(abc.ABC):
         else:
             positive, negative = db_terms[0] + extra_terms, db_terms[1]
 
-        by_keyword = [kw_store.any_match(t, positive) for t in texts]
+        by_keyword = [kw_store.any_match(t, positive) or (kind == "tender" and uninformative_title(t))
+                      for t in texts]
         blocked = [kw_store.any_match(t, negative) for t in texts] if negative else [False] * len(texts)
         picked = triage(texts, kind=kind) if texts else set()
         by_ai = [i in picked for i in range(len(texts))] if picked is not None else [False] * len(texts)

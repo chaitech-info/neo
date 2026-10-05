@@ -68,7 +68,9 @@ class FakeRedis:
 @pytest.fixture(autouse=True)
 def no_deploy_env(monkeypatch):
     """Lokal .env production dəyişənləri (Mac worker rolu, Modal kilidi, trigger) testlərə sızmasın."""
-    for name in ("NEO_SCRAPE_ROLE", "NEO_LOCK_BACKEND", "MODAL_TRIGGER_URL", "TRIGGER_TOKEN"):
+    for name in ("NEO_SCRAPE_ROLE", "NEO_LOCK_BACKEND", "MODAL_TRIGGER_URL", "TRIGGER_TOKEN", "AI_SCORER",
+                 "AI_MODEL", "AI_MODEL_V2", "AI_REASONING_EFFORT", "AI_TRIAGE_MODEL",
+                 "OPENAI_API_KEY"):  # açarsız heç bir test real OpenAI-yə gedə bilməz
         monkeypatch.delenv(name, raising=False)
 
 

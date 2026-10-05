@@ -13,3 +13,4 @@ neo_leads.db
 .celerybeat-schedule*
 .vercel
 .env.local
+eval_data/
