@@ -1,4 +1,23 @@
+"""Test konfiqurasiyası."""
+import os
+import tempfile
+
+# Testlər HEÇ VAXT production bazasına (lokal .env → Neon) toxunmasın: app modulları
+# yüklənməmişdən əvvəl müvəqqəti SQLite təyin edilir (load_dotenv mövcud dəyişəni əvəz etmir).
+_TEST_DB = os.path.join(tempfile.mkdtemp(prefix="neo-tests-"), "test.db")
+os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_DB}"
+
 import pytest
+
+
+@pytest.fixture(scope="session", autouse=True)
+def test_database_schema():
+    """Paylaşılan test bazasında sxem (ayrıca bazası olmayan route testləri üçün)."""
+    from app.db.engine import DATABASE_URL, engine
+    from app.db.migrate import upgrade_to_head
+
+    assert DATABASE_URL.startswith("sqlite:///") and "neo-tests-" in DATABASE_URL, DATABASE_URL
+    upgrade_to_head(engine)
 
 
 @pytest.fixture(autouse=True)

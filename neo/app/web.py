@@ -24,6 +24,7 @@ from app.auth.security import REQUIRE, ROLE_NAMES, CsrfFailed, LoginRequired, Pe
 from app.db.models import User
 from app.ai_filter import SCORE_THRESHOLD
 from app import triggers
+from app.health import source_health
 from app.db.engine import SERVERLESS, engine
 from app.db.backfill import backfill
 from app.db.migrate import upgrade_to_head
@@ -276,6 +277,16 @@ def _schedules() -> dict[str, str]:
         return {}
 
 
+def _crons() -> dict[str, object]:
+    try:
+        from app.scheduler import celery_app
+
+        return {v["args"][0]: v["schedule"] for v in celery_app.conf.beat_schedule.values()}
+    except Exception:
+        log.warning("schedule_load_failed", exc_info=True)
+        return {}
+
+
 @app.get("/")
 def dashboard(request: Request, user: User = Depends(REQUIRE["viewer"])):
     from sqlalchemy import func, select
@@ -290,6 +301,7 @@ def dashboard(request: Request, user: User = Depends(REQUIRE["viewer"])):
         open_opps = session.scalar(select(func.count()).select_from(Opportunity)
                                    .where(Opportunity.stage.notin_(("won", "lost"))))
         last_auto = session.scalar(select(func.max(ScrapeRun.started_at)).where(ScrapeRun.trigger == "schedule"))
+        health = source_health(session, _crons())
     finally:
         session.close()
 
@@ -297,7 +309,7 @@ def dashboard(request: Request, user: User = Depends(REQUIRE["viewer"])):
     schedules = _schedules()
     sources = [
         {"key": k, "label": label, "kind": lead_kind(k), "schedule": schedules.get(k, "—"),
-         "last": last_run.get(k)}
+         "last": last_run.get(k), "health": health.get(k)}
         for k, (label, _) in SOURCES.items()
     ]
     return templates.TemplateResponse(

@@ -92,6 +92,8 @@ class ScrapeRun(Base):
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     status: Mapped[str] = mapped_column(_enum("run_status", *RUN_STATUSES), default="running")
     items_seen: Mapped[int] = mapped_column(Integer, default=0)
+    # Filtrdən əvvəl saytdan gələn elan (0003). items_seen = filtrdən keçən.
+    items_fetched: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     leads_new: Mapped[int] = mapped_column(Integer, default=0)
     leads_duplicate: Mapped[int] = mapped_column(Integer, default=0)
     leads_pending: Mapped[int] = mapped_column(Integer, default=0)

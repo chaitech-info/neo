@@ -79,7 +79,8 @@ Panel Vercel-də (serverless), baza Neon Postgres-də, scraping iki yerdə:
   `DATABASE_URL="<neon URL, -pooler silinmiş>" python -m scripts.init_db`
   Vercel-də startup miqrasiya işlətmir (`SERVERLESS` → `on_startup` erkən qayıdır).
 - **Lokal `.env`:** `DATABASE_URL="<neon pooled URL>"` (dırnaqda — `&` shell-i pozur), `SESSION_SECRET`, `TRIGGER_TOKEN`, `NEO_SCRAPE_ROLE=local`, `MODAL_PROFILE=neo`. Worker üçün `pip install -r requirements-worker.txt` (modal paketi). `NEO_SCRAPE_ROLE=local` olmadan worker bütün mənbələri işlədər və Modal ilə dublikat scrape olar.
-- **Versiya fərqi:** Vercel və Modal Python 3.12 + ən son paketlər (SQLAlchemy 2.1, Starlette 1.x), lokal venv 3.9-dur. Deploydan əvvəl testləri 3.12-də də işlət: `uv venv -p 3.12 /tmp/v312 && uv pip install -p /tmp/v312/bin/python -r requirements.txt pytest && /tmp/v312/bin/python -m pytest -q`.
+- **Versiya fərqi:** Vercel və Modal Python 3.12 + ən son paketlər (SQLAlchemy 2.1, Starlette 1.x), lokal venv 3.9-dur. Deploydan əvvəl testləri 3.12-də də işlət. Qalıcı 3.12 venv (modal 1.6 da burada): `uv venv -p 3.12 ~/.local/share/neo-py312 && uv pip install -p ~/.local/share/neo-py312/bin/python -r requirements.txt modal pytest`, sonra `~/.local/share/neo-py312/bin/python -m pytest -q`. (`/tmp`-də saxlama — sistem təmizləyir.)
+- **Testlər production bazasına toxunmur:** `tests/conftest.py` app yüklənməmişdən əvvəl `DATABASE_URL`-i müvəqqəti SQLite-a çevirir (əvvəl `.env` → Neon idi, dashboard testi canlı bazanı oxuyurdu).
 
 ### Vercel (panel)
 - Layihə `neo` (emil0510s-projects), URL https://neo-omega-five.vercel.app. Git-ə bağlı deyil — deploy CLI ilə, `neo/neo` qovluğundan: `vercel deploy --prod` (`.vercelignore` `.env`, `*.db` fayllarını yükləmir). Giriş nöqtəsi `api/index.py`, marşrutlar `vercel.json`.
@@ -87,10 +88,16 @@ Panel Vercel-də (serverless), baza Neon Postgres-də, scraping iki yerdə:
 - İlk admin: `/setup`. Loglar səhifəsi Vercel-də boşdur — scrape logları Modal dashboard-dadır.
 
 ### Modal (scraping)
-- App `neo-scraper`, Modal profili `neo` (əsas profil deyil — hər əmrdə `MODAL_PROFILE=neo`). Deploy: `MODAL_PROFILE=neo modal deploy modal_app.py` (modal ≥1.6, Python 3.12 venv).
+- App `neo-scraper`, Modal profili `neo` (əsas profil deyil — hər əmrdə `MODAL_PROFILE=neo`). Deploy: `MODAL_PROFILE=neo ~/.local/share/neo-py312/bin/modal deploy modal_app.py`.
 - `tick` — 10 dəqiqədən bir cron; `app/scheduler.py::beat_schedule`-a görə vaxtı çatan mənbələri `scrape_source.spawn` ilə başladır (cədvəl bir yerdədir, Celery ilə ortaq). Mənbə başına kilid `modal.Dict` `neo-scrape-locks`-dadır.
 - `trigger` — web endpoint (`https://emil-abdurahmanli-project--neo-scraper-trigger.modal.run`); panelin "Scrape indi"/"Hamısını scrape et" düymələri bura POST edir (`app/triggers.py`), Bearer `TRIGGER_TOKEN` olmadan 401. LOCAL_ONLY mənbələri `modal.Queue` `neo-local-requests`-ə qoyur — Mac worker-in `local-bridge` thread-i oradan götürür (Mac sönülüdürsə sorğu növbədə gözləyir).
 - Scraper xətası (403 və s.) indi `scrape_runs.status=failed` + `error` kimi yazılır (əvvəl "ok, 0 elan" görünürdü).
+
+### Mənbə sağlamlığı (dashboard "Vəziyyət" sütunu, `app/health.py`)
+- **Xəta** — son 3 run uğursuz → sayt dəyişib/bloklayıb, scraper-ə bax.
+- **Gecikir** — cədvələ görə 2 qat müddətdən çox işləməyib → Mac sönülüdür (LOCAL_ONLY) və ya Modal cron dayanıb.
+- **Boş** — son 3 uğurlu run saytdan 0 elan gətirib (`scrape_runs.items_fetched`) → selector sınıb ola bilər. `items_seen` (filtrdən keçən) 0 olması normaldır.
+- Özünü bərpa: `running` qalmış 2 saatdan köhnə run növbəti run-da `failed` ("Yarımçıq qaldı") olur; skorsuz qalan `new` lead-lər (30 dəq-dən köhnə) həmin mənbənin növbəti run-ında skorlanır; baza bağlantısı düşəndə run bir dəfə təkrarlanır.
 - Secret `neo-secrets`: `DATABASE_URL`, `OPENAI_API_KEY`, `APIFY_TOKEN`, `TRIGGER_TOKEN` (+ istəyə görə `AI_MODEL`). Açar dəyişəndə: `.env`-i yenilə, secret-i `modal secret create neo-secrets --from-json ... --force` ilə yenidən yarat.
 - Loglar: `MODAL_PROFILE=neo modal app logs neo-scraper` və ya Modal dashboard.
 

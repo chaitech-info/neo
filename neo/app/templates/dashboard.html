@@ -44,10 +44,11 @@
 
   <div class="table-wrap">
     <table class="sources">
-      <tr><th>Mənbə</th><th>Cədvəl</th><th>Son nəticə</th><th></th></tr>
+      <tr><th>Mənbə</th><th>Vəziyyət</th><th>Cədvəl</th><th>Son nəticə</th><th></th></tr>
       {% for s in sources %}
       <tr class="{{ 'running' if s.key in running else '' }}">
         <td>{{ s.label }}<span class="kind">{{ kind_names[s.kind] }}</span></td>
+        <td>{% if s.health %}<span class="badge health-{{ s.health.state }}" title="{{ s.health.detail }}">{{ s.health.label }}</span>{% if s.health.state != 'ok' %}<span class="health-note">{{ s.health.detail.split(' · ')[0] }}</span>{% endif %}{% endif %}</td>
         <td class="muted">{{ s.schedule }}</td>
         <td class="result">
           {% if s.key in running %}<span class="pulse"></span>yoxlanılır…{% else %}{{ s.last or 'hələ yoxlanılmayıb' }}{% endif %}

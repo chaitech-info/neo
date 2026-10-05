@@ -8,7 +8,8 @@ nömrə siyahısı istəyəndə gpt-4o-mini həm artıq seçir, həm də buraxı
 daxil edilmiş başlıqdan bahadır, növbəti addımda AI mətni oxuyub rədd edə bilər.
 
 AI əlçatan deyilsə triage() None qaytarır — scraper yalnız açar sözlərlə davam
-edir. Cavab pozuqdursa (say uyğun gəlmir) həmin partiyanın hamısı daxil edilir.
+edir. Cavab pozuqdursa (say uyğun gəlmir) partiya bölünüb yenidən soruşulur; yalnız
+kiçik partiya yenə pozuqdursa o başlıqlar daxil edilir (keşlənmədən).
 Bax docs/knowledge-base/04-decisions.md → "Açar söz + AI triaj".
 """
 from __future__ import annotations
@@ -88,17 +89,27 @@ def _model() -> str:
     return os.environ.get("AI_MODEL") or "gpt-4o-mini"
 
 
-def _ask(client: OpenAI, kind: str, system: str, titles: list[str]) -> list[bool]:
-    # Model bəzən 40 başlığa 39 cavab qaytarır — bir dəfə təkrar soruşulur, yenə
-    # pozuqdursa partiyanın hamısı daxil edilir (xəbərdə bu hər başlıq üçün
-    # məqalə yükləmək deməkdir, ona görə əvvəlcə təkrar).
+MIN_SPLIT = 5  # bundan kiçik pozuq partiya artıq bölünmür — hamısı daxil edilir
+
+
+def _ask(client: OpenAI, kind: str, system: str, titles: list[str]) -> list[bool | None]:
+    """Hər başlıq üçün True/False; None = AI cavab verə bilmədi ("şübhədə daxil et").
+
+    Model bəzən 37 başlığa 36 cavab qaytarır (2026-10-05: oxu-da iki dəfə ardıcıl).
+    Əvvəllər bütün partiya daxil edilirdi → 37 xəbərin hamısı tam AI qiymətləndirməsinə
+    gedirdi. İndi bir dəfə təkrar, sonra partiya yarıya bölünür — kiçik partiyada
+    model düzgün sayır. Yalnız ≤5 başlıqlıq partiya yenə pozuqdursa daxil edilir.
+    """
     answers = _ask_once(client, kind, system, titles)
     if answers is None:
         answers = _ask_once(client, kind, system, titles)
-    if answers is None:
-        log.warning("ai_triage_bad_batch", kind=kind, size=len(titles))
-        return [True] * len(titles)
-    return answers
+    if answers is not None:
+        return answers
+    if len(titles) > MIN_SPLIT:
+        mid = len(titles) // 2
+        return _ask(client, kind, system, titles[:mid]) + _ask(client, kind, system, titles[mid:])
+    log.warning("ai_triage_bad_batch", kind=kind, size=len(titles))
+    return [None] * len(titles)
 
 
 def _ask_once(client: OpenAI, kind: str, system: str, titles: list[str]) -> list[bool] | None:
@@ -130,17 +141,21 @@ def triage(titles: list[str], kind: str = "news", client: OpenAI | None = None) 
     system = prompt(kind)
     version = hashlib.sha1(system.encode("utf-8")).hexdigest()[:12]
     todo = sorted({t for t in titles if t and (kind, version, t) not in _cache})
+    unsure: set[str] = set()
     if todo:
         try:
             client = client or _client()
             for start in range(0, len(todo), BATCH_SIZE):
                 batch = todo[start:start + BATCH_SIZE]
                 for title, fit in zip(batch, _ask(client, kind, system, batch)):
-                    _cache[(kind, version, title)] = fit
+                    if fit is None:
+                        unsure.add(title)   # daxil et, amma keşləmə — növbəti run yenə soruşsun
+                    else:
+                        _cache[(kind, version, title)] = fit
         except Exception:
             log.exception("ai_triage_failed", kind=kind, titles=len(todo))
             return None
-    result = {i for i, t in enumerate(titles) if t and _cache.get((kind, version, t))}
+    result = {i for i, t in enumerate(titles) if t and (t in unsure or _cache.get((kind, version, t)))}
     if len(_cache) > CACHE_MAX:
         _cache.clear()
     return result

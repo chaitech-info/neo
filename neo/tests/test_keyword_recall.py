@@ -116,6 +116,25 @@ def test_triage_bad_batch_includes_everything_recall_first():
     assert client.calls == 2  # əvvəl bir dəfə təkrar soruşur
 
 
+def test_triage_splits_miscounted_batch_instead_of_including_all():
+    triage = _real_triage()
+    titles = [f"s{i}" for i in range(8)]  # sıralanmış: s0..s7
+    # 8 başlıq: iki dəfə 7 cavab → yarıya bölünür, hər yarı düzgün cavablanır
+    client = _FakeOpenAI([[0] * 7, [0] * 7, [0, 1, 0, 0], [0, 0, 0, 1]])
+
+    assert triage(titles, kind="news", client=client) == {1, 7}
+    assert client.calls == 4
+
+
+def test_triage_fallback_answers_are_not_cached():
+    triage = _real_triage()
+    client = _FakeOpenAI([[1], [1], [0, 0, 1]])  # birinci run: pozuq → hamısı daxil; ikinci: düzgün
+
+    assert triage(["u1", "u2", "u3"], kind="news", client=client) == {0, 1, 2}
+    assert triage(["u1", "u2", "u3"], kind="news", client=client) == {2}  # yenidən soruşdu
+    assert client.calls == 3
+
+
 def test_triage_retries_once_on_count_mismatch():
     triage = _real_triage()
     client = _FakeOpenAI([[1], [0, 1, 0]])  # birinci pozuq, ikinci düzgün

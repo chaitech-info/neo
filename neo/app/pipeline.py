@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import structlog
 from sqlalchemy.orm import Session
@@ -16,6 +16,11 @@ from app.tenders import link_tender
 
 log = structlog.get_logger()
 
+# Bu müddətdən köhnə `running` run = yarımçıq (ən uzun mənbə etender ~5 dəq + AI).
+INTERRUPTED_AFTER = timedelta(hours=2)
+# Bu müddətdən köhnə `new` lead = əvvəlki run AI mərhələsində qırılıb.
+UNSCORED_AFTER = timedelta(minutes=30)
+
 
 @dataclass
 class PipelineResult:
@@ -28,6 +33,8 @@ class PipelineResult:
     pending: int = 0          # AI: validasiyaya
     rejected: int = 0         # AI: rədd
     error: str | None = None  # scraper xətası (məs. sayt 403 qaytardı) — run "failed" sayılır
+    fetched: int = 0          # filtrdən ƏVVƏL saytdan gələn elan (0 = sayt/selector sınıb ola bilər)
+    recovered: int = 0        # əvvəlki qırılmış run-dan skorsuz qalan lead-lər, indi skorlandı
 
     def summary(self) -> str:
         """Məs. "3 yeni lead — 1 validasiyaya, 2 AI rədd etdi" (+ dublikatlar)."""
@@ -59,7 +66,11 @@ def run_pipeline(
     bir neçə mənbədə eyni ola bilər).
     """
     source_key = source_key or scraper_cls.source_name
-    run = ScrapeRun(source_key=source_key, trigger=trigger, started_at=datetime.utcnow(), status="running",
+    started = datetime.utcnow()
+    closed = LeadRepository(session).close_interrupted_runs(source_key, started - INTERRUPTED_AFTER)
+    if closed:
+        log.warning("interrupted_runs_closed", source=source_key, count=closed)
+    run = ScrapeRun(source_key=source_key, trigger=trigger, started_at=started, status="running",
                     items_seen=0, leads_new=0, leads_duplicate=0, leads_pending=0)
     session.add(run)
     session.commit()
@@ -78,6 +89,7 @@ def run_pipeline(
     run.status, run.finished_at = ("failed" if failed else "ok"), datetime.utcnow()
     run.error = result.error if failed else None
     run.items_seen, run.leads_new, run.leads_pending = result.scraped, result.fresh, result.pending
+    run.items_fetched = result.fetched
     run.leads_duplicate = result.url_duplicates + result.tender_duplicates
     session.commit()
     return result
@@ -91,8 +103,11 @@ def _run(scraper_cls: type[BaseScraper], session: Session) -> PipelineResult:
 
     log.info("pipeline_started", source=scraper_cls.source_name)
     scraper = scraper_cls()
+    started = datetime.utcnow()
     raw_leads = scraper.run()
     result.error = getattr(scraper, "error", None)
+    fetched = getattr(scraper, "fetched", None)
+    result.fetched = len(raw_leads) if fetched is None else fetched
     for lead in raw_leads:
         lead.deadline_at = lead.deadline_at or extract_deadline(lead.raw_text)
     fresh_leads = normalizer.process(raw_leads)
@@ -117,7 +132,15 @@ def _run(scraper_cls: type[BaseScraper], session: Session) -> PipelineResult:
         cross_source_duplicates=result.tender_duplicates,
     )
 
-    if not fresh_leads:
+    # Əvvəlki run AI mərhələsində qırılıbsa (Neon bağlantısı düşüb və s.) onun lead-ləri
+    # `new` statusunda qalıb — heç vaxt skorlanmırdı. İndi bu run-la birlikdə skorlanır.
+    stuck = repo.list_unscored(scraper_cls.source_name, started - UNSCORED_AFTER)
+    if stuck:
+        log.warning("unscored_leads_recovered", source=scraper_cls.source_name, count=len(stuck))
+        result.recovered = len(stuck)
+        to_score += [repo.to_raw_lead(record) for record in stuck]
+
+    if not to_score:
         log.info("pipeline_no_new_leads", source=scraper_cls.source_name)
         return result
 

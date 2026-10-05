@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import os
+import time
 from datetime import datetime, timedelta
 
 import structlog
 from celery.schedules import crontab
 from celery.signals import worker_ready
+from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.orm import sessionmaker
 
 from app import triggers
@@ -30,6 +32,8 @@ from app.scrapers import (
 )
 
 SessionLocal = sessionmaker(bind=engine)
+DB_ATTEMPTS = 2
+DB_RETRY_DELAY_S = 30
 log = structlog.get_logger()
 
 # Sənəd §7 Scheduling:
@@ -83,11 +87,21 @@ def scrape_source(source_key: str, trigger: str = "schedule") -> int | None:
         if not acquired:
             log.info("scheduled_scrape_skipped", source=source_key, reason="artıq işləyir")
             return None
-        session = SessionLocal()
-        try:
-            return run_pipeline(scraper_cls, session, source_key=source_key, trigger=trigger).pending
-        finally:
-            session.close()
+        for attempt in range(1, DB_ATTEMPTS + 1):
+            session = SessionLocal()
+            try:
+                return run_pipeline(scraper_cls, session, source_key=source_key, trigger=trigger).pending
+            except DBAPIError as exc:
+                # Neon bağlantısı düşdü (şəbəkə, Mac yuxusu) — bir dəfə təzə bağlantı ilə
+                # təkrar. Qırılmış run-ın yazdığı lead-lər növbəti run-da skorlanır.
+                connection_lost = exc.connection_invalidated or isinstance(exc, OperationalError)
+                if not connection_lost or attempt == DB_ATTEMPTS:
+                    raise
+                log.warning("scrape_db_retry", source=source_key, attempt=attempt, error=str(exc)[:200])
+                engine.dispose()
+                time.sleep(DB_RETRY_DELAY_S)
+            finally:
+                session.close()
 
 
 celery_app.conf.beat_schedule = {

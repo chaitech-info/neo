@@ -143,6 +143,19 @@
   - **Açıq:** worker-in kompüter yenidən başlayanda özü qalxması (launchd agent) — hələ qurulmayıb, istifadəçi qərarı; worker logları panelin "Loglar" səhifəsinə düşmür.
   - **Kodda:** `app/crm.py`, `app/crm_routes.py`, `app/keywords.py`, `app/keyword_routes.py`, `app/locks.py`, `app/scheduler.py`, `scripts/run_worker.sh`, şablonlar `opportunities.html`, `opportunity.html`, `tasks.html`, `keywords.html`; testlər `tests/test_crm.py`, `tests/test_keywords_db.py`, `tests/test_locks_and_scheduler.py`
 
+### Phase 0 — etibarlılıq düzəlişləri (2026-10-05)
+- **Status:** Decided, deploy olunub
+- **Niyə:** 5 günlük production datası (370 lead, 477 run): 1news 112 run-dan 89-u uğursuz (sayt `/az/xronika/`-ni silib, 404); 41 lead heç vaxt skorlanmayıb (`new` — Neon bağlantısı AI mərhələsində düşüb, heç kim təkrar etmirdi); "0 elan" həm "uyğun yoxdur", həm "selector sınıb" demək idi; AI triajı say səhvində (37 başlığa 36 cavab) bütün partiyanı daxil edirdi (oxu: 37/37 tam qiymətləndirməyə getdi).
+- **Nə edildi:**
+  - 1news → `/az/lenta/` (`.newsList a span.title`).
+  - `scrape_runs.items_fetched` (miqrasiya 0003) — filtrdən əvvəlki say; dashboard-da mənbə sağlamlığı (`app/health.py`: OK / Xəta / Gecikir / Boş).
+  - Özünü bərpa: skorsuz `new` lead-lər növbəti run-da skorlanır; yarımçıq `running` run-lar `failed` olur; baza bağlantısı düşəndə bir təkrar; psycopg2 keepalive + connect_timeout.
+  - Triaj: pozuq partiya yarıya bölünüb yenidən soruşulur; yalnız ≤5 başlıqlıq pozuq partiya daxil edilir və bu "şübhə" cavabları keşlənmir.
+  - Testlər müvəqqəti SQLite-da (əvvəl `.env` → Neon idi).
+- **Worldbank 0 elan normaldır:** API Azərbaycan üzrə 50 elan qaytarır, açıq olan 1-2-si konsaltinqdir.
+- **Nəticə (canlı yoxlanıb):** 1news ok (24 gətirdi), 41 skorsuz lead skorlandı, oxu 37-dən 4-ü seçildi, bütün 13 mənbə "OK".
+- **Kodda:** `app/health.py`, `app/pipeline.py`, `app/db/repository.py`, `app/ai_triage.py`, `app/scheduler.py`, `app/db/engine.py`, `migrations/versions/0003_run_items_fetched.py`, `tests/test_pipeline_recovery.py`.
+
 ## Açıq suallar (hələ qərar verilməyib)
 
 ### CRM real endpoint-i

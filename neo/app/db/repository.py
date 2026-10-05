@@ -107,6 +107,31 @@ class LeadRepository:
         stmt = select(ScrapeRun).join(newest, ScrapeRun.id == newest.c.id)
         return {run.source_key: run for run in self.session.execute(stmt).scalars()}
 
+    def list_unscored(self, source: str, scraped_before: datetime) -> list[LeadRecord]:
+        """Yazılıb, amma AI skoru almayan lead-lər (status `new`) — run AI mərhələsində
+        qırılıb (məs. Neon bağlantısı düşüb). `scraped_before`: indiki run-ın öz
+        lead-lərinə və paralel run-a toxunmamaq üçün."""
+        stmt = (
+            select(LeadRecord)
+            .where(LeadRecord.source == source, LeadRecord.status == "new",
+                   LeadRecord.scraped_at < scraped_before)
+            .order_by(LeadRecord.scraped_at)
+        )
+        return list(self.session.execute(stmt).scalars().all())
+
+    def close_interrupted_runs(self, source_key: str, started_before: datetime) -> int:
+        """Proses və ya baza bağlantısı ölüb, `running` qalmış köhnə run-lar → failed."""
+        runs = self.session.execute(
+            select(ScrapeRun).where(ScrapeRun.source_key == source_key, ScrapeRun.status == "running",
+                                    ScrapeRun.started_at < started_before)
+        ).scalars().all()
+        for run in runs:
+            run.status, run.finished_at = "failed", run.finished_at or datetime.utcnow()
+            run.error = run.error or "Yarımçıq qaldı: proses və ya baza bağlantısı run bitməmiş kəsildi"
+        if runs:
+            self.session.commit()
+        return len(runs)
+
     def list_all(self, limit: int = 200) -> list[LeadRecord]:
         stmt = select(LeadRecord).order_by(LeadRecord.scraped_at.desc()).limit(limit)
         return list(self.session.execute(stmt).scalars().all())

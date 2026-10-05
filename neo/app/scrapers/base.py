@@ -185,6 +185,9 @@ class BaseScraper(abc.ABC):
 
     def __init__(self, client: httpx.Client | None = None) -> None:
         self.error: str | None = None  # run() xətanı udanda — scrape_runs-a "failed" yazılsın
+        # Filtrdən əvvəl saytdan gələn elan sayı (select_relevant sayır). None = scraper
+        # select_relevant çağırmır — pipeline qaytarılan sayı götürür.
+        self.fetched: int | None = None
         self._client = client or httpx.Client(
             headers={"User-Agent": DEFAULT_USER_AGENT},
             timeout=20.0,
@@ -236,6 +239,7 @@ class BaseScraper(abc.ABC):
         from app import keywords as kw_store  # gec import: baza modulu scraper-lərdən asılı olmasın
         from app.ai_triage import triage
 
+        self.fetched = (self.fetched or 0) + len(texts)
         db_terms = kw_store.terms_for(kind)
         extra_terms = [kw_store.Term(t) for t in extra]
         if db_terms is None:

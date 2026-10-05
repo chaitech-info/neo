@@ -17,9 +17,14 @@ for _prefix in ("postgres://", "postgresql://"):
 
 # timeout: "Hamısını scrape et" 13 mənbəni paralel işlədir — SQLite yazıları
 # bir-birini gözləsin ("database is locked" xətası verməsin).
-_connect_args = (
-    {"check_same_thread": False, "timeout": 30} if DATABASE_URL.startswith("sqlite") else {}
-)
+if DATABASE_URL.startswith("sqlite"):
+    _connect_args = {"check_same_thread": False, "timeout": 30}
+else:
+    # Neon bağlantısı uzun run-ların ortasında düşürdü ("Operation timed out",
+    # "server closed the connection") — keepalive ölü bağlantını tez aşkar edir,
+    # connect_timeout isə Mac yuxudan oyananda sonsuz gözləmənin qarşısını alır.
+    _connect_args = {"connect_timeout": 10, "keepalives": 1, "keepalives_idle": 30,
+                     "keepalives_interval": 10, "keepalives_count": 3}
 # Serverless (Vercel): hər sorğu qısa ömürlü prosesdədir — öz bağlantı hovuzu
 # saxlanmır, hovuzlamanı Neon-un "-pooler" endpoint-i edir (DATABASE_URL onu göstərməlidir).
 SERVERLESS = bool(os.environ.get("VERCEL"))
