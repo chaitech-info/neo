@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 import structlog
 from openai import OpenAI
@@ -59,6 +60,9 @@ BASE = {
     "expansion_hiring": (0.50, "C"),
 }
 LOW = 0.10
+# Pərakəndə/supermarket şəbəkələri ərzaq SATIR, işçisinə yemək bişirmir — model promptdakı
+# qeydə baxmayaraq OBA-nı "food_business" sayırdı (2026-10-05). Adına görə kodla düzəlir.
+_RETAIL_NAME = re.compile(r"market|mağaza|magaza|maqaz|store|супермаркет|магазин", re.IGNORECASE)
 
 SCHEMA = {
     "type": "object",
@@ -134,6 +138,8 @@ food_business — the organization COOKS AND SERVES MEALS TO CUSTOMERS as its
 business (restaurant, cafe, hotel, catering, canteen operator, food delivery).
 FALSE for food MANUFACTURERS and producers (confectionery, bakery factory, meat,
 dairy, flour, brewery, agro, FMCG) — they are factories that need staff lunches.
+FALSE for supermarkets, grocery/retail chains and shops (OBA, Bravo, Araz...) —
+they sell groceries, they do not cook meals for their staff.
 workforce — staff size of the organization/site: small (<20), medium (20-200),
 large (200+), unknown. Factories, mines, plants, construction sites, state
 bodies, holdings, networks with many branches are usually medium/large.
@@ -145,18 +151,21 @@ matters (or why not).
 """
 
 
-def compute_score(facts: dict, text: str, is_tender: bool = True) -> tuple[float, str]:
+def compute_score(facts: dict, text: str, is_tender: bool = True, listing: bool = False) -> tuple[float, str]:
     """Faktlardan skor və A/B/C. Kateqoriya "none" = rədd.
     `is_tender` — mənbə tender/satınalmadır; xəbərdəki tədbir (forum keçirildi/keçiriləcək)
     tender deyil — yalnız yemək açıq yazılıbsa keçir."""
     signal = facts.get("signal")
     if signal not in BASE:
         return LOW if signal != "irrelevant" else 0.0, "none"
-    if not facts.get("in_azerbaijan", True) or facts.get("food_business"):
+    food_business = facts.get("food_business") and not _RETAIL_NAME.search(facts.get("organization") or "")
+    if not facts.get("in_azerbaijan", True) or food_business:
         return 0.05, "none"
     score, tier = BASE[signal]
     workforce = facts.get("workforce", "unknown")
-    if signal == "event_tender" and not is_tender:
+    if signal == "event_tender" and listing:
+        score, tier = 0.70, "B"          # sərgi təqvimi: tədbir var, amma catering sorğusu yox — dolayı
+    elif signal == "event_tender" and not is_tender:
         score, tier = (0.65, "C") if facts.get("food_mentioned") else (0.50, "C")
     elif signal == "event_tender" and facts.get("food_mentioned"):
         score, tier = 0.85, "A"          # tədbir tenderi yeməyi açıq yazır → birbaşa tələbat
@@ -165,8 +174,6 @@ def compute_score(facts: dict, text: str, is_tender: bool = True) -> tuple[float
             score += 0.10
         elif workforce == "small":
             score, tier = score - 0.08, "C"
-    elif signal == "expansion_hiring" and workforce == "large":
-        score, tier = 0.72, "B"
     if "[SON TARİX: BİTİB" in text:
         return min(score, LOW), "none"
     return round(min(score, 1.0), 2), tier
@@ -216,17 +223,36 @@ class StructuredAIFilter:
         facts["_text"] = text
         return facts
 
+    @staticmethod
+    def blocked_by_negative(lead: RawLead) -> str | None:
+        """Paneldəki mənfi açar söz başlıqda varsa (məs. "mətbəə") — AI-yə getmədən rədd.
+        Triaj da bunu edir, amma yenidən skorlama (scripts/rescore_v2.py) triajı keçmir."""
+        from app import keywords
+
+        kind = "tender" if lead.category.value == "tender" else "news"
+        terms = keywords.terms_for(kind)
+        if not terms:
+            return None
+        hit = next((t.text for t in terms[1] if keywords.matches(lead.title, t)), None)
+        return hit
+
     def score(self, lead: RawLead) -> RawLead:
+        hit = self.blocked_by_negative(lead)
+        if hit:
+            lead.ai_score, lead.status = 0.0, LeadStatus.rejected
+            lead.ai_reason = f"Mənfi açar söz: «{hit}» — avtomatik rədd"
+            return lead
         try:
             facts = self.facts(lead)
-            score, tier = compute_score(facts, facts.pop("_text"), is_tender=lead.category.value == "tender")
+            score, tier = compute_score(facts, facts.pop("_text"), is_tender=lead.category.value in ("tender", "event_listing"),
+                                         listing=lead.category.value == "event_listing")
             lead.ai_score = score
             org = facts.get("organization") or ""
             lead.ai_reason = f"[{tier}] {facts.get('reason', '')}" if tier != "none" else facts.get("reason", "")
             if org and not lead.entity_name:
                 lead.entity_name = org[:200]
             lead.status = LeadStatus.pending_review if score >= SCORE_THRESHOLD else LeadStatus.rejected
-            log.info("ai_scored", source=lead.source.value, score=score, tier=tier, signal=facts.get("signal"),
+            log.info("ai_scored", source=lead.source, score=score, tier=tier, signal=facts.get("signal"),
                      status=lead.status.value, title=lead.title[:90], scorer="v2", model=self.model)
         except Exception:
             log.exception("ai_scoring_failed", source=lead.source, url=lead.source_url, scorer="v2")

@@ -34,14 +34,14 @@ def main(dry_run: bool = False) -> None:
     for record in records:
         lead = repo.to_raw_lead(record)
 
-        if lead.source.value in ENRICHABLE_SOURCES and lead.raw_text == lead.title and not dry_run:
-            scraper = SCRAPERS_BY_SOURCE[lead.source.value]()
+        if lead.source in ENRICHABLE_SOURCES and lead.raw_text == lead.title and not dry_run:
+            scraper = SCRAPERS_BY_SOURCE[lead.source]()
             lead = scraper.enrich(lead)
             record.raw_text = lead.raw_text
             record.posted_at = lead.posted_at
 
         if dry_run:
-            print(f"  [{lead.source.value}] {lead.title[:80]}")
+            print(f"  [{lead.source}] {lead.title[:80]}")
             continue
 
         lead = ai_filter.score(lead)
@@ -49,7 +49,7 @@ def main(dry_run: bool = False) -> None:
         outcome = "failed" if lead.ai_score is None else lead.status.value
         counts[outcome] += 1
         score = "—" if lead.ai_score is None else f"{lead.ai_score:.2f}"
-        print(f"  {score:>4} {lead.status.value:<14} [{lead.source.value}] {lead.title[:60]}")
+        print(f"  {score:>4} {lead.status.value:<14} [{lead.source}] {lead.title[:60]}")
         print(f"       {lead.ai_reason}")
 
     if not dry_run:

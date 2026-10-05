@@ -48,30 +48,55 @@ def overlap(a: set[str], b: set[str]) -> float:
     return len(a & b) / min(len(a), len(b))
 
 
-def org_key(record: LeadRecord) -> str:
+_DOMAIN_TAIL = re.compile(r"\.(az|com|net|org|ru|tr|co)$")
+_LEGAL_TAIL = {"mmc", "asc", "qsc", "llc", "ltd", "cjsc", "ojsc", "jsc", "inc", "group", "holding", "company"}
+
+
+def org_key(record: LeadRecord) -> tuple[str, ...]:
+    """Normallaşdırılmış təşkilat adı sözlər kimi: fold, domen sonluğu (xirman.az → xirman),
+    hüquqi forma (normalize_org). Boşdursa ()."""
     name = record.entity_name
     if not name:
         m = _ORG_IN_TITLE.match(record.title or "")
         name = m.group(1) if m else ""
-    return normalize_org(name) if name else ""
+    if not name:
+        return ()
+    name = _DOMAIN_TAIL.sub("", fold(name.strip().lower()))
+    return tuple(re.findall(r"\w+", fold(normalize_org(name))))
+
+
+def same_org(a: tuple[str, ...], b: tuple[str, ...]) -> bool:
+    """Eyni şirkət: adlardan biri digərinin söz-prefiksidir ("avromak" ⊂ "avromak istehsalat və
+    satış", "baku steel company" ⊂ "+ cjsc"). Yalnız ilk sözün üst-üstə düşməsi kifayət deyil
+    ("azərbaycan dəmir yolları" ≠ "azərbaycan hava yolları"); tək söz ≥4 hərf olmalıdır."""
+    if not a or not b:
+        return False
+    a = tuple(w for w in a if w not in _LEGAL_TAIL) or a
+    b = tuple(w for w in b if w not in _LEGAL_TAIL) or b
+    short, long_ = (a, b) if len(a) <= len(b) else (b, a)
+    if len(short) == 1 and len(short[0]) < 4:
+        return False
+    return long_[:len(short)] == short
 
 
 def find_story_duplicate(session: Session, record: LeadRecord, now: datetime | None = None) -> LeadRecord | None:
-    if record.category == "tender" or record.tender_id is not None:
+    # Tenderlər app/tenders.py-da; sərgi təqvimi buraxılışları URL#il ilə unikaldır və başlıqları
+    # ortaq "…, Baku Expo Center" sözləri ilə üst-üstə düşür — burada birləşdirilmir.
+    if record.category in ("tender", "event_listing") or record.tender_id is not None:
         return None
     now = now or datetime.utcnow()
     candidates = session.scalars(
         select(LeadRecord).where(
             LeadRecord.dedupe_key != record.dedupe_key,
             LeadRecord.status.in_(("pending_review", "converted")),
-            LeadRecord.category != "tender",
+            LeadRecord.category.notin_(("tender", "event_listing")),
             LeadRecord.scraped_at >= now - WINDOW,
             LeadRecord.scraped_at <= record.scraped_at,
         ).order_by(LeadRecord.scraped_at)
     ).all()
     key, tokens = org_key(record), title_tokens(record.title or "")
     for other in candidates:
-        if key and key == org_key(other):
+        if same_org(key, org_key(other)):
             return other
         if overlap(tokens, title_tokens(other.title or "")) >= TITLE_OVERLAP:
             return other

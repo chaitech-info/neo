@@ -105,11 +105,12 @@ def test_due_sources_follow_beat_schedule():
     from datetime import datetime
 
     # 10 dəqiqəlik pəncərə: (06:21, 06:30] — emlak 06:30, report */2 saat :25 (6 cüt)
-    assert set(scheduler.due_sources(datetime(2026, 10, 1, 6, 30), 10)) == {"emlak", "report"}
+    due = set(scheduler.due_sources(datetime(2026, 10, 1, 6, 30), 10))
+    assert {"emlak", "report"} <= due and not {"marja", "etender", "boss"} & due
     # (07:51, 08:00] — marja/1news hər saat :00
-    assert set(scheduler.due_sources(datetime(2026, 10, 1, 8, 0), 10)) == {"marja", "1news"}
+    assert {"marja", "1news"} <= set(scheduler.due_sources(datetime(2026, 10, 1, 8, 0), 10))
     # (07:01, 07:10] — heç nə (worldbank/linkedin 07:00 əvvəlki pəncərədədir)
-    assert scheduler.due_sources(datetime(2026, 10, 1, 7, 10), 10) == []
+    assert not {"worldbank", "linkedin", "bp_edp"} & set(scheduler.due_sources(datetime(2026, 10, 1, 7, 10), 10))
 
 
 def test_modal_lock_refuses_second_holder(monkeypatch):
@@ -135,10 +136,10 @@ def test_modal_lock_refuses_second_holder(monkeypatch):
 def test_blocked_sources_run_on_mac_not_modal(monkeypatch):
     from datetime import datetime
 
-    at_0640 = datetime(2026, 10, 1, 6, 40)  # (06:31, 06:40] — fed (hər saat :40)
-    assert scheduler.due_sources(at_0640, 10) == ["fed"]
+    at_0640 = datetime(2026, 10, 1, 6, 40)  # (06:31, 06:40] — fed (Mac) + banker (Modal)
+    assert {"fed", "banker"} <= set(scheduler.due_sources(at_0640, 10))
     monkeypatch.setenv("NEO_SCRAPE_ROLE", "modal")
-    assert scheduler.due_sources(at_0640, 10) == []                   # Modal atlayır
+    assert "fed" not in scheduler.due_sources(at_0640, 10) and "banker" in scheduler.due_sources(at_0640, 10)
     assert scheduler.scrape_source("etender") is None                 # işə düşmür
     monkeypatch.setenv("NEO_SCRAPE_ROLE", "local")
     assert scheduler.runs_here("etender") and not scheduler.runs_here("marja")

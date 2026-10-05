@@ -174,6 +174,18 @@
 - **Testlər:** OpenAI açarı test mühitindən silinir — heç bir test real API-yə gedə bilməz.
 - **Açıq:** satış komandasının etiket yoxlaması (`eval_data/for_sales_review.csv`); köhnə (v1) lead-lərin v2 ilə yenidən skorlanması — qərar gözləyir; A/B/C panel filtri — növbəti scope.
 
+### Phase 2 — mənbə reyestri və 13 → 28 mənbə (2026-10-05)
+- **Status:** Davam edir; ilk iki partiya deploy olunub.
+- **Reyestr** (`app/sources.py`): mənbə əvvəl 7 yerdə əl ilə qeyd olunurdu (enum, sources cədvəli, panel, scheduler, beat, növ, LOCAL_ONLY). İndi bir `SourceSpec`; `sources` cədvəli `upgrade_to_head`-dən sonra `sync_sources` ilə yenilənir (miqrasiya lazım deyil). `RawLead.source` artıq sərbəst sətirdir — yoxlama bazadakı FK-dır.
+- **Ümumi scraper-lər:** RSS (9 mənbə), siyahı + URL nümunəsi (5), jobsearch.az JSON API (1). Bax 03-site-research → "Phase 2 mənbələri".
+- **Triaj keşi bazada** (miqrasiya 0006, `triage_cache`): Modal hər run-da təzə konteyner açır — yaddaş keşi boş idi, saatlıq lentlər eyni başlıqları təkrar AI-yə göndərəcəkdi (~25M token/ay). 30 gün saxlanılır.
+- **"Pulsuz nahar"** (imtiyaz sözü yeməkdən əvvəl) indi tutulur — boss.az-a da aiddir.
+- **Təxirə salınıb:** UNGM / EU / ADB (aşağı gəlir — 5 gündə Dünya Bankından AZ catering tenderi yoxdur), JS saytları, hellojob/position (HTML, detal səhifə lazım), tədbir təqvimləri (BakuBuild, Caspian Oil & Gas və s.).
+- **Partiya 3 (eyni gün):** position.az + hellojob.az (ümumi `JobBoardScraper`; işəgötürən qruplaşdırması `app/scrapers/employers.py`-da — jobsearch da işlədir), Baku Expo Center sərgi təqvimi (yeni kateqoriya `event_listing` — v2 bunu tender kimi sayır, amma maks. B 0.7: tədbir var, catering sorğusu yox). Cəmi **31 mənbə**.
+- **Şirkət adının qeyri-dəqiq uyğunlaşdırılması** (`story_dedup.same_org`): fold, domen sonluğu (xirman.az → xirman), hüquqi forma; adlardan biri digərinin söz-prefiksidirsə eyni şirkət ("Avromak MMC" ⊂ "Avromak MMC İstehsalat və satış"); yalnız ilk söz kifayət deyil. Mövcud növbəyə bir dəfə tətbiq olundu: 4 birləşmə.
+- **Kod qaydası:** adı "market/mağaza/store" olan təşkilat yemək biznesi sayılmır (model OBA-nı promptdakı açıq qeydə baxmayaraq "food_business" sayırdı).
+- **Reqressiya ölçüsü** (bütün dəyişikliklərdən sonra): v2 P 0.925 / R 0.961 (bütün dəst), test 0.875 / 0.933.
+
 ## Açıq suallar (hələ qərar verilməyib)
 
 ### CRM real endpoint-i

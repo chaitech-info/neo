@@ -202,3 +202,15 @@ def test_own_kitchen_employer_names():
     assert has_own_kitchen("Beast Coffee")
     assert not has_own_kitchen("Sahil Transport MMC")
     assert not has_own_kitchen("restart.az")  # ".rest" yalnız domen sonluğu kimi
+
+
+def test_triage_decisions_survive_process_restart():
+    """Modal hər run-da təzə konteyner açır — qərarlar bazadan gəlməlidir, AI-yə yox."""
+    triage = _real_triage()
+    first = _FakeOpenAI([[0, 1]])
+    assert triage(["db-a", "db-b"], kind="news", client=first) == {1}
+
+    triage = _real_triage()          # yeni proses: yaddaş keşi boş
+    second = _FakeOpenAI([])
+    assert triage(["db-a", "db-b"], kind="news", client=second) == {1}
+    assert second.calls == 0

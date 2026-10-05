@@ -23,7 +23,7 @@ def facts(signal, **kw):
     (facts("employer_meal_signal", workforce="small"), (0.62, "C")),
     (facts("new_facility", workforce="large"), (0.8, "B")),
     (facts("expansion_hiring"), (0.5, "C")),
-    (facts("expansion_hiring", workforce="large"), (0.72, "B")),
+    (facts("expansion_hiring", workforce="large"), (0.5, "C")),   # tək vakansiya böyük şirkətdə — keçmir
     # 2026-10-05 analizindəki səhvlər: restoran, xaricdə zavod, rəqib, tikinti tenderi
     (facts("employer_meal_signal", food_business=True), (0.05, "none")),
     (facts("new_facility", in_azerbaijan=False, workforce="large"), (0.05, "none")),
@@ -39,6 +39,16 @@ def test_event_in_news_is_not_a_tender():
     assert compute_score(facts("event_tender"), "x", is_tender=False) == (0.5, "C")
     assert compute_score(facts("event_tender", food_mentioned=True), "x", is_tender=False) == (0.65, "C")
     assert compute_score(facts("event_tender"), "x", is_tender=True) == (0.7, "B")
+
+
+def test_retail_chain_is_not_a_food_business():
+    f = facts("employer_meal_signal", food_business=True, workforce="large", organization="OBA marketlər şəbəkəsi")
+    assert compute_score(f, "x") == (0.8, "B")
+    assert compute_score(facts("employer_meal_signal", food_business=True, organization="Lezzet Restoran"), "x")[0] == 0.05
+
+
+def test_event_listing_is_indirect_even_with_food():
+    assert compute_score(facts("event_tender", food_mentioned=True), "x", is_tender=True, listing=True) == (0.7, "B")
 
 
 def test_expired_deadline_caps_score():
@@ -92,3 +102,16 @@ def test_pipeline_uses_v2_when_configured(monkeypatch):
     assert isinstance(pipeline.make_scorer(), StructuredAIFilter)
     monkeypatch.setenv("AI_SCORER", "v1")
     assert isinstance(pipeline.make_scorer(), pipeline.AIFilter)
+
+
+def test_negative_keyword_rejects_without_calling_ai(monkeypatch):
+    from app import keywords
+
+    monkeypatch.setattr(keywords, "terms_for",
+                        lambda kind: ([], [keywords.Term("mətbəə")]) if kind == "tender" else ([], []))
+    client = _Client(facts("food_supply_tender"))
+    lead = RawLead(source="etender", source_url="https://etender.gov.az/9", title="Mətbəə malları",
+                   raw_text="Mətbəə malları", category="tender")
+    lead = StructuredAIFilter(client=client).score(lead)
+    assert (lead.ai_score, lead.status) == (0.0, LeadStatus.rejected) and "mətbəə" in lead.ai_reason
+    assert client.calls == []

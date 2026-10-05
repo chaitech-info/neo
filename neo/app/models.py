@@ -28,6 +28,7 @@ class LeadCategory(str, Enum):
     corporate = "corporate"
     tender = "tender"
     real_estate = "real_estate"
+    event_listing = "event_listing"  # sərgi/tədbir təqvimindən yaxınlaşan tədbir (app/scrapers/events.py)
     other = "other"
 
 
@@ -49,7 +50,7 @@ class ContactInfo(BaseModel):
 class RawLead(BaseModel):
     """Bir scraper-in qaytardığı vahid format. Bax: sənəd §4 Data Model."""
 
-    source: LeadSource
+    source: str  # mənbə açarı (sources.key; reyestr app/sources.py, bazada FK yoxlayır)
     source_url: str
     title: str
     raw_text: str
@@ -69,5 +70,5 @@ class RawLead(BaseModel):
 
     def dedupe_key(self) -> str:
         """source + source_url üzrə hash. Sənəd §4-dəki deduplication qaydası."""
-        raw = f"{self.source.value}:{self.source_url}".encode("utf-8")
+        raw = f"{self.source}:{self.source_url}".encode("utf-8")
         return hashlib.sha256(raw).hexdigest()

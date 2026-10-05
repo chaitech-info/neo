@@ -123,6 +123,14 @@ Qərarı **test** hissəsinə görə ver; tənzimləməni **dev** səhvlərinə 
 | `Address already in use` (port 8008) | Köhnə uvicorn prosesi hələ işləyir | `lsof -ti:8008 \| xargs kill -9` |
 | Pydantic/SQLAlchemy `TypeError: unsupported operand type(s) for \|` | Python 3.9-da `str \| None` sintaksisi | `eval_type_backport` quraşdırılıb-quraşdırılmadığını yoxla; yeni fayl yazırsansa, DB modellərində `Optional[str]` istifadə et (`str \| None` yox) — bax `app/db/models.py` |
 
+## Yeni mənbə əlavə etmək (Phase 2-dən sonra)
+Hər şey `app/sources.py`-dadır — scheduler, panel, Modal/Mac bölgüsü, `sources` cədvəli oradan törəyir:
+1. RSS varsa: `_rss("key", "Ad", "https://site/rss", "dəqiqə", "saat")` (gövdə seçicisi lazım olsa `body=`).
+2. RSS yoxdursa: `_list("key", "Ad", LinkListSite("key", siyahı_url, r"məqalə URL regex", "news"|"tender", org), ...)`.
+3. Modal-dan 403/timeout verirsə `local_only=True` (Mac worker işlədir).
+4. Testlər (`pytest`), sonra Neon: `DATABASE_URL="<-pooler silinmiş>" python -m scripts.init_db` (mənbə sətri avtomatik yaranır), Modal + Vercel deploy, Mac worker restart.
+5. Canlı yoxla: trigger endpoint ilə run, dashboard "Vəziyyət" sütunu.
+
 ## Yeni scraper əlavə etmək (checklist)
 
 1. Saytı brauzerdə aç, real strukturunu tap (statik HTML? JSON API? SPA?) — `03-site-research.md`-ə qeyd et

@@ -15,21 +15,7 @@ from app.celery_app import celery_app
 from app.locks import source_lock
 from app.db.engine import engine
 from app.pipeline import run_pipeline
-from app.scrapers import (
-    BossAzScraper,
-    BpEdpScraper,
-    CorporateTenderScraper,
-    EmlakScraper,
-    EtenderScraper,
-    FedScraper,
-    FedTenderScraper,
-    LinkedInScraper,
-    MarjaScraper,
-    News1Scraper,
-    OxuScraper,
-    ReportSenayeScraper,
-    WorldBankScraper,
-)
+from app.sources import LOCAL_ONLY, SOURCES
 
 SessionLocal = sessionmaker(bind=engine)
 DB_ATTEMPTS = 2
@@ -41,26 +27,9 @@ log = structlog.get_logger()
 # - Etender.gov.az, Emlak.gov.az, LinkedIn: gündə 1 dəfə
 #   (LinkedIn Apify actor-u post başına ödənişlidir — tez-tez çağırmaq lazım deyil)
 
-SOURCE_TASKS = {
-    "marja": MarjaScraper,
-    # azerweb qəsdən yoxdur — robots.txt `Disallow: /api/`, məzmun isə yalnız API-dən gəlir (bax app/scrapers/azerweb.py)
-    "1news": News1Scraper,
-    "oxu": OxuScraper,
-    "fed": FedScraper,
-    "fed_tenders": FedTenderScraper,
-    "report": ReportSenayeScraper,
-    "etender": EtenderScraper,
-    "emlak": EmlakScraper,
-    "corporate": CorporateTenderScraper,
-    "worldbank": WorldBankScraper,
-    "bp_edp": BpEdpScraper,
-    "boss": BossAzScraper,
-    "linkedin": LinkedInScraper,
-}
+SOURCE_TASKS = {spec.key: spec.scraper for spec in SOURCES}  # reyestrdən (app/sources.py)
 
-# Modal-ın (ABŞ/AB datacenter) IP-lərini bloklayan mənbələr — 403 və ya timeout
-# (2026-09-30 yoxlanıb; report ABŞ IP-dən 403, AB-dən bəzən 200 — qeyri-sabit). Bunlar Azərbaycan IP-si olan maşında (lokal Mac worker) işləyir.
-LOCAL_ONLY = frozenset({"etender", "fed", "fed_tenders", "oxu", "report"})
+# Modal-ı bloklayan mənbələr (Mac worker işlədir) — reyestrdə `local_only=True` (app/sources.py).
 
 
 def runs_here(source_key: str) -> bool:
@@ -105,72 +74,9 @@ def scrape_source(source_key: str, trigger: str = "schedule") -> int | None:
 
 
 celery_app.conf.beat_schedule = {
-    "scrape-marja-every-90min": {
-        "task": "scrape_source",
-        "schedule": crontab(minute=0, hour="*/1,*/2"),
-        "args": ("marja",),
-    },
-    "scrape-1news-hourly": {
-        "task": "scrape_source",
-        "schedule": crontab(minute=0, hour="*"),
-        "args": ("1news",),
-    },
-    "scrape-oxu-hourly": {
-        "task": "scrape_source",
-        "schedule": crontab(minute=20, hour="*"),
-        "args": ("oxu",),
-    },
-    "scrape-fed-hourly": {
-        "task": "scrape_source",
-        "schedule": crontab(minute=40, hour="*"),
-        "args": ("fed",),
-    },
-    "scrape-fed-tenders-every-2h": {
-        "task": "scrape_source",
-        "schedule": crontab(minute=50, hour="*/2"),
-        "args": ("fed_tenders",),
-    },
-    "scrape-report-every-2h": {
-        "task": "scrape_source",
-        "schedule": crontab(minute=25, hour="*/2"),
-        "args": ("report",),
-    },
-    "scrape-etender-daily": {
-        "task": "scrape_source",
-        "schedule": crontab(minute=0, hour=6),
-        "args": ("etender",),
-    },
-    "scrape-corporate-twice-daily": {
-        "task": "scrape_source",
-        "schedule": crontab(minute=10, hour="8,16"),
-        "args": ("corporate",),
-    },
-    "scrape-worldbank-daily": {
-        "task": "scrape_source",
-        "schedule": crontab(minute=0, hour=7),
-        "args": ("worldbank",),
-    },
-    "scrape-bp-edp-daily": {
-        "task": "scrape_source",
-        "schedule": crontab(minute=15, hour=7),
-        "args": ("bp_edp",),
-    },
-    "scrape-emlak-daily": {
-        "task": "scrape_source",
-        "schedule": crontab(minute=30, hour=6),
-        "args": ("emlak",),
-    },
-    "scrape-linkedin-daily": {
-        "task": "scrape_source",
-        "schedule": crontab(minute=0, hour=7),
-        "args": ("linkedin",),
-    },
-    # ~28 GraphQL səhifəsi, ~1.5 dəq. Elanlar 30 gün aktiv qalır — gündə 1 dəfə kifayətdir.
-    "scrape-boss-daily": {
-        "task": "scrape_source",
-        "schedule": crontab(minute=45, hour=7),
-        "args": ("boss",),
-    },
+    f"scrape-{spec.key}": {"task": "scrape_source", "schedule": crontab(minute=spec.minute, hour=spec.hour),
+                           "args": (spec.key,)}
+    for spec in SOURCES
 }
 
 

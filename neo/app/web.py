@@ -34,43 +34,14 @@ from app.crm_routes import router as crm_router
 from app.keyword_routes import router as keyword_router
 from app.locks import source_lock
 from app.pipeline import PipelineResult, reject_lead, restore_lead, run_pipeline
-from app.scrapers import (
-    BossAzScraper,
-    BpEdpScraper,
-    CorporateTenderScraper,
-    EmlakScraper,
-    EtenderScraper,
-    FedScraper,
-    FedTenderScraper,
-    LinkedInScraper,
-    MarjaScraper,
-    News1Scraper,
-    OxuScraper,
-    ReportSenayeScraper,
-    WorldBankScraper,
-)
+from app.sources import SOURCES as SOURCE_SPECS
 
 logbuffer.setup()
 log = structlog.get_logger()
 
 SessionLocal = sessionmaker(bind=engine)
 
-SOURCES = {
-    "marja": ("Marja.az", MarjaScraper),
-    # azerweb qəsdən yoxdur — robots.txt `Disallow: /api/`, məzmun isə yalnız API-dən gəlir (bax app/scrapers/azerweb.py)
-    "1news": ("1news.az", News1Scraper),
-    "oxu": ("Oxu.az", OxuScraper),
-    "fed": ("Fed.az", FedScraper),
-    "fed_tenders": ("Fed.az Tenderlər", FedTenderScraper),
-    "report": ("Report.az Sənaye", ReportSenayeScraper),
-    "etender": ("Etender.gov.az", EtenderScraper),
-    "emlak": ("Emlak.gov.az", EmlakScraper),
-    "corporate": ("Şirkət/agentlik tenderləri", CorporateTenderScraper),
-    "worldbank": ("Dünya Bankı", WorldBankScraper),
-    "bp_edp": ("bp EDP", BpEdpScraper),
-    "boss": ("boss.az — işçilərinə nahar verən şirkətlər", BossAzScraper),
-    "linkedin": ("LinkedIn (Apify)", LinkedInScraper),
-}
+SOURCES = {spec.key: (spec.label, spec.scraper) for spec in SOURCE_SPECS}  # reyestr: app/sources.py
 
 _last_run: dict[str, str] = {}
 
@@ -132,10 +103,7 @@ templates.env.globals.update(
 )
 
 # Mənbənin növü — dashboard və validasiya qəbzlərində rəng/etiket.
-SOURCE_KIND = {
-    "etender": "tender", "fed_tenders": "tender", "corporate": "tender", "worldbank": "tender", "bp_edp": "tender",
-    "boss": "employer", "linkedin": "employer",
-}
+SOURCE_KIND = {spec.key: spec.panel_kind for spec in SOURCE_SPECS}
 KIND_NAMES = {"tender": "Tender", "employer": "İşəgötürən", "news": "Xəbər"}
 
 

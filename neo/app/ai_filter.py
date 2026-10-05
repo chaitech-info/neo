@@ -179,7 +179,7 @@ class AIFilter:
             )
             log.info(
                 "ai_scored",
-                source=lead.source.value,
+                source=lead.source,
                 score=lead.ai_score,
                 status=lead.status.value,
                 title=lead.title[:90],

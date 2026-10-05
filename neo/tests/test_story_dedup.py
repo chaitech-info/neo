@@ -59,3 +59,28 @@ def test_different_stories_rejected_old_and_tenders_are_kept(session):
     assert find_story_duplicate(session, new, now=NOW) is None
     tender = _lead(session, "etender", "ASELSAN Naxçıvanda zavod açacaq", org="ASELSAN", category="tender")
     assert find_story_duplicate(session, tender, now=NOW) is None  # tenderlər app/tenders.py-da
+
+
+def test_event_listings_are_never_story_merged(session):
+    _lead(session, "expo_center", "BakuBuild 31-ci Azərbaycan Beynəlxalq İnşaat Sərgisi — 14.10.2026, Baku Expo Center",
+          hours_ago=5, category="event_listing")
+    other = _lead(session, "expo_center", "Plastex 5-ci Azərbaycan Beynəlxalq Sərgisi — 14.10.2026, Baku Expo Center",
+                  category="event_listing")
+    assert find_story_duplicate(session, other, now=NOW) is None
+
+
+@pytest.mark.parametrize("a, b, same", [
+    ("Avromak MMC", "Avromak MMC İstehsalat və satış", True),
+    ("Baku Steel Company", "Baku Steel Company CJSC", True),
+    ("xirman.az", "Xırman", True),
+    ("Azersun Holding", "Azersun", True),
+    ("Azərbaycan Dəmir Yolları", "Azərbaycan Hava Yolları", False),
+    ("ABC", "ABC Holding Construction", False),        # qısa tək söz — çox ümumi
+    ("Main Steel MMC", "Baku Steel Company", False),
+])
+def test_same_org_fuzzy(session, a, b, same):
+    from app.story_dedup import org_key, same_org
+
+    ra = _lead(session, "boss", f"{a} — işçilərinə nahar verir (1 vakansiya, boss.az)", org=a)
+    rb = _lead(session, "jobsearch", f"{b} — işçilərinə nahar verir (1 vakansiya, jobsearch.az)", org=b)
+    assert same_org(org_key(ra), org_key(rb)) is same

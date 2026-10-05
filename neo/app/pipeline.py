@@ -64,6 +64,11 @@ def make_scorer():
     return StructuredAIFilter()
 
 
+def scorer_label(scorer) -> str:
+    """leads.ai_model: hansı qiymətləndirici + model (məs. "v2:gpt-4.1-mini")."""
+    return f"{getattr(scorer, 'version', 'v1')}:{getattr(scorer, 'model', '?')}"
+
+
 def run_pipeline(
     scraper_cls: type[BaseScraper],
     session: Session,
@@ -160,7 +165,7 @@ def _run(scraper_cls: type[BaseScraper], session: Session) -> PipelineResult:
         return result
 
     for lead in ai_filter.score_batch(to_score):
-        repo.update_after_scoring(lead.dedupe_key(), lead)
+        repo.update_after_scoring(lead.dedupe_key(), lead, ai_model=scorer_label(ai_filter))
         if lead.status.value != "pending_review":
             result.rejected += 1
             continue

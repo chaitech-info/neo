@@ -86,6 +86,54 @@ def prompt(kind: str) -> str:
     return _company() + "\n" + _RULES[kind] + "\n" + _FORMAT
 
 _cache: dict[tuple[str, str, str], bool] = {}
+DB_CACHE_DAYS = 30
+
+
+def _db_key(kind: str, version: str, title: str) -> str:
+    return hashlib.sha1(f"{kind}|{version}|{title}".encode("utf-8")).hexdigest()
+
+
+def _db_load(kind: str, version: str, titles: list[str]) -> dict[str, bool]:
+    """Bazadakı keş (Modal konteynerləri arasında). Baza əlçatan deyilsə — boş, AI soruşulur."""
+    if not titles:
+        return {}
+    try:
+        from sqlalchemy import select
+        from sqlalchemy.orm import Session
+
+        from app.db.engine import engine
+        from app.db.models import TriageCache
+
+        keys = {_db_key(kind, version, t): t for t in titles}
+        with Session(engine) as session:
+            rows = session.execute(select(TriageCache.key, TriageCache.fit)
+                                   .where(TriageCache.key.in_(list(keys)))).all()
+        return {keys[k]: fit for k, fit in rows}
+    except Exception:
+        log.warning("triage_cache_load_failed", exc_info=True)
+        return {}
+
+
+def _db_save(kind: str, version: str, decisions: dict[str, bool]) -> None:
+    if not decisions:
+        return
+    try:
+        from datetime import datetime, timedelta
+
+        from sqlalchemy import delete
+        from sqlalchemy.orm import Session
+
+        from app.db.engine import engine
+        from app.db.models import TriageCache
+
+        now = datetime.utcnow()
+        with Session(engine) as session:
+            for title, fit in decisions.items():
+                session.merge(TriageCache(key=_db_key(kind, version, title), fit=fit, created_at=now))
+            session.execute(delete(TriageCache).where(TriageCache.created_at < now - timedelta(days=DB_CACHE_DAYS)))
+            session.commit()
+    except Exception:
+        log.warning("triage_cache_save_failed", exc_info=True)
 
 
 def _client() -> OpenAI:
@@ -156,7 +204,11 @@ def triage(titles: list[str], kind: str = "news", client: OpenAI | None = None) 
     system = prompt(kind)
     version = hashlib.sha1(system.encode("utf-8")).hexdigest()[:12]
     todo = sorted({t for t in titles if t and (kind, version, t) not in _cache})
+    for title, fit in _db_load(kind, version, todo).items():
+        _cache[(kind, version, title)] = fit
+    todo = [t for t in todo if (kind, version, t) not in _cache]
     unsure: set[str] = set()
+    fresh: dict[str, bool] = {}
     if todo:
         try:
             client = client or _client()
@@ -166,10 +218,11 @@ def triage(titles: list[str], kind: str = "news", client: OpenAI | None = None) 
                     if fit is None:
                         unsure.add(title)   # daxil et, amma keşləmə — növbəti run yenə soruşsun
                     else:
-                        _cache[(kind, version, title)] = fit
+                        _cache[(kind, version, title)] = fresh[title] = fit
         except Exception:
             log.exception("ai_triage_failed", kind=kind, titles=len(todo))
             return None
+    _db_save(kind, version, fresh)
     result = {i for i, t in enumerate(titles) if t and (t in unsure or _cache.get((kind, version, t)))}
     if len(_cache) > CACHE_MAX:
         _cache.clear()

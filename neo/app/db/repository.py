@@ -26,7 +26,7 @@ class LeadRepository:
     def save(self, dedupe_key: str, lead: RawLead) -> LeadRecord:
         record = LeadRecord(
             dedupe_key=dedupe_key,
-            source=lead.source.value,
+            source=lead.source,
             source_url=lead.source_url,
             title=lead.title,
             raw_text=lead.raw_text,
@@ -47,7 +47,7 @@ class LeadRepository:
         self.session.commit()
         return record
 
-    def update_after_scoring(self, dedupe_key: str, lead: RawLead) -> None:
+    def update_after_scoring(self, dedupe_key: str, lead: RawLead, ai_model: str | None = None) -> None:
         record = self.session.get(LeadRecord, dedupe_key)
         if record is None:
             return
@@ -56,6 +56,8 @@ class LeadRepository:
         record.status = lead.status.value
         if lead.entity_name and not record.entity_name:
             record.entity_name = lead.entity_name  # v2 təşkilat adını çıxarır — dublikat yoxlaması üçün
+        if ai_model:
+            record.ai_model = ai_model[:32]
         self.session.commit()
 
     def get(self, dedupe_key: str) -> LeadRecord | None:

@@ -150,7 +150,14 @@ def _published_at(soup: BeautifulSoup) -> datetime | None:
 
 
 def _article_text(soup: BeautifulSoup, body_selector: str | None) -> str:
-    container = soup.select_one(body_selector) if body_selector else None
+    # Seçici bir neçə blok tuta bilər (president.az: hər abzas ayrı `news_paragraph-block`).
+    containers = soup.select(body_selector) if body_selector else []
+    container = containers[0] if len(containers) == 1 else None
+    if len(containers) > 1:
+        paragraphs = [p for c in containers for p in (c.find_all("p") or [c])]
+        text = "\n".join(t for p in paragraphs if (t := p.get_text(" ", strip=True)))
+        if text:
+            return text[:ARTICLE_MAX_CHARS]
     if container is None:
         # Seçici tapılmadı (sayt dəyişib və ya təyin olunmayıb) — birbaşa <p>
         # uşaqlarında ən çox mətni olan blok məqalə gövdəsi sayılır.

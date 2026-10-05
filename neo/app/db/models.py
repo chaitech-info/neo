@@ -100,6 +100,16 @@ class ScrapeRun(Base):
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
+class TriageCache(Base):
+    """Başlıq süzgəcinin qərarı (0006) — app/ai_triage.py; açar sha1(növ|prompt versiyası|başlıq)."""
+
+    __tablename__ = "triage_cache"
+
+    key: Mapped[str] = mapped_column(String(40), primary_key=True)
+    fit: Mapped[bool] = mapped_column(Boolean)
+    created_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+
+
 class InterestArea(Base):
     """Şirkətin maraq sahəsi; `ai_description` AI promptuna gedir."""
 
