@@ -17,7 +17,9 @@ import structlog
 from bs4 import BeautifulSoup
 
 from app.scrapers.base import BaseScraper, parse_datetime
-from app.scrapers.employers import EmployerCollector, clean_company, remember, seen_without_signal, usable_employer
+from app.scrapers.employers import (
+    EmployerCollector, RoleCollector, clean_company, remember, seen_without_signal, usable_employer,
+)
 
 log = structlog.get_logger()
 
@@ -56,6 +58,10 @@ class JobSearchScraper(BaseScraper):
         public = {i["slug"]: PUBLIC_URL.format(slug=i["slug"]) for i in recent}
         skip = seen_without_signal(self.source_name, list(public.values()))
         collector = EmployerCollector(self.source_name, "jobsearch.az")
+        roles = RoleCollector(self.source_name, "jobsearch.az")  # hədəf vəzifələr — detal lazım deyil, yalnız ad
+        for item in recent:
+            if not item.get("hide_company"):
+                roles.add(public[item["slug"]], item.get("title") or "", (item.get("company") or {}).get("title") or "")
         checked: dict[str, bool] = {}
         for item in recent:
             vacancy_url = public[item["slug"]]
@@ -79,4 +85,8 @@ class JobSearchScraper(BaseScraper):
         remember(self.source_name, checked)
         log.info("jobsearch_scanned", pages=pages, recent=len(recent), skipped=len(skip),
                  employers=len(collector.employers))
-        return collector.leads()
+        meal_leads = collector.leads()
+        role_leads = roles.leads(exclude_names=[e["name"] for e in collector.employers.values()],
+                                 exclude_urls=[lead.source_url for lead in meal_leads])
+        log.info("jobsearch_roles", role_employers=len(role_leads))
+        return meal_leads + role_leads

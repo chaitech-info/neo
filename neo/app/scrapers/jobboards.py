@@ -18,7 +18,9 @@ import structlog
 from bs4 import BeautifulSoup
 
 from app.scrapers.base import BaseScraper
-from app.scrapers.employers import EmployerCollector, clean_company, remember, seen_without_signal, usable_employer
+from app.scrapers.employers import (
+    EmployerCollector, RoleCollector, clean_company, remember, seen_without_signal, usable_employer,
+)
 
 log = structlog.get_logger()
 
@@ -59,6 +61,7 @@ class JobBoardScraper(BaseScraper):
         skip = seen_without_signal(self.source_name, urls)
         todo = [u for u in urls if u not in skip][:site.max_details]
         collector = EmployerCollector(self.source_name, site.label)
+        roles = RoleCollector(self.source_name, site.label)
         checked: dict[str, bool] = {}
         for url in todo:
             self.polite_sleep()
@@ -72,11 +75,16 @@ class JobBoardScraper(BaseScraper):
             if not usable_employer(name):
                 checked[url] = False
                 continue
-            checked[url] = collector.add(name.lower(), name, _text(page, site.title_selector), url, text)
+            title = _text(page, site.title_selector)
+            roles.add(url, title, name)
+            checked[url] = collector.add(name.lower(), name, title, url, text)
         remember(self.source_name, checked)
         log.info("jobboard_scanned", source=self.source_name, links=len(urls), skipped=len(skip),
                  checked=len(checked), employers=len(collector.employers))
-        return collector.leads()
+        meal_leads = collector.leads()
+        role_leads = roles.leads(exclude_names=[e["name"] for e in collector.employers.values()],
+                                 exclude_urls=[lead.source_url for lead in meal_leads])
+        return meal_leads + role_leads
 
 
 def _text(page: BeautifulSoup, selector: str) -> str:

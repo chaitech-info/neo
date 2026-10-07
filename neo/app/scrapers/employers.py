@@ -7,6 +7,7 @@ hellojob.az bunu işlədir (Phase 2, 2026-10-05).
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from datetime import datetime
 
 from app.models import ContactInfo, LeadCategory, RawLead
@@ -124,6 +125,28 @@ def role_lead(e: dict, source: str, board: str) -> RawLead:
         category=LeadCategory.corporate,
         location="Azərbaycan",
     )
+
+
+class RoleCollector:
+    """Hədəf vəzifə siqnalı üçün ortaq yığıcı (boss.az, jobsearch.az, position.az, hellojob.az).
+
+    Nahar siqnalı olan şirkət artıq güclü lead-dir — eyni şirkət üçün təkrar rol lead-i
+    yaranmasın deyə `leads(exclude_names=...)` ada görə də (domen URL-i fərqli ola bilər) çıxarır.
+    """
+
+    def __init__(self, source: str, board: str) -> None:
+        self.source, self.board = source, board
+        self.employers: dict[str, dict] = {}
+
+    def add(self, vacancy_url: str, position: str, company: str) -> None:
+        collect_role_employer(vacancy_url, position, company, self.employers)
+
+    def leads(self, exclude_names: Iterable[str] = (), exclude_urls: Iterable[str] = ()) -> list[RawLead]:
+        skip_names = {fold(clean_company(n)) for n in exclude_names}
+        skip_urls = set(exclude_urls)
+        return [role_lead(e, source=self.source, board=self.board)
+                for url, e in self.employers.items()
+                if url not in skip_urls and fold(e["name"]) not in skip_names]
 
 
 # --- Artıq yoxlanmış elanlar (triage_cache cədvəli, növ "jobad:<mənbə>") ----------------------

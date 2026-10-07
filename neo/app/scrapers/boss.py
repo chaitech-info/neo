@@ -17,7 +17,7 @@ from app.scrapers.employer_signal import (
     is_competitor,
     mentions_company_meal,
 )
-from app.scrapers.employers import collect_role_employer, role_lead
+from app.scrapers.employers import RoleCollector
 
 log = structlog.get_logger()
 
@@ -78,7 +78,7 @@ class BossAzScraper(BaseScraper):
 
     def fetch_leads(self) -> list[RawLead]:
         employers: dict[str, dict] = {}
-        role_employers: dict[str, dict] = {}  # hədəf vəzifəyə (Facility/Camp Manager...) işçi axtaranlar
+        roles = RoleCollector("boss", "boss.az")  # hədəf vəzifəyə (Facility/Camp Manager...) işçi axtaranlar
         after = None
         scanned = 0
         for page in range(self.max_pages):
@@ -96,18 +96,14 @@ class BossAzScraper(BaseScraper):
             for node in vacancies["nodes"]:
                 scanned += 1
                 self._collect(node, employers)
-                collect_role_employer(
-                    VACANCY_URL.format(id=node["id"]), node.get("positionName") or "", node.get("name") or "",
-                    role_employers,
-                )
+                roles.add(VACANCY_URL.format(id=node["id"]), node.get("positionName") or "", node.get("name") or "")
             if not vacancies["pageInfo"]["hasNextPage"]:
                 break
             after = vacancies["pageInfo"]["endCursor"]
 
         leads = [self._to_lead(e) for e in employers.values()]
         # Nahar siqnalı olan şirkət artıq güclü lead-dir (eyni URL = eyni dedup açarı) — təkrar yox.
-        role_leads = [role_lead(e, source="boss", board="boss.az")
-                      for url, e in role_employers.items() if url not in employers]
+        role_leads = roles.leads(exclude_names=[e["name"] for e in employers.values()], exclude_urls=employers)
         log.info("boss_scanned", scanned=scanned, employers=len(leads), role_employers=len(role_leads))
         return leads + role_leads
 

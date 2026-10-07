@@ -62,7 +62,10 @@ KNOWN_COMPETITORS = (
 # yedizdirir — alıcı deyil (boss.az testində: Pizza Mizza, Supreme Hotel, EGUN Cafe).
 _OWN_KITCHEN_RE = re.compile(
     r"\b(catering|keytering|keytrinq|iaşə|hotel|otel|hostel|restoran|restaurant"
-    r"|cafe|kafe|coffee|pizza|burger|bistro|lounge|şaurma|doner|dönər)|\.rest\b"
+    r"|cafe|kafe|coffee|pizza|burger|bistro|lounge|şaurma|doner|dönər"
+    # Adında "hotel" olmayan otel brendləri (jobsearch.az: "Fairmont Baku — Demi Chef de Partie")
+    r"|fairmont|hilton|marriott|hyatt|rixos|sheraton|kempinski|ritz.carlton|four seasons|intercontinental"
+    r"|radisson|crowne plaza|holiday inn|jw marriott|boulevard hotel|jumeirah|swissotel|park inn)|\.rest\b"
 )
 
 

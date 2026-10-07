@@ -155,6 +155,21 @@ Vəzifə siyahısı `employer_signal.TARGET_ROLES`-dadır; "x manager" ifadələ
 | Sənaye parkları (Sumqayıt, Ağdam, Hacıqabul, Araz Vadisi, Pirallahı, Mingəçevir, Balaxanı, Neftçala, Masallı, Sabirabad) | **Yoxlanılmayıb** — ayrı sayt ünvanları təsdiqlənməyib. AFEZ (Alat) və İqtisadiyyat Nazirliyi qoşuldu; Pirallahı kimi park xəbərləri APA/AZƏRTAC üzərindən gəlir |
 | AmCham, AHK, ASK, TÜİB, Türkiyə/İtaliya/Çin/Britaniya ticarət qurumları, Caspian Energy Club | ASK və TÜİB qoşuldu. AmCham `/en/news` səhifəsində xəbər lenti yoxdur (yalnız tədbir təqvimi linki — ayrıca baxılmalı); AHK, xarici ticarət palataları və Caspian Energy Club **yoxlanılmayıb/cavab vermədi** |
 
+### Faza 2 yoxlaması (2026-10-07, `scripts/probe_sources.py`)
+
+`python -m scripts.probe_sources <ünvanlar>` — yalnız oxuyur: status, robots.txt, RSS, əsas linklər. Nəticələr:
+
+| Ünvan | Nəticə |
+|---|---|
+| metro.gov.az | robots.txt 500 → qoşulmaz (dəyişməyib) |
+| abc.az, cabmin.gov.az, energetika.gov.az, mdt.gov.az, sdh.gov.az, aic.az, bakuseaport.az, caspianenergyclub.com, totalenergies.az, ezda.gov.az, azeravtoyol.*, dsak.gov.az | Bu maşından `ConnectError/Timeout`. Domen səhv və ya xarici IP bloku ola bilər — **skripti Azərbaycan IP-li Mac worker-də də işlədib müqayisə etmək lazımdır** |
+| offer.az | HTTP 526 (sertifikat) |
+| **abif.az** | **Azərbaycan Bilyard Federasiyasıdır** (investisiya qurumu deyil) — siyahıdakı "ABİF" üçün səhv fərziyyə idi; qoşulmur. RSS də 500 verir |
+| mincom.gov.az (Rəqəmsal İnkişaf və Nəqliyyat Nazirliyi) | Açılır, robots OK. `/az/media/elanlar` = **kadr müsabiqəsi elanları** (satınalma deyil) → qoşulmur; xəbərləri yemək fürsəti vermir |
+| dtsea.gov.az (İcbari Tibbi Sığorta), sehiyye.gov.az | `/media/elanlar` = vətəndaş qəbulu/inzibati elanlar, satınalma yox → qoşulmur |
+| taxes.gov.az | "Tenderlər" linki etender.gov.az-a yönləndirir (artıq qoşulub) |
+| Sənaye parkları (Sumqayıt, Balaxanı, Pirallahı, Mingəçevir, Qaradağ, Ağdam, Araz Vadisi) | Axtarışla **ayrı rəsmi sayt tapılmadı**; park xəbərləri economy.gov.az, president.az (RSS) və APA/AZƏRTAC-dan gəlir |
+
 ## Ümumi dərs
 
 İlk sənəd versiyası (development spec-in ilk qaralaması) hər saytın funksiyasını **görmədən, adından fərziyyə ilə** təsvir etmişdi (məs. "Marja.az = elan saytı", "Emlak.gov.az = qeydiyyat reyestri"). Bunların əksəriyyəti səhv çıxdı. **Nəticə:** yeni mənbə əlavə edərkən HƏMİŞƏ əvvəlcə brauzerdə real saytı aç, strukturu/API-ni tap, SONRA kodu yaz — adından güman etmə.
