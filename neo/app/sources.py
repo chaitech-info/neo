@@ -123,6 +123,21 @@ SOURCES += [
     _list("minenergy", "Energetika Nazirliyi — xəbərlər",
           LinkListSite("minenergy", "https://minenergy.gov.az/az/xeberler-arxivi", r"/az/xeberler-arxivi/\d+"),
           "10", "10,16"),
+    # --- Faza 3 (2026-10-07): dövlət və bank satınalma siyahıları (scripts/probe_sources ilə tapılıb) ---
+    # Sınanıb, QOŞULMAYIB: justice.gov.az/az/announcements və mfa.gov.az/category/elanlar — elanların ~75%-i
+    # kadr qəbulu/vətəndaş qəbuludur ("qəbul" açar sözünə düşür), satınalma elanları isə 2021-dən qalıb.
+    _list("unibank", "Unibank — tender və kotirovkalar",
+          LinkListSite("unibank", "https://unibank.az/az/news/category/649", r"/az/news/view/\d+",
+                       "tender", "Unibank KB ASC"),
+          "15", "9,17", kind="corporate"),
+    _list("dost", "DOST Agentliyi — satınalmalar",
+          LinkListSite("dost", "https://dost.gov.az/announcements", r"/announcements\?id=\d+",
+                       "tender", "DOST Agentliyi"),
+          "25", "9,17", kind="tender_portal", local_only=True, notes="Modal-dan yoxlanmayıb — Mac worker"),
+    _list("afb", "AFB Bank — tender elanları",
+          LinkListSite("afb", "https://afb.az/tender-elanlari", r"afb\.az/(?:afb-bank-)?tender-elani[\w-]*",
+                       "tender", "AFB Bank ASC"),
+          "55", "9,17", kind="corporate"),
 ]
 # --- Phase 2: iş elanı saytları — işçilərinə nahar verən şirkətlər ---------------------------
 SOURCES += [

@@ -170,6 +170,28 @@ Vəzifə siyahısı `employer_signal.TARGET_ROLES`-dadır; "x manager" ifadələ
 | taxes.gov.az | "Tenderlər" linki etender.gov.az-a yönləndirir (artıq qoşulub) |
 | Sənaye parkları (Sumqayıt, Balaxanı, Pirallahı, Mingəçevir, Qaradağ, Ağdam, Araz Vadisi) | Axtarışla **ayrı rəsmi sayt tapılmadı**; park xəbərləri economy.gov.az, president.az (RSS) və APA/AZƏRTAC-dan gəlir |
 
+### Faza 3 – dövlət/bank satınalmaları (2026-10-07)
+
+**Qoşuldu** (`app/sources.py`, `LinkListSite`, tender): Unibank (`/az/news/category/649`), DOST Agentliyi (`/announcements?id=N`, `local_only`), AFB Bank (`/tender-elanlari`). Hamısı robots-a uyğundur. Real tenderlərin əksəriyyəti IT/mebel/avadanlıqdır — yemək/tədbir açar sözünə nadir düşür, ona görə lead sayı azdır (AFB: 28 tender → 0, Unibank: 30 → 1, DOST: 12 → 1). Banklar canteen tenderi də keçirir (Yapı Kredi Bank Azərbaycan "yeməkxana xidməti" tenderi axtarışda çıxdı), buna görə saxlanılır.
+
+**Sınanıb, qoşulmadı:**
+
+| Mənbə | Səbəb |
+|---|---|
+| justice.gov.az/az/announcements, mfa.gov.az/category/elanlar | 12 elandan 9-u kadr qəbulu/vətəndaş qəbulu ("qəbul" açar sözünə düşür); satınalma elanları 2021-dən qalıb |
+| customs.gov.az (Satınalmalar → Tender) | Səhifə hazırda boşdur (elan yoxdur); yenidən yoxlanmalıdır |
+| abb-bank.az (müsabiqələrin elanı) | Next.js RSC axını, adi HTML-də siyahı yoxdur (corporate.py-dəki qeyd) |
+| kapitalbank.az, azersun.com, bakcell.com, azertelecom.az | 403 bot qoruması |
+| yapikredi.com.az, yelo.az | Xəbər siyahısı JS ilə yüklənir; tender elanları xəbər məqalələridir (siyahı SSR-də yoxdur) |
+| cbar.az (Mərkəzi Bank) | "Müsabiqələr" səhifəsində tender elanlarını ayırmaq üçün sabit element tapılmadı |
+| sosial.gov.az, dtsea.gov.az, sehiyye.gov.az, mincom.gov.az | "Elanlar" kadr/vətəndaş elanlarıdır, satınalma deyil |
+| procure.az, azexport.az | procure.az SaaS tender platformasıdır (müştərilərin tenderləri girişlə); azexport.az-da statik elan siyahısı yoxdur — aqreqator kimi istifadə olunmadı |
+| azerigaz, azersu, azerkimya, socar-polymer, azercosmos, aeroport saytları, bsu/qu.edu.az | Bu maşından açılmır — Mac worker-də `probe_sources` ilə yoxlanmalıdır |
+| Dövlət universitetləri (unec, ada, aztu, adau, atu, bhos, azmiu) | Açılır, amma satınalma bölməsi yoxdur (yalnız ümumi elanlar/xəbərlər); satınalmalar etender.gov.az üzərindən gedir |
+| Dövlət xəstəxanaları | TƏBİB tabeliyindəki müəssisələrin ayrı satınalma səhifəsi tapılmadı; satınalmalar etender-dədir |
+
+**Nəticə:** dövlət qurumlarının satınalmalarının böyük hissəsi artıq `etender.gov.az` (qanun üzrə məcburi portal) vasitəsilə tutulur; qurumların öz saytları əsasən kadr/vətəndaş elanlarıdır. Əsas əlavə dəyər özəl sektor və bank/korporativ tenderlərdədir.
+
 ## Ümumi dərs
 
 İlk sənəd versiyası (development spec-in ilk qaralaması) hər saytın funksiyasını **görmədən, adından fərziyyə ilə** təsvir etmişdi (məs. "Marja.az = elan saytı", "Emlak.gov.az = qeydiyyat reyestri"). Bunların əksəriyyəti səhv çıxdı. **Nəticə:** yeni mənbə əlavə edərkən HƏMİŞƏ əvvəlcə brauzerdə real saytı aç, strukturu/API-ni tap, SONRA kodu yaz — adından güman etmə.
