@@ -8,7 +8,7 @@ import structlog
 from bs4 import BeautifulSoup
 
 from app.models import LeadCategory, RawLead
-from app.scrapers.base import NEWS_KEYWORDS, BaseScraper
+from app.scrapers.base import NEWS_KEYWORDS, BaseScraper, fold
 
 log = structlog.get_logger()
 
@@ -32,7 +32,15 @@ class MediaSite:
     category: LeadCategory = LeadCategory.corporate
     body_selector: str | None = None  # məqalə mətni konteyneri; None: ümumi evristika
     max_items: int = 40               # siyahının ən yeni N elementi — hər uyğunluq səhifə yükləməsi deməkdir
+    # Qlobal şirkət saytları (ACWA, Masdar, TotalEnergies...) dünya xəbərləri ilə doludur: başlıq və ya URL
+    # bu sözlərdən birini ehtiva etməyənlər atılır (AI triaj xərci və səs-küy olmasın).
+    must_match: tuple[str, ...] = ()
 
+
+AZ_GATE = (
+    "azerbaijan", "azərbaycan", "azerbaycan", "baku", "bakı", "caspian", "xəzər", "absheron", "abşeron",
+    "shah deniz", "shahdeniz", "socar", "azeri", "gobustan", "garadagh", "qaradağ", "karabakh", "garabagh",
+)
 
 MEDIA_SITES: list[MediaSite] = [
     # Əsas xəbər/rəsmi saytlar (APA, Trend, AZƏRTAC, Banker, İqtisadiyyat Nazirliyi, AZPROMO, AFEZ, ASK...)
@@ -49,6 +57,12 @@ MEDIA_SITES: list[MediaSite] = [
               r"^https://bakubuild\.az/en/news(?:-for-all)?/[a-z0-9-]{10,}$", category=LeadCategory.event),
     MediaSite("translogistica", "TransLogistica Caspian", "https://translogistica.az/en/news",
               r"^https://translogistica\.az/en/news/[a-z0-9-]{10,}$", category=LeadCategory.event),
+    # --- Faza 4: böyük investor/şirkətlər (2026-10-07) ---
+    # Masdar (newsroom JS ilə yüklənir) və TotalEnergies (/news qlobal köhnə məqalələr verir) sınanıb, qoşulmayıb.
+    MediaSite("socar_press", "SOCAR press-relizlər", "https://www.socar.az/az/page/press-relizler",
+              r"^https://www\.socar\.az/az/post/[a-z0-9-]{15,}$"),
+    MediaSite("acwa", "ACWA Power", "https://acwapower.com/en/media-center/latest-news/",
+              r"^https://acwapower\.com/en/media-center/latest-news/[a-z0-9-]{15,}/?$", must_match=AZ_GATE),
     MediaSite("rebuild", "Rebuild Karabakh", "https://rebuildgarabagh.az/en/news",
               r"^https://rebuildgarabagh\.az/en/news(?:-for-all)?/[a-z0-9-]{10,}$", category=LeadCategory.event),
 ]
@@ -60,6 +74,9 @@ _DATE_FRAGMENTS = [
     re.compile(r"\b\d{1,2}[.-]\d{1,2}[.-]\d{4}\b"),
     re.compile(r"\b\d{1,2}\s+[A-Za-zƏəİıÖöÜüĞğÇçŞş]+,?\s+20\d\d\b"),
     re.compile(r"\b[A-Za-z]+\s+\d{1,2},\s+20\d\d\b"),
+    re.compile(r"\b\d{1,2}/\d{1,2}/20\d\d\b"),       # socar.az: "01/10/2026"
+    re.compile(r"\b\d{1,2}/\d{1,2}\s+20\d\d\b"),   # "10/26 2021"
+    re.compile(r"\bRead the article\b", re.I),
 ]
 MIN_TITLE_LEN = 15
 
@@ -119,6 +136,13 @@ class MediaScraper(BaseScraper):
         if not candidates:
             log.warning("media_site_no_items", site=site.key, pattern=site.href_pattern)
             return []
+
+        if site.must_match:
+            gate = [fold(g) for g in site.must_match]
+            candidates = [(u, t) for u, t in candidates if any(g in fold(f"{t} {u}") for g in gate)]
+            if not candidates:
+                log.info("media_site_gated_out", site=site.key)
+                return []
 
         keep = self.select_relevant([f"{t} — {site.org}" for _, t in candidates], self.keywords, kind="news")
         leads: list[RawLead] = []

@@ -192,6 +192,24 @@ Vəzifə siyahısı `employer_signal.TARGET_ROLES`-dadır; "x manager" ifadələ
 
 **Nəticə:** dövlət qurumlarının satınalmalarının böyük hissəsi artıq `etender.gov.az` (qanun üzrə məcburi portal) vasitəsilə tutulur; qurumların öz saytları əsasən kadr/vətəndaş elanlarıdır. Əsas əlavə dəyər özəl sektor və bank/korporativ tenderlərdədir.
 
+### Faza 4 – böyük investor/şirkət monitorinqi (2026-10-07)
+
+**Qoşuldu** (`media.py`): **SOCAR press-relizlər** (`socar.az/az/page/press-relizler`, `/az/post/<slug>`, SSR — investisiya, layihə, tərəfdaş görüşləri) və **ACWA Power** (`acwapower.com/en/media-center/latest-news/`). ACWA xəbərləri dünya miqyaslıdır, ona görə `MediaSite.must_match` (Azərbaycan/Bakı/Xəzər/Abşeron... başlıq və ya URL-də) süzgəci var — uyğun gəlməyən xəbər AI triajına getmir. Canlıda ACWA-nın 13 xəbərindən 0-ı keçdi (hazırda Azərbaycanla bağlı xəbər yoxdur) — gözlənilən davranış.
+
+**Sınanıb, qoşulmadı:**
+
+| Mənbə | Səbəb |
+|---|---|
+| bp.com (Azerbaijan news) | 403 bot qoruması |
+| socar.az/az/news | WAF "Request Rejected" (bot qoruması) — keçməyə cəhd edilmir; press-relizlər ayrı ünvandadır |
+| Masdar | Newsroom JS ilə yüklənir, SSR-də 3 link (biri "Media Inquiries") |
+| TotalEnergies | `/news` qlobal köhnə məqalələr verir; Azərbaycan səhifəsi (`/countries/azerbaijan`) 404 |
+| PASHA Holding (pasha-holding.az) | Xəbər lenti 2025-in iyununda dayanıb, əsasən CSR |
+| Neft Fondu (oilfund.az), AzPetrol | Xəbərlər maliyyə/yanacaq stansiyası — yemək fürsəti siqnalı zəifdir |
+| SOCAR "Pre-kvalifikasiya"/Vendor Registration | Statik məlumat səhifəsi (FAQ), elan lenti deyil — izlənmir |
+| Annual/Sustainability Reports | PDF, siqnal aşağı — izlənmir |
+| Şirkətlərin LinkedIn/Instagram/Facebook səhifələri | ToS — Faza 7 qərarı |
+
 ## Ümumi dərs
 
 İlk sənəd versiyası (development spec-in ilk qaralaması) hər saytın funksiyasını **görmədən, adından fərziyyə ilə** təsvir etmişdi (məs. "Marja.az = elan saytı", "Emlak.gov.az = qeydiyyat reyestri"). Bunların əksəriyyəti səhv çıxdı. **Nəticə:** yeni mənbə əlavə edərkən HƏMİŞƏ əvvəlcə brauzerdə real saytı aç, strukturu/API-ni tap, SONRA kodu yaz — adından güman etmə.

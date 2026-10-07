@@ -64,3 +64,40 @@ def test_failing_and_empty_sites_do_not_stop_others():
     real_get = scraper.get
     scraper.get = lambda url: (_ for _ in ()).throw(RuntimeError("down")) if "broken" in url else real_get(url)
     assert len(scraper.fetch_leads()) == 1
+
+
+def test_must_match_gate_drops_unrelated_global_news_before_triage():
+    from app.scrapers.media import AZ_GATE
+
+    html = """
+<a href="https://acme.com/news/a-solar-plant-in-chile-opens-today-1">Solar plant in Chile opens today with 500 workers</a>
+<a href="https://acme.com/news/acme-signs-baku-wind-farm-deal-2">Acme signs Baku wind farm deal, new plant opens</a>
+<a href="https://acme.com/news/absheron-gas-project-update-3">Gas project update for the region this quarter</a>
+"""
+    site = MediaSite("acme", "Acme", "https://acme.com/news", r"^https://acme\.com/news/[a-z0-9-]{15,}$", must_match=AZ_GATE)
+    scraper = _scraper([site])
+    scraper.get = lambda url: FakeResponse(html)
+    seen = []
+    real = scraper.select_relevant
+    scraper.select_relevant = lambda texts, kw, kind: (seen.extend(texts), [True] * len(texts))[1]
+    leads = scraper.fetch_leads()
+
+    assert sorted(l.source_url.rsplit("/", 1)[-1] for l in leads) == [
+        "absheron-gas-project-update-3", "acme-signs-baku-wind-farm-deal-2"]   # Chile atıldı (nə başlıqda, nə URL-də)
+    assert all("Chile" not in t for t in seen)
+
+
+def test_new_company_sites_patterns_match_real_urls():
+    import re
+
+    from app.scrapers.media import MEDIA_SITES
+
+    by_key = {s.key: s for s in MEDIA_SITES}
+    ok = {
+        "socar_press": "https://www.socar.az/az/post/nis-seherinde-kombineedilmis-buxar-qaz-elektrik-stansiyasinin-insasi",
+        "acwa": "https://acwapower.com/en/media-center/latest-news/acwa-led-consortium-reaches-commercial-operation-at-the-red-sea/",
+    }
+    for key, url in ok.items():
+        assert re.search(by_key[key].href_pattern, url), key
+    assert clean_title("01/10/2026 SOCAR yeni zavod açır") == "SOCAR yeni zavod açır"
+    assert clean_title("10/26 2021 What is a PPA? Read the article") == "What is a PPA?"

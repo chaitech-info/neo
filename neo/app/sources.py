@@ -160,7 +160,7 @@ SOURCES += [
     SourceSpec("intl_tender", "UNGM + EBRD tenderləri", IntlTenderScraper, "intl_api", "30", "7",
                notes="UNGM (ölkə=Azərbaycan) və EBRD ECEPP — app/scrapers/intl.py"),
     SourceSpec("media", "Media, assosiasiya və sərgilər", MediaScraper, "news", "35", "9,15",
-               notes="BusinessTime, TƏBİB, TÜİB, Caspian Oil & Gas, BakuBuild, TransLogistica, Rebuild Karabakh"),
+               notes="BusinessTime, TƏBİB, TÜİB, SOCAR press-relizlər, ACWA Power (Azərbaycan süzgəci), Caspian Oil & Gas, BakuBuild, TransLogistica, Rebuild Karabakh"),
 ]
 
 # Yoxlanılıb, qoşulmayıb (2026-10-05): metro.gov.az (robots.txt 500 → RFC 9309: qadağan say),
