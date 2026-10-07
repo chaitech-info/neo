@@ -27,17 +27,17 @@ class Company:
     az_only: bool = False  # qlobal şirkət: yalnız Azərbaycanla bağlı postlar (media.AZ_GATE)
 
 
-# ⚠️ URL slug-ları canlı təsdiqlənməyib (Apify tokeni olmadan yoxlamaq mümkün olmadı). Yanlış slug
-# 0 post qaytarır — scraper bunu `linkedin_companies_empty` kimi loglayır; ilk işə salmadan sonra
-# loglara baxıb düzəldin. Siyahı kodda saxlanılır ki, dəyişiklik PR ilə izlənsin.
+# Slug-lar 2026-10-07-də ictimai axtarış nəticələri ilə təsdiqlənib (LinkedIn-in özünə sorğu göndərilmədi);
+# actor-un özü tokensiz işə salınmayıb. Yanlış/dəyişmiş slug 0 post qaytarır — scraper bunu
+# `linkedin_companies_empty` kimi loglayır. Siyahı kodda saxlanılır ki, dəyişiklik PR ilə izlənsin.
 WATCHLIST: list[Company] = [
-    Company("SOCAR", "https://www.linkedin.com/company/socar"),
+    Company("SOCAR", "https://www.linkedin.com/company/socarofficial"),
     Company("bp", "https://www.linkedin.com/company/bp", az_only=True),
-    Company("ACWA Power", "https://www.linkedin.com/company/acwa-power", az_only=True),
+    Company("ACWA Power", "https://www.linkedin.com/company/acwa-power-international", az_only=True),
     Company("TotalEnergies", "https://www.linkedin.com/company/totalenergies", az_only=True),
-    Company("Masdar", "https://www.linkedin.com/company/masdar", az_only=True),
-    Company("AZPROMO", "https://www.linkedin.com/company/azpromo"),
-    Company("AFEZ", "https://www.linkedin.com/company/afez"),
+    Company("Masdar", "https://www.linkedin.com/company/masdar-abu-dhabi-future-energy-company", az_only=True),
+    Company("AZPROMO", "https://www.linkedin.com/company/azpromopr"),
+    Company("AFEZ", "https://www.linkedin.com/company/afeza"),
 ]
 
 

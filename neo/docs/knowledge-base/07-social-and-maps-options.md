@@ -93,8 +93,9 @@ Qərarlardan sonra hər addım ayrıca plan və PR ilə icra olunur (mövcud `Li
   (`app/sources.py`, gündə 1, `APIFY_TOKEN` lazımdır — yoxdursa heç nə çağırılmır və xərc olmur). Actor: `harvestapi/linkedin-company-posts`
   (giriş `targetUrls`/`maxPosts`/`postedLimit`, çıxış post-search actor-u ilə eyni sahələr). Siyahı kodda `WATCHLIST`-dədir (SOCAR, bp, ACWA Power,
   TotalEnergies, Masdar, AZPROMO, AFEZ); qlobal şirkətlər `az_only=True` — yalnız Azərbaycanla bağlı postlar keçir və birbaşa AI skoruna gedir.
-  - ⚠️ **Slug-lar canlı təsdiqlənməyib** (token olmadan yoxlamaq mümkün olmadı). Yanlış slug 0 post qaytarır və `linkedin_companies_empty` loglanır — ilk
-    işə salmadan sonra loglara baxıb `WATCHLIST`-i düzəldin; siyahını 10–15 iri podratçı/sənaye şirkəti ilə genişləndirmək üçün adlarınız lazımdır.
+  - Slug-lar ictimai axtarış nəticələri ilə təsdiqləndi (socarofficial, bp, acwa-power-international, totalenergies, masdar-abu-dhabi-future-energy-company,
+    azpromopr, afeza); ilkin təxminlərin 5-i səhv idi. **Actor-un özü tokensiz işə salınmayıb** — ilk real işə salmadan sonra `linkedin_companies_empty`
+    logu boşdursa, hər şey işləyir. Siyahını 10–15 iri podratçı/sənaye şirkəti ilə genişləndirmək üçün adlarınız lazımdır.
   - Təxmini xərc: 7 şirkət × 10 post × gündə 1 işə salma ≈ 2100 post/ay ≈ $3/ay (postedLimit=week olduğundan təkrar postlar da sayılır; URL ilə dedup olunur).
 - **D — Google Places pilotu:** Google Cloud API açarı və aylıq büdcə limiti gözlənilir.
 - **B, C, E:** qərar gözlənilir.
