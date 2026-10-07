@@ -12,6 +12,7 @@ Layihə haqqında mərkəzləşdirilmiş bilgi bazası. Development komandasına
 | [04-decisions.md](04-decisions.md) | Açıq suallar, qəbul edilmiş qərarlar, niyə belə seçildi |
 | [05-runbook.md](05-runbook.md) | Qurulum, işə salma, admin panel, testlər — əməli təlimat |
 | [06-glossary.md](06-glossary.md) | Termin lüğəti (RawLead, pending_review, NeoAnalyze və s.) |
+| [07-social-and-maps-options.md](07-social-and-maps-options.md) | Instagram/Facebook/LinkedIn səhifələri və Google Maps üçün variantlar (qərar gözləyir) |
 
 ## Əlaqəli sənədlər (bu qovluqdan kənarda)
 
