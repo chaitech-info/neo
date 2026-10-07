@@ -77,6 +77,25 @@ EXPANSION_KEYWORDS = [
     "istehsalın başla", "istifadəyə veril", "tikiləcək", "inşa ediləcək",
 ]
 
+# Tikinti işləri (2026-10-07, Faza 6): böyük tikinti obyekti = çoxlu fəhlə, düşərgə/obyekt mətbəxi
+# ehtiyacı. "təmir" bilərəkdən YOXDUR (cari təmir kiçikdir) — yalnız əsaslı təmir və yenidənqurma.
+CONSTRUCTION_KEYWORDS = [
+    "tikinti", "tikilməsi", "inşa", "yenidənqurma", "yenidən qurul", "əsaslı təmir", "layihələndirmə və tikinti",
+    "zavod", "fabrik", "elektrik stansiya", "yol tikinti", "körpü", "tunel", "yaşayış kompleks", "sənaye park",
+    "dəmir yol", "kanalizasiya", "su təchizat", "qazlaşdır", "yataqxana", "düşərgə", "istehsal binası", "anbar kompleks",
+    "строительств", "реконструкц", "капитальный ремонт",
+    "construction of", "civil works", "building works", "epc", "reconstruction of", "rehabilitation of", "camp",
+]
+
+# Tikinti tenderində fəhlə düşərgəsi yaratmayan işlər: layihə-smeta/ekspertiza/nəzarət (kağız işi),
+# avadanlıq/material alışı, cari təmir.
+CONSTRUCTION_EXCLUDE = [
+    "layihə-smeta", "layihə smeta", "layihə sənəd", "texniki nəzarət", "müəllif nəzarət", "ekspertiza", "monitorinq",
+    "ləvazimat", "mal-material", "avadanlıq", "ehtiyat hissə", "cari təmir", "kompüter", "proqram", "informasiya sistem",
+    "konsaltinq", "audit", "sığorta", "hazır beton", "inşaat materiallar", "tikinti materiallar",
+    "cost estimate", "supervision", "consulting",
+]
+
 # Tenderlər (etender, fed.az tenderlər, şirkət saytları, Dünya Bankı, bp EDP).
 # Tender başlığında "təşkili/keçirilməsi" demək olar həmişə tədbir/xidmət təşkilidir
 # (miqrasiya 0004; 2026-10-05 ölçüsü: AI triajı belə tədbir tenderlərini buraxırdı).

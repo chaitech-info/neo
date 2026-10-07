@@ -5,7 +5,9 @@ from datetime import datetime
 import structlog
 
 from app.models import LeadCategory, RawLead
-from app.scrapers.base import TENDER_KEYWORDS, BAKU_TZ, BaseScraper, parse_datetime
+from app.scrapers.base import (
+    BAKU_TZ, CONSTRUCTION_EXCLUDE, CONSTRUCTION_KEYWORDS, TENDER_KEYWORDS, BaseScraper, contains_keyword, parse_datetime,
+)
 
 # Real API (brauzerlə yoxlanıb): GET /api/events. robots.txt yoxdur (SPA HTML
 # qaytarır). Detay səhifəsi: /main/competition/detail/<eventId>.
@@ -46,6 +48,9 @@ class EtenderScraper(BaseScraper):
     min_delay_s = 2.0
     max_delay_s = 4.0
     max_pages = 40
+    keywords: list[str] = TENDER_KEYWORDS
+    exclude: list[str] = []          # başlıqda bunlardan biri varsa atılır
+    match_buyer = True               # açar söz sifarişçi adında da axtarılsın (tədbir/yemək üçün faydalıdır)
 
     @staticmethod
     def now() -> datetime:
@@ -76,17 +81,20 @@ class EtenderScraper(BaseScraper):
             if not data.get("hasNextPage"):
                 break
 
+        if self.exclude:
+            open_items = [i for i in open_items if not contains_keyword(i.get("eventName") or "", self.exclude)]
         keep = self.select_relevant(
-            [f"{i.get('eventName', '')} — {i.get('buyerOrganizationName', '')}" for i in open_items],
-            TENDER_KEYWORDS,
+            [f"{i.get('eventName', '')} — {i.get('buyerOrganizationName', '')}" if self.match_buyer
+             else (i.get("eventName") or "") for i in open_items],
+            self.keywords,
             kind="tender",
         )
-        leads = [self._to_lead(item) for item, selected in zip(open_items, keep) if selected]
+        leads = [self._to_lead(item, self.source_name) for item, selected in zip(open_items, keep) if selected]
         log.info("etender_scanned", source=self.source_name, total=total, expired=expired, open=len(open_items), leads=len(leads))
         return leads
 
     @staticmethod
-    def _to_lead(item: dict) -> RawLead:
+    def _to_lead(item: dict, source: str = "etender") -> RawLead:
         name = (item.get("eventName") or "").strip()
         buyer = (item.get("buyerOrganizationName") or "").strip()
         end = _naive(item.get("endDate"))
@@ -94,7 +102,7 @@ class EtenderScraper(BaseScraper):
         if end:
             raw_text += f"\nSon tarix: {end.strftime('%d.%m.%Y %H:%M')}"
         return RawLead(
-            source="etender",
+            source=source,
             source_url=DETAIL_URL.format(id=item.get("eventId")),
             title=name,
             raw_text=raw_text,
@@ -102,6 +110,16 @@ class EtenderScraper(BaseScraper):
             category=LeadCategory.tender,
             posted_at=parse_datetime(item.get("publishDate")),
         )
+
+
+class EtenderConstructionScraper(EtenderScraper):
+    """Eyni etender API-si, tikinti açar sözləri ilə (Faza 6): böyük tikinti obyektində çoxlu fəhlə var —
+    podratçı düşərgə/obyekt yeməyinə ehtiyac duyur. Qalib podratçı tender nəticəsindən görünür."""
+
+    source_name = "etender_construction"
+    keywords = CONSTRUCTION_KEYWORDS
+    exclude = CONSTRUCTION_EXCLUDE
+    match_buyer = False   # "Dəmir Yolları" sifarişçisi "dəmir yol" tikinti sözünə düşməsin
 
 
 def _naive(value: str | None) -> datetime | None:

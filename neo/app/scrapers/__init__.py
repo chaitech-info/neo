@@ -3,7 +3,7 @@ from app.scrapers.boss import BossAzScraper
 from app.scrapers.bp_edp import BpEdpScraper
 from app.scrapers.corporate import CorporateTenderScraper
 from app.scrapers.emlak import EmlakScraper
-from app.scrapers.etender import EtenderScraper
+from app.scrapers.etender import EtenderConstructionScraper, EtenderScraper
 from app.scrapers.intl import IntlTenderScraper
 from app.scrapers.jobsearch import JobSearchScraper
 from app.scrapers.media import MediaScraper
@@ -30,6 +30,7 @@ ALL_SCRAPERS = [
     ReportEnergetikaScraper,
     ReportInfrastrukturScraper,
     EtenderScraper,
+    EtenderConstructionScraper,
     EmlakScraper,
     CorporateTenderScraper,
     WorldBankScraper,
@@ -54,6 +55,7 @@ __all__ = [
     "ReportEnergetikaScraper",
     "ReportInfrastrukturScraper",
     "EtenderScraper",
+    "EtenderConstructionScraper",
     "EmlakScraper",
     "CorporateTenderScraper",
     "WorldBankScraper",

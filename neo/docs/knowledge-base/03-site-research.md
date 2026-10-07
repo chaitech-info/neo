@@ -220,6 +220,26 @@ Vəzifə siyahısı `employer_signal.TARGET_ROLES`-dadır; "x manager" ifadələ
 
 **Sınanıb, qoşulmadı:** caspiannews.com (403), interfax.az və cci.az/eurochamber.az/itca.az (cavab yox), azernews.az (bölmə ünvanı 404), neftegaz.ru (468 bloku), bcca.az (British Chamber — saytda xəbər/tədbir lenti yoxdur, yalnız statik səhifələr), DEİK (Türkiyə-Azərbaycan Biznes Şurası — xəbər lenti SSR-də yoxdur), Caspian Energy Club (cavab yox), İtaliya və Çin ticarət qurumları (rəsmi sayt tapılmadı). report.az/en/energy qoşulmadı: ingilis xəbərləri əsasən neft qiyməti/proqnozdur, yemək siqnalı yoxdur.
 
+### Faza 6 – tikinti/infrastruktur qatı (2026-10-07)
+
+**Məntiq:** böyük tikinti obyektində çoxlu fəhlə olur — podratçıya düşərgə/obyekt yeməyi lazımdır. Tikinti sektorunu üç yerdən tuturuq: tender (hazırlıq mərhələsi), xəbər/elan (layihə başlanır), vakansiya (Facility/Camp/Site Manager — Faza 1).
+
+**Qoşuldu:**
+- **`etender_construction`** (yeni mənbə, `EtenderConstructionScraper`): eyni etender API-si, `CONSTRUCTION_KEYWORDS` (tikinti, inşa, yenidənqurma, əsaslı təmir, zavod, yol, körpü, tunel, sənaye parkı, yataqxana, düşərgə, ru/en) ilə. Açar söz **yalnız tender adında** axtarılır (sifarişçi adında deyil — "Dəmir Yolları" "dəmir yol"-a düşürdü); `CONSTRUCTION_EXCLUDE` kağız işi/avadanlıq/material/cari təmiri atır. Canlıda 351 aktiv tikinti-əlaqəli tenderdən ~70-i qalır. Eyni tender `etender` ilə də tutulsa `tenders.reference_for` ikisini bir tender sayır (dublikat).
+- `media.py`: **Dövlət Şəhərsalma və Arxitektura Komitəsi** (`arxkom.gov.az`, xəbərlər + elanlar — layihə/satınalma bildirişləri) və **Azfen** (SOCAR-ın EPC podratçısı).
+
+**Sınanıb, qoşulmadı:**
+
+| Mənbə | Səbəb |
+|---|---|
+| HECOTEC (hecotec.az) | Açılır, amma xəbər linklərində başlıq mətni yoxdur (yalnız ikon); satınalma bölməsi statikdir |
+| North West Construction, A+A Group, nwc.az, aagroup.az | Bu maşından açılmır |
+| Rigzone | Baku filtri işləyir, amma yalnız 2 vakansiya (hər ikisi agentlik/xidmət şirkəti) — siqnal zəif |
+| EnergyJobline | Ölkə süzgəci işləmir (qlobal say göstərir) |
+| Orion (orionjobs.com) | Qeyri-şəffaf recruiter, işəgötürən adı gizlidir |
+| Tikinti icazələri / tikintilərin dövlət reyestri | İcazə sistemi elektrondur (Şəhərsalma Komitəsi), amma **ictimai siyahı yoxdur** — yalnız ərizəçi girişi ilə; qoşulmur |
+| General contractor / EPC / developer saytlarının geniş siyahısı | Mərkəzləşdirilmiş reyestr yoxdur; hər biri ayrı-ayrılıqda kəşf tələb edir (tövsiyə: etender-də qalib podratçı adlarından siyahı çıxarıb saytlarını yoxlamaq) |
+
 ## Ümumi dərs
 
 İlk sənəd versiyası (development spec-in ilk qaralaması) hər saytın funksiyasını **görmədən, adından fərziyyə ilə** təsvir etmişdi (məs. "Marja.az = elan saytı", "Emlak.gov.az = qeydiyyat reyestri"). Bunların əksəriyyəti səhv çıxdı. **Nəticə:** yeni mənbə əlavə edərkən HƏMİŞƏ əvvəlcə brauzerdə real saytı aç, strukturu/API-ni tap, SONRA kodu yaz — adından güman etmə.

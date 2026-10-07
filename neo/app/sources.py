@@ -15,6 +15,7 @@ from app.scrapers import (
     BpEdpScraper,
     CorporateTenderScraper,
     EmlakScraper,
+    EtenderConstructionScraper,
     EtenderScraper,
     FedScraper,
     FedTenderScraper,
@@ -76,6 +77,9 @@ SOURCES: list[SourceSpec] = [
                "*/3", "https://report.az", local_only=True, notes="Faza 5; ABŞ IP-dən 403 (report ilə eyni)"),
     SourceSpec("etender", "Etender.gov.az", EtenderScraper, "tender_portal", "0", "6", "https://etender.gov.az",
                local_only=True, notes="Xarici IP-dən timeout"),
+    SourceSpec("etender_construction", "Etender.gov.az — tikinti tenderləri", EtenderConstructionScraper, "tender_portal",
+               "20", "6", "https://etender.gov.az", local_only=True,
+               notes="Faza 6: eyni API, CONSTRUCTION_KEYWORDS; etender ilə eyni tender dublikat sayılır (tenders.py)"),
     SourceSpec("emlak", "Emlak.gov.az", EmlakScraper, "tender_portal", "30", "6", "https://emlak.gov.az"),
     SourceSpec("corporate", "Şirkət/agentlik tenderləri", CorporateTenderScraper, "corporate", "10", "8,16"),
     SourceSpec("worldbank", "Dünya Bankı", WorldBankScraper, "intl_api", "0", "7", "https://search.worldbank.org"),
@@ -166,7 +170,7 @@ SOURCES += [
     SourceSpec("intl_tender", "UNGM + EBRD tenderləri", IntlTenderScraper, "intl_api", "30", "7",
                notes="UNGM (ölkə=Azərbaycan) və EBRD ECEPP — app/scrapers/intl.py"),
     SourceSpec("media", "Media, assosiasiya və sərgilər", MediaScraper, "news", "35", "9,15",
-               notes="BusinessTime, TƏBİB, TÜİB, SOCAR press-relizlər, ACWA Power (Azərbaycan süzgəci), AmCham, AHK, ATİA, Caspian Oil & Gas, BakuBuild, TransLogistica, Rebuild Karabakh"),
+               notes="BusinessTime, TƏBİB, TÜİB, SOCAR press-relizlər, ACWA Power (Azərbaycan süzgəci), AmCham, AHK, ATİA, Şəhərsalma Komitəsi, Azfen, Caspian Oil & Gas, BakuBuild, TransLogistica, Rebuild Karabakh"),
 ]
 
 # Yoxlanılıb, qoşulmayıb (2026-10-05): metro.gov.az (robots.txt 500 → RFC 9309: qadağan say),

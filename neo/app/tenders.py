@@ -84,7 +84,11 @@ def fingerprint(org: str | None, title: str) -> str | None:
     return hashlib.sha256(f"{normalize_org(org)}|{norm_title}".encode("utf-8")).hexdigest()
 
 
+_REF_SOURCE_ALIASES = {"etender_construction": "etender"}  # eyni portal: eyni tender dublikat olsun
+
+
 def reference_for(source: str, url: str) -> str | None:
+    source = _REF_SOURCE_ALIASES.get(source, source)
     pattern = _REF_PATTERNS.get(source)
     m = pattern.search(url) if pattern else None
     return f"{source}:{m[1]}" if m else None

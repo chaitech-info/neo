@@ -64,6 +64,14 @@ MEDIA_SITES: list[MediaSite] = [
               r"^https://aserbaidschan\.ahk\.de/en/events/[a-z0-9-]{10,}$", category=LeadCategory.event),
     MediaSite("atia", "ATİA — Tikinti İstehsalçıları Assosiasiyası", "https://atia-az.az/",
               r"^https://atia-az\.az/news/[a-z0-9-]{15,}$"),
+    # --- Faza 6: tikinti/infrastruktur (2026-10-07) ---
+    MediaSite("arxkom_news", "Dövlət Şəhərsalma və Arxitektura Komitəsi — xəbərlər", "https://arxkom.gov.az/media/xeberler",
+              r"^https://arxkom\.gov\.az/media/xeberler/[a-z0-9-]{15,}$"),
+    MediaSite("arxkom_notices", "Dövlət Şəhərsalma və Arxitektura Komitəsi — elanlar", "https://arxkom.gov.az/media/elanlar",
+              r"^https://arxkom\.gov\.az/elanlar/[a-z0-9-]{15,}$"),
+    MediaSite("azfen", "Azfen (SOCAR EPC podratçısı)", "https://www.azfen.com/Main/News",
+              r"^https://www\.azfen\.com/Main/NewsDetails/\d+$"),
+    # HECOTEC (hecotec.az/az/bloq) sınanıb: xəbər linklərində başlıq mətni yoxdur (yalnız ox ikonu) — qoşulmadı.
     # --- Faza 4: böyük investor/şirkətlər (2026-10-07) ---
     # Masdar (newsroom JS ilə yüklənir) və TotalEnergies (/news qlobal köhnə məqalələr verir) sınanıb, qoşulmayıb.
     MediaSite("socar_press", "SOCAR press-relizlər", "https://www.socar.az/az/page/press-relizler",
