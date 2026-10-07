@@ -1,6 +1,6 @@
 # 07 — Sosial şəbəkə və xəritə mənbələri: variantlar (qərar sənədi)
 
-> **Status:** Open — qərar gözləyir (2026-10-07). Bu sənəd **kod yazmır**: Mənbə siyahısının Faza 7-sidir.
+> **Status:** Open — qərar gözləyir (2026-10-07). **A variantı icra olunub** (aşağıda "İcra statusu"); B, C, D, E gözləyir. Bu sənəd **kod yazmır**: Mənbə siyahısının Faza 7-sidir.
 > Birbaşa scrape bu kanalların ToS-unu pozur, buna görə yalnız **rəsmi API** və ya **lisenziyalı provayder** yolları təhlil olunur.
 > Hüquqi rəy deyil — ümumi ToS qaydalarına və aşağıdakı rəsmi sənədlərə əsaslanan mühəndis qiymətləndirməsidir.
 
@@ -86,3 +86,15 @@ Qərarlardan sonra hər addım ayrıca plan və PR ilə icra olunur (mövcud `Li
 - Meta, *Instagram API — Hashtag Search*: developers.facebook.com/documentation/instagram-platform/instagram-api-with-facebook-login/hashtag-search
 - Google Maps Platform qiymətləri: developers.google.com/maps/billing-and-pricing/pricing (rəqəmlər üçüncü tərəf icmallarından alınıb, qərardan əvvəl rəsmi səhifədə təsdiqlənməlidir)
 - Apify, *Google Maps Scraper*: apify.com/compass/crawler-google-places
+
+## İcra statusu
+
+- **A — LinkedIn izləmə siyahısı: kodlaşdırılıb (2026-10-07).** `app/scrapers/linkedin_companies.py`, mənbə açarı `linkedin_companies`
+  (`app/sources.py`, gündə 1, `APIFY_TOKEN` lazımdır — yoxdursa heç nə çağırılmır və xərc olmur). Actor: `harvestapi/linkedin-company-posts`
+  (giriş `targetUrls`/`maxPosts`/`postedLimit`, çıxış post-search actor-u ilə eyni sahələr). Siyahı kodda `WATCHLIST`-dədir (SOCAR, bp, ACWA Power,
+  TotalEnergies, Masdar, AZPROMO, AFEZ); qlobal şirkətlər `az_only=True` — yalnız Azərbaycanla bağlı postlar keçir və birbaşa AI skoruna gedir.
+  - ⚠️ **Slug-lar canlı təsdiqlənməyib** (token olmadan yoxlamaq mümkün olmadı). Yanlış slug 0 post qaytarır və `linkedin_companies_empty` loglanır — ilk
+    işə salmadan sonra loglara baxıb `WATCHLIST`-i düzəldin; siyahını 10–15 iri podratçı/sənaye şirkəti ilə genişləndirmək üçün adlarınız lazımdır.
+  - Təxmini xərc: 7 şirkət × 10 post × gündə 1 işə salma ≈ 2100 post/ay ≈ $3/ay (postedLimit=week olduğundan təkrar postlar da sayılır; URL ilə dedup olunur).
+- **D — Google Places pilotu:** Google Cloud API açarı və aylıq büdcə limiti gözlənilir.
+- **B, C, E:** qərar gözlənilir.

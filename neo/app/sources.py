@@ -19,6 +19,7 @@ from app.scrapers import (
     EtenderScraper,
     FedScraper,
     FedTenderScraper,
+    LinkedInCompaniesScraper,
     LinkedInScraper,
     MarjaScraper,
     News1Scraper,
@@ -86,6 +87,9 @@ SOURCES: list[SourceSpec] = [
     SourceSpec("bp_edp", "bp EDP", BpEdpScraper, "corporate", "15", "7", "https://edp.az"),
     SourceSpec("boss", "boss.az — işçilərinə nahar verən şirkətlər", BossAzScraper, "jobs", "45", "7",
                "https://boss.az", notes="~28 GraphQL səhifəsi; elanlar 30 gün aktiv — gündə 1"),
+    SourceSpec("linkedin_companies", "LinkedIn — izləmə siyahısındakı şirkətlər", LinkedInCompaniesScraper, "social",
+               "0", "8", "https://www.linkedin.com",
+               notes="Faza 7/A: Apify company-posts, gündə 1 (postedLimit=week, URL ilə dedup; ~$3/ay); APIFY_TOKEN lazımdır; slug-lar təsdiqlənməlidir"),
     SourceSpec("linkedin", "LinkedIn (Apify)", LinkedInScraper, "jobs", "0", "7", "https://www.linkedin.com",
                notes="Apify post başına ödənişlidir"),
 ]

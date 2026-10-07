@@ -8,6 +8,7 @@ from app.scrapers.intl import IntlTenderScraper
 from app.scrapers.jobsearch import JobSearchScraper
 from app.scrapers.media import MediaScraper
 from app.scrapers.linkedin import LinkedInScraper
+from app.scrapers.linkedin_companies import LinkedInCompaniesScraper
 from app.scrapers.marja import MarjaScraper
 from app.scrapers.news import (
     FedScraper,
@@ -40,6 +41,7 @@ ALL_SCRAPERS = [
     MediaScraper,
     IntlTenderScraper,
     # AzerwebScraper deaktivdir — robots.txt /api/-ni qadağan edir (bax app/scrapers/azerweb.py)
+    LinkedInCompaniesScraper,  # Apify, izləmə siyahısı — bax app/scrapers/linkedin_companies.py
     LinkedInScraper,  # Apify vasitəsilə (lisenziyalı) — bax app/scrapers/linkedin.py
 ]
 
@@ -65,4 +67,5 @@ __all__ = [
     "MediaScraper",
     "IntlTenderScraper",
     "LinkedInScraper",
+    "LinkedInCompaniesScraper",
 ]
