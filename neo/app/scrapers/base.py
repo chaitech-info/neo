@@ -78,7 +78,10 @@ EXPANSION_KEYWORDS = [
 ]
 
 # Tenderlər (etender, fed.az tenderlər, şirkət saytları, Dünya Bankı, bp EDP).
-TENDER_KEYWORDS = MEAL_KEYWORDS + EVENT_KEYWORDS
+# Tender başlığında "təşkili/keçirilməsi" demək olar həmişə tədbir/xidmət təşkilidir
+# (miqrasiya 0004; 2026-10-05 ölçüsü: AI triajı belə tədbir tenderlərini buraxırdı).
+EVENT_ORGANIZATION_TERMS = ["təşkili", "keçirilməsi"]
+TENDER_KEYWORDS = MEAL_KEYWORDS + EVENT_KEYWORDS + EVENT_ORGANIZATION_TERMS
 
 # Xəbərlər (marja, 1news, oxu, fed, report). Tədbir sözləri xəbərlərdə dövlət
 # tədbiri reportajları ilə dolur (canlı test: 16 uyğunluqdan 15-i) və hər uyğunluq
@@ -147,7 +150,14 @@ def _published_at(soup: BeautifulSoup) -> datetime | None:
 
 
 def _article_text(soup: BeautifulSoup, body_selector: str | None) -> str:
-    container = soup.select_one(body_selector) if body_selector else None
+    # Seçici bir neçə blok tuta bilər (president.az: hər abzas ayrı `news_paragraph-block`).
+    containers = soup.select(body_selector) if body_selector else []
+    container = containers[0] if len(containers) == 1 else None
+    if len(containers) > 1:
+        paragraphs = [p for c in containers for p in (c.find_all("p") or [c])]
+        text = "\n".join(t for p in paragraphs if (t := p.get_text(" ", strip=True)))
+        if text:
+            return text[:ARTICLE_MAX_CHARS]
     if container is None:
         # Seçici tapılmadı (sayt dəyişib və ya təyin olunmayıb) — birbaşa <p>
         # uşaqlarında ən çox mətni olan blok məqalə gövdəsi sayılır.
@@ -162,6 +172,21 @@ def _article_text(soup: BeautifulSoup, body_selector: str | None) -> str:
         meta = soup.find("meta", attrs={"property": "og:description"})
         text = meta.get("content", "").strip() if meta else ""
     return text[:ARTICLE_MAX_CHARS]
+
+
+_GENERIC_TITLE_WORDS = {"tender", "elan", "elanı", "bildiriş", "bildirişi", "uzatma", "dəyişiklik",
+                        "procurement", "notice", "specific", "general", "announcement", "invitation",
+                        "satınalma", "satinalma", "müsabiqə", "kotirovka", "sorğusu", "açıq", "i", "ii"}
+
+
+def uninformative_title(title: str) -> bool:
+    """Tender başlığı nə alındığını demirsə ("T E N D E R — Azərenerji ASC", "Bildiriş-Uzatma",
+    "Specific Procurement Notice") — AI də, açar söz də qərar verə bilməz: tam oxunmalıdır.
+    Təşkilat adı ("— X ASC") nəzərə alınmır."""
+    subject = fold(title.split(" — ")[0])
+    subject = re.sub(r"(?<=\b\w) (?=\w\b)", "", subject)       # "t e n d e r" → "tender"
+    words = [w for w in re.findall(r"\w+", subject) if not w.isdigit()]
+    return bool(words) and all(w in _GENERIC_TITLE_WORDS for w in words)
 
 
 class BaseScraper(abc.ABC):
@@ -184,6 +209,10 @@ class BaseScraper(abc.ABC):
     article_body_selector: str | None = None
 
     def __init__(self, client: httpx.Client | None = None) -> None:
+        self.error: str | None = None  # run() xətanı udanda — scrape_runs-a "failed" yazılsın
+        # Filtrdən əvvəl saytdan gələn elan sayı (select_relevant sayır). None = scraper
+        # select_relevant çağırmır — pipeline qaytarılan sayı götürür.
+        self.fetched: int | None = None
         self._client = client or httpx.Client(
             headers={"User-Agent": DEFAULT_USER_AGENT},
             timeout=20.0,
@@ -220,18 +249,35 @@ class BaseScraper(abc.ABC):
         resp.raise_for_status()
         return resp
 
-    def select_relevant(self, texts: list[str], keywords: list[str], kind: str) -> list[bool]:
-        """Hansı başlıqlar tam yoxlamaya getsin: açar söz VƏ YA AI triajı.
+    def select_relevant(
+        self, texts: list[str], fallback: list[str], kind: str, extra: list[str] = ()
+    ) -> list[bool]:
+        """Hansı başlıqlar tam yoxlamaya getsin: açar söz VƏ YA AI triajı, mənfi söz istisna.
 
+        Açar sözlər bazadandır (paneldə redaktə olunur, app/keywords.py) — `kind`
+        ("tender"|"news") həmin növə aid terminləri seçir. Baza əlçatan deyilsə
+        `fallback` (koddakı siyahı) işlədilir. `extra` — mənbəyə xas əlavə sözlər
+        (məs. emlak-ın hərrac sözləri), həmişə keçərlidir.
         Açar söz uyğunluğu həmişə daxil edir (AI işləməsə də heç nə itmir); AI
-        triajı açar sözlərin görmədiyi fürsətləri əlavə edir. kind: "tender"|"news".
+        triajı açar sözlərin görmədiyi fürsətləri əlavə edir; mənfi söz hər ikisini bağlayır.
         """
-        from app.ai_triage import triage  # scraper-lər AI modulu olmadan da import olunsun
+        from app import keywords as kw_store  # gec import: baza modulu scraper-lərdən asılı olmasın
+        from app.ai_triage import triage
 
-        by_keyword = [contains_keyword(t, keywords) for t in texts]
+        self.fetched = (self.fetched or 0) + len(texts)
+        db_terms = kw_store.terms_for(kind)
+        extra_terms = [kw_store.Term(t) for t in extra]
+        if db_terms is None:
+            positive, negative = [kw_store.Term(t) for t in fallback] + extra_terms, []
+        else:
+            positive, negative = db_terms[0] + extra_terms, db_terms[1]
+
+        by_keyword = [kw_store.any_match(t, positive) or (kind == "tender" and uninformative_title(t))
+                      for t in texts]
+        blocked = [kw_store.any_match(t, negative) for t in texts] if negative else [False] * len(texts)
         picked = triage(texts, kind=kind) if texts else set()
         by_ai = [i in picked for i in range(len(texts))] if picked is not None else [False] * len(texts)
-        selected = [k or a for k, a in zip(by_keyword, by_ai)]
+        selected = [(k or a) and not b for k, a, b in zip(by_keyword, by_ai, blocked)]
         log.info(
             "candidates_selected",
             source=self.source_name,
@@ -239,8 +285,10 @@ class BaseScraper(abc.ABC):
             keyword=sum(by_keyword),
             ai=sum(by_ai),
             ai_only=sum(a and not k for k, a in zip(by_keyword, by_ai)),
+            negative=sum(blocked),
             selected=sum(selected),
             ai_available=picked is not None,
+            keywords_from="db" if db_terms is not None else "code",
         )
         return selected
 
@@ -275,8 +323,9 @@ class BaseScraper(abc.ABC):
             leads = self.fetch_leads()
             log.info("scraper_completed", source=self.source_name, count=len(leads))
             return leads
-        except Exception:
+        except Exception as exc:
             log.exception("scraper_failed", source=self.source_name)
+            self.error = f"{type(exc).__name__}: {exc}"[:500]
             return []
         finally:
             self._client.close()

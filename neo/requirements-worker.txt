@@ -1,0 +1,3 @@
+-r requirements.txt
+# Mac worker (NEO_SCRAPE_ROLE=local): Vercel panelindən gələn sorğular Modal Queue ilə çatır
+modal>=1.2

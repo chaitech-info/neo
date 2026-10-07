@@ -122,7 +122,7 @@ def _scraper(source, url, title, org):
 
 
 def test_pipeline_skips_ai_for_cross_source_duplicate_and_records_runs(session, monkeypatch):
-    monkeypatch.setattr("app.pipeline.AIFilter", _FakeAI)
+    monkeypatch.setattr("app.pipeline.make_scorer", lambda: _FakeAI())
     _FakeAI.scored = []
 
     r1 = run_pipeline(_scraper("corporate", "https://tourism.gov.az/a.pdf", TITLE, "Dövlət Turizm Agentliyi"),

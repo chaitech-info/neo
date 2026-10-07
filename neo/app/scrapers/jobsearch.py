@@ -1,115 +1,82 @@
+"""jobsearch.az — "işçilərinə nahar verən şirkət" siqnalı (Phase 2, 2026-10-05).
+
+Qızıl dəstdə (scripts/eval_filter.py) relevant elementlərin ən böyük qrupu
+işəgötürən siqnalıdır (133-dən 59-u) — indiyədək yalnız boss.az və LinkedIn-dən.
+jobsearch.az-ın açıq JSON API-si var (robots.txt `Allow: /`):
+- siyahı: /api-az/vacancies-az?page=1 (30 elan, `next` linki, ən yenilər əvvəl);
+- detal: /api-az/vacancies-az/{slug} (`text` — HTML təsvir).
+Gündə bir dəfə son LOOKBACK_DAYS günün elanları; artıq yoxlanmış siqnalsız elanın
+detalı təkrar çəkilmir. Şirkət `company.id` ilə qruplaşdırılır (bir elanda korporativ
+email, digərində yox — ad/domen açarı eyni şirkəti iki lead-ə bölürdü).
+"""
 from __future__ import annotations
 
-import re
+from datetime import datetime, timedelta
 
 import structlog
 from bs4 import BeautifulSoup
 
-from app.models import LeadCategory, RawLead
-from app.scrapers.base import BaseScraper
-from app.scrapers.employer_signal import (
-    ROLE_SIGNAL_PREFIX,
-    employer_url,
-    fold,
-    has_own_kitchen,
-    is_competitor,
-    is_job_board,
-    matches_target_role,
-)
+from app.scrapers.base import BaseScraper, parse_datetime
+from app.scrapers.employers import EmployerCollector, clean_company, remember, seen_without_signal, usable_employer
 
 log = structlog.get_logger()
 
-# jobsearch.az — ikinci ən böyük iş elanı saytı (2026-10-07 yoxlanıb; robots.txt
-# `Allow: /`). Siyahı SSR-dir: `a.list__item__text` > h3.list__item__title
-# (vəzifə) + şirkət adı. Elan detalı Nuxt SPA-dır (təsvir ayrıca API-dən gəlir),
-# ona görə yalnız VƏZİFƏ ADI əsasında işləyirik: hədəf vəzifələrə (Facility/Camp/
-# Canteen/Procurement/HSE/Site Manager, Chef...) işçi axtaran şirkət lead-dir.
-# "Nahar verilir" siqnalı boss.az və LinkedIn-də tutulur — burada detal yoxdur.
-#
-# ⚠️ Səhifələmə YOXDUR: `?page=N` SSR-də həmişə eyni ilk 30 elanı qaytarır, "Daha
-# ətraflı" düyməsi /vacancies/undefined-ə gedir, siyahı API-si ictimai deyil
-# (2026-10-07 brauzerlə yoxlanıb). Ona görə hər çalışmada yalnız ən yeni ~30 elan
-# görünür — scheduler gün ərzində bir neçə dəfə çağırır ki, heç nə keçməsin.
-LISTING_URL = "https://jobsearch.az/vacancies"
-BASE_URL = "https://jobsearch.az"
-ANONYMOUS_NAMES = {"company", "şirkət", "sirket", "gizli", "anonim", "məxfi", "mexfi"}
-
-
-def parse_listing(html: str) -> list[tuple[str, str, str]]:
-    """[(vakansiya URL-i, vəzifə, şirkət)]"""
-    soup = BeautifulSoup(html, "lxml")
-    results = []
-    for a in soup.select("a.list__item__text[href*='/vacancies/']"):
-        title_el = a.select_one(".list__item__title")
-        if title_el is None:
-            continue
-        position = title_el.get_text(" ", strip=True)
-        company = re.sub(r"\s+", " ", a.get_text(" ", strip=True).replace(position, "", 1)).strip()
-        href = a["href"]
-        results.append((href if href.startswith("http") else f"{BASE_URL}{href}", position, company))
-    return results
-
-
-def collect_role_employer(vacancy_url: str, position: str, company: str, employers: dict[str, dict]) -> None:
-    """Hədəf vəzifəyə uyğun elanın işəgötürənini `employers`-ə əlavə edir (boss.az da istifadə edir)."""
-    name = re.sub(r"[\"“”«»„]", "", company or "").strip()
-    if not matches_target_role(position) or not name or fold(name) in ANONYMOUS_NAMES:
-        return
-    if is_job_board(name) or is_competitor(name) or has_own_kitchen(name):
-        return
-    entry = employers.setdefault(employer_url(None, name), {"name": name, "positions": [], "urls": []})
-    entry["positions"].append(position)
-    entry["urls"].append(vacancy_url)
-
-
-def role_lead(e: dict, source: str, board: str) -> RawLead:
-    positions = sorted(set(e["positions"]))
-    raw_text = (
-        f"{ROLE_SIGNAL_PREFIX}\n"
-        f"Şirkət: {e['name']}\n"
-        f"{board}-da aktiv vakansiyalar ({len(e['urls'])}): {', '.join(positions)}\n"
-        f"Elan: {e['urls'][0]}"
-    )
-    return RawLead(
-        source=source,
-        source_url=employer_url(None, e["name"]),
-        title=f"{e['name']} — {', '.join(positions[:3])} axtarır ({board})",
-        raw_text=raw_text,
-        entity_name=e["name"],
-        category=LeadCategory.corporate,
-        location="Azərbaycan",
-    )
+LIST_URL = "https://jobsearch.az/api-az/vacancies-az?page=1"
+DETAIL_URL = "https://jobsearch.az/api-az/vacancies-az/{slug}"
+PUBLIC_URL = "https://jobsearch.az/vacancies/{slug}"
+HEADERS = {"X-Requested-With": "XMLHttpRequest"}
+LOOKBACK_DAYS = 3
+MAX_PAGES = 15
 
 
 class JobSearchScraper(BaseScraper):
-    """jobsearch.az-da hədəf vəzifələrə işçi axtaran şirkətlər (hər şirkət bir lead)."""
-
     source_name = "jobsearch"
-    base_url = BASE_URL
-    min_delay_s = 1.5
-    max_delay_s = 3.0
-    max_pages = 1  # bax yuxarıdakı qeyd: SSR yalnız ilk səhifəni verir
+    base_url = "https://jobsearch.az"
+    min_delay_s = 1.0
+    max_delay_s = 2.0
 
-    def fetch_leads(self) -> list[RawLead]:
-        employers: dict[str, dict] = {}
-        scanned = 0
-        for page in range(1, self.max_pages + 1):
-            if page > 1:
+    def fetch_leads(self):
+        cutoff = datetime.utcnow() - timedelta(days=LOOKBACK_DAYS)
+        recent: list[dict] = []
+        url, pages = LIST_URL, 0
+        while url and pages < MAX_PAGES:
+            if pages:
                 self.polite_sleep()
-            items = parse_listing(self.get(LISTING_URL, params={"page": page} if page > 1 else None).text)
-            if not items:
+            data = self.get(url, headers=HEADERS).json()
+            pages += 1
+            items = data.get("items") or []
+            fresh = [i for i in items if (parse_datetime(i.get("created_at")) or datetime.utcnow()) >= cutoff]
+            recent += fresh
+            # VIP elanlar qarışıq gəlir — səhifədə heç bir təzə elan yoxdursa dayan.
+            if items and not fresh:
                 break
-            for vacancy_url, position, company in items:
-                scanned += 1
-                self._collect(vacancy_url, position, company, employers)
-        leads = [self._to_lead(e) for e in employers.values()]
-        log.info("jobsearch_scanned", scanned=scanned, employers=len(leads))
-        return leads
+            url = data.get("next")
+        self.fetched = len(recent)
 
-    @staticmethod
-    def _collect(vacancy_url: str, position: str, company: str, employers: dict[str, dict]) -> None:
-        collect_role_employer(vacancy_url, position, company, employers)
-
-    @staticmethod
-    def _to_lead(e: dict) -> RawLead:
-        return role_lead(e, source="jobsearch", board="jobsearch.az")
+        public = {i["slug"]: PUBLIC_URL.format(slug=i["slug"]) for i in recent}
+        skip = seen_without_signal(self.source_name, list(public.values()))
+        collector = EmployerCollector(self.source_name, "jobsearch.az")
+        checked: dict[str, bool] = {}
+        for item in recent:
+            vacancy_url = public[item["slug"]]
+            name = clean_company((item.get("company") or {}).get("title"))
+            if vacancy_url in skip:
+                continue
+            if item.get("hide_company") or not usable_employer(name):
+                checked[vacancy_url] = False
+                continue
+            self.polite_sleep()
+            try:
+                detail = self.get(DETAIL_URL.format(slug=item["slug"]), headers=HEADERS).json()
+            except Exception:
+                log.warning("jobsearch_detail_failed", slug=item.get("slug"))
+                continue
+            text = BeautifulSoup(detail.get("text") or "", "lxml").get_text(" ", strip=True)
+            group = str((item.get("company") or {}).get("id") or name.lower())
+            checked[vacancy_url] = collector.add(group, name, item.get("title") or "", vacancy_url, text,
+                                                 phone=detail.get("phone"),
+                                                 posted_at=parse_datetime(item.get("created_at")))
+        remember(self.source_name, checked)
+        log.info("jobsearch_scanned", pages=pages, recent=len(recent), skipped=len(skip),
+                 employers=len(collector.employers))
+        return collector.leads()

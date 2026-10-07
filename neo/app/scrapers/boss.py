@@ -17,7 +17,7 @@ from app.scrapers.employer_signal import (
     is_competitor,
     mentions_company_meal,
 )
-from app.scrapers.jobsearch import collect_role_employer, role_lead
+from app.scrapers.employers import collect_role_employer, role_lead
 
 log = structlog.get_logger()
 

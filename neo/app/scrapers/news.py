@@ -66,22 +66,25 @@ class BaseNewsHTMLScraper(BaseScraper):
 
 
 class News1Scraper(BaseNewsHTMLScraper):
-    """1news.az — h3.title a. `.desc h3.title a` yalnız üstdəki ~5 xəbəri tuturdu;
-    lentin qalanı başqa bloklardakı h3.title-lardadır (2026-09-23 yoxlanıb)."""
+    """1news.az — tam xəbər lenti `/az/lenta/` (`.newsList a` + `span.title`).
+    `/az/xronika/` 2026-09-30-dan 404 qaytarır (sayt bölməni silib) — 89 run uğursuz oldu.
+    Köhnə `h3.title a` (bölmə səhifələri) ehtiyat kimi qalır (2026-10-05 yoxlanıb)."""
 
     source_name = "1news"
     base_url = "https://1news.az"
-    listing_url = "https://1news.az/az/xronika/"
+    listing_url = "https://1news.az/az/lenta/"
     article_body_selector = "div.content"
 
     def article_links(self, soup: BeautifulSoup) -> list[tuple[str, str]]:
         results = []
-        for a in soup.select("h3.title a[href]"):
+        for a in soup.select(".newsList a[href], h3.title a[href]"):
             href = a["href"]
             if "/az/news/" not in href:
                 continue
+            title_el = a.select_one("span.title")
+            title = (title_el or a).get_text(strip=True)
             url = href if href.startswith("http") else f"{self.base_url}{href}"
-            results.append((url, a.get_text(strip=True)))
+            results.append((url, title))
         return results
 
 

@@ -95,7 +95,7 @@ def test_fetch_leads_keyword_filtered_with_expected_fields():
     titles = {lead.title for lead in leads}
     assert titles == {"Arrangement of Teambuilding Workshop", "Catering for stakeholder event"}
     lead = next(l for l in leads if l.entity_name == "FAO")
-    assert lead.source.value == "intl_tender" and lead.category.value == "tender"
+    assert lead.source == "intl_tender" and lead.category.value == "tender"
     assert "Son tarix: 16.10.2026" in lead.raw_text and "UNGM" in lead.raw_text
 
 

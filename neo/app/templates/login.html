@@ -1,9 +1,10 @@
 {% extends "base.html" %}
-{% block title %}Giriş — Lead Scraping Admin{% endblock %}
+{% block title %}Giriş — Neo{% endblock %}
 {% block content %}
   <div class="auth-card">
+    <div class="brand-line">Neo</div>
     <h1>Giriş</h1>
-    <p class="muted">Lead Scraping Admin panelinə daxil ol.</p>
+    <p class="muted">Catering lead-ləri və satış paneli.</p>
     {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
     <form method="post" action="/login">
       {{ csrf_field(request) }}

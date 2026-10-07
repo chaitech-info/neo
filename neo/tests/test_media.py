@@ -52,7 +52,7 @@ def test_only_keyword_matches_become_leads_with_site_category():
     leads = _scraper([site]).fetch_leads()
     assert [lead.source_url for lead in leads] == [
         "https://apa.az/senaye-ve-energetika/yeni-zavod-ucun-iscilere-nahar-verilecek-1"]
-    assert leads[0].source.value == "media"
+    assert leads[0].source == "media"
     assert leads[0].category == LeadCategory.event
     assert "Mənbə: APA.az" in leads[0].raw_text
 

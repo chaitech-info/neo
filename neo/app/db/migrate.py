@@ -35,3 +35,7 @@ def upgrade_to_head(engine: Engine) -> None:
         if "leads" in tables and "alembic_version" not in tables:
             command.stamp(cfg, BASELINE)
         command.upgrade(cfg, "head")
+        # Mənbə reyestri (app/sources.py) → `sources` cədvəli; yeni mənbə üçün miqrasiya lazım deyil.
+        from app.sources import sync_sources
+
+        sync_sources(connection)

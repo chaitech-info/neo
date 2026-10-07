@@ -6,7 +6,7 @@ from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 
 from app.models import LeadCategory, RawLead
-from app.scrapers.base import BaseScraper
+from app.scrapers.base import NEWS_KEYWORDS, BaseScraper
 
 # Brauzerlə yoxlanıb: emlak.gov.az əslində "Əmlak Məsələləri Dövlət Xidməti"
 # saytıdır — ilk fərziyyə (yeni obyekt qeydiyyatı reyestri) mövcud deyil.
@@ -46,7 +46,8 @@ class EmlakScraper(BaseScraper):
                 best_text[url] = text
 
         candidates = [(url, title) for url, title in best_text.items() if title]
-        keep = self.select_relevant([title for _, title in candidates], KEYWORDS, kind="news")
+        # Emlak-ın hərrac/özəlləşdirmə sözləri mənbəyə xasdır — bazadakı xəbər sözlərinə əlavə.
+        keep = self.select_relevant([title for _, title in candidates], NEWS_KEYWORDS, kind="news", extra=KEYWORDS)
         for (url, title), selected in zip(candidates, keep):
             if not selected:
                 continue

@@ -3,114 +3,65 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Lead Scraping Admin{% endblock %}</title>
-  <style>
-    :root { color-scheme: light dark; }
-    body { font-family: -apple-system, Segoe UI, Arial, sans-serif; margin: 0; background: #0b0e14; color: #e7e9ee; }
-    header { background: #12172a; padding: 16px 28px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #232c47; }
-    header a { color: #e7e9ee; text-decoration: none; margin-right: 20px; font-weight: 600; }
-    header a.active { color: #4C8DFF; }
-    main { padding: 28px; max-width: 1200px; margin: 0 auto; }
-    h1 { font-size: 22px; margin-bottom: 4px; }
-    .muted { color: #8d96b3; font-size: 14px; }
-    details { margin-top: 6px; max-width: 520px; white-space: pre-line; font-size: 13px; line-height: 1.5; }
-    details summary { cursor: pointer; color: #7ca8ff; }
-    table { width: 100%; border-collapse: collapse; margin-top: 16px; background: #12182c; border-radius: 10px; overflow: hidden; }
-    th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid #232c47; font-size: 14px; vertical-align: top; }
-    th { color: #8d96b3; font-weight: 600; text-transform: uppercase; font-size: 12px; letter-spacing: 0.5px; }
-    tr:last-child td { border-bottom: none; }
-    .badge { display: inline-block; padding: 3px 10px; border-radius: 100px; font-size: 12px; font-weight: 600; }
-    .badge-pending { background: #2a2340; color: #b58cff; }
-    .badge-sent { background: #0e2a1e; color: #34d399; }
-    .badge-rejected { background: #2a1730; color: #f97066; }
-    .badge-new { background: #12203a; color: #7ca8ff; }
-    .badge-duplicate { background: #1f2330; color: #9aa3b5; }
-    .expired { color: #f97066; font-size: 12px; font-weight: 600; }
-    .dup-note { font-size: 12px; margin-top: 4px; }
-    .dup-note a { color: #7ca8ff; }
-    .btn { display: inline-block; padding: 8px 16px; border-radius: 8px; border: 1px solid #2a3555; background: #1a2340; color: #e7e9ee; cursor: pointer; font-size: 14px; font-weight: 600; text-decoration: none; }
-    .btn:hover { background: #232c47; }
-    .btn-primary { background: #4C8DFF; border-color: #4C8DFF; color: #0b0e14; }
-    .btn-approve { background: #34d399; border-color: #34d399; color: #0b0e14; }
-    .btn-reject { background: #f97066; border-color: #f97066; color: #0b0e14; }
-    .btn-sm { padding: 5px 12px; font-size: 13px; }
-    .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; margin-top: 16px; }
-    .card { background: #12182c; border: 1px solid #232c47; border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 10px; }
-    .card h3 { margin: 0; font-size: 16px; }
-    .flash { background: #12203a; border: 1px solid #4C8DFF; color: #cbd3ec; padding: 10px 16px; border-radius: 8px; margin-bottom: 16px; font-size: 14px; }
-    .error { background: #2a1730; border-color: #f97066; color: #ffd7d0; }
-    .empty { color: #6a7391; padding: 24px; text-align: center; }
-    form.inline { display: inline; }
-    .score { font-weight: 700; }
-    .actions { display: flex; gap: 8px; }
-    .btn[disabled] { opacity: 0.55; cursor: not-allowed; }
-    .btn-lg { padding: 11px 22px; font-size: 15px; }
-    .toolbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
-    .toolbar h1 { margin-top: 0; }
-    .flash a { color: #7ca8ff; }
-    .card-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    .card-running { border-color: #4C8DFF; box-shadow: 0 0 0 1px #4C8DFF inset; }
-    .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 12px 0; font-size: 14px; }
-    .filters select, .filters input[type=search] { background: #12182c; color: #e7e9ee; border: 1px solid #2a3555; border-radius: 8px; padding: 7px 10px; font-size: 14px; }
-    .log-wrap { background: #0f1424; border: 1px solid #232c47; border-radius: 10px; height: 62vh; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
-    .log-row { display: grid; grid-template-columns: 70px 56px 110px 190px 1fr; gap: 10px; padding: 4px 12px; border-bottom: 1px solid #161d33; align-items: baseline; }
-    .log-row:hover { background: #141b31; }
-    .log-row .ev { color: #cbd3ec; font-weight: 600; overflow-wrap: anywhere; }
-    .log-row .det { color: #8d96b3; overflow-wrap: anywhere; }
-    .log-row .src { color: #7ca8ff; overflow-wrap: anywhere; }
-    .lvl-info { color: #7ca8ff; } .lvl-warning { color: #f5b454; } .lvl-error { color: #f97066; } .lvl-debug { color: #6a7391; }
-    .log-row.lvl-row-error { background: #1f1220; } .log-row.lvl-row-warning { background: #1d1a12; }
-    .running-pill { display: inline-block; padding: 3px 10px; border-radius: 100px; font-size: 12px; font-weight: 600; background: #12203a; color: #7ca8ff; margin: 2px 4px 2px 0; }
-    .userbox { display: flex; align-items: center; gap: 12px; font-size: 14px; }
-    .userbox .role { color: #8d96b3; }
-    .auth-card { max-width: 420px; margin: 40px auto; background: #12182c; border: 1px solid #232c47; border-radius: 12px; padding: 28px; }
-    .auth-card h1 { margin-top: 0; }
-    .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; font-size: 14px; }
-    .field label { color: #cbd3ec; font-weight: 600; }
-    .field input, .field select, .input { background: #0f1424; color: #e7e9ee; border: 1px solid #2a3555; border-radius: 8px; padding: 9px 11px; font-size: 14px; }
-    .field input:focus, .input:focus, .field select:focus { outline: 2px solid #4C8DFF; outline-offset: 0; }
-    .hint { color: #8d96b3; font-size: 12.5px; }
-    .panel { background: #12182c; border: 1px solid #232c47; border-radius: 12px; padding: 20px; margin-top: 16px; }
-    .form-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
-    .form-row .field { margin-bottom: 0; min-width: 180px; flex: 1; }
-    .inactive td { opacity: 0.55; }
-    @media (max-width: 720px) {
-      .log-row { grid-template-columns: 62px 1fr; }
-      .log-row .lvl, .log-row .src { display: none; }
-      .log-row .det { grid-column: 1 / -1; }
-    }
-  </style>
+  <title>{% block title %}Neo{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
   {% set current = request.state.user|default(none) %}
-  <header>
-    <div>
-      {% if current %}
-      <a href="/" class="{{ 'active' if active == 'dashboard' else '' }}">Dashboard</a>
-      <a href="/leads/pending_review" class="{{ 'active' if active == 'validation' else '' }}">Validasiya</a>
+  {% if current %}
+  {% set navc = nav_counts(current) %}
+  {% macro links() %}
+    <div class="nav-group">
+      <h4>Satış</h4>
+      <a href="/leads/pending_review" class="{{ 'active' if active == 'validation' else '' }}">Validasiya{% if navc.pending %}<span class="count hot">{{ navc.pending }}</span>{% endif %}</a>
+      <a href="/opportunities" class="{{ 'active' if active == 'opportunities' else '' }}">Fürsətlər</a>
+      <a href="/tasks" class="{{ 'active' if active == 'tasks' else '' }}">Tapşırıqlarım{% if navc.late %}<span class="count late" title="{{ navc.late }} tapşırığın vaxtı keçib">{{ navc.tasks }}</span>{% elif navc.tasks %}<span class="count">{{ navc.tasks }}</span>{% endif %}</a>
+    </div>
+    <div class="nav-group">
+      <h4>Toplama</h4>
+      <a href="/" class="{{ 'active' if active == 'dashboard' else '' }}">Mənbələr</a>
       <a href="/leads/ai_rejected" class="{{ 'active' if active == 'ai_rejected' else '' }}">AI rədd etdi</a>
       <a href="/leads" class="{{ 'active' if active == 'all' else '' }}">Bütün lead-lər</a>
       <a href="/logs" class="{{ 'active' if active == 'logs' else '' }}">Loglar</a>
+    </div>
+    <div class="nav-group">
+      <h4>Ayarlar</h4>
+      <a href="/settings/keywords" class="{{ 'active' if active == 'keywords' else '' }}">Açar sözlər</a>
       {% if has_role(current, 'admin') %}<a href="/users" class="{{ 'active' if active == 'users' else '' }}">İstifadəçilər</a>{% endif %}
+    </div>
+    <div class="me">
+      <b>{{ current.full_name }}</b>
+      <span>{{ role_names[current.role_code] }}</span>
+      <form method="post" action="/logout">{{ csrf_field(request) }}<button class="btn btn-sm" type="submit">Çıxış</button></form>
+    </div>
+  {% endmacro %}
+  <div class="shell">
+    <nav class="rail" aria-label="Əsas menyu">
+      <details class="rail-toggle">
+        <summary><span class="brand">Neo</span><span class="burger">Menyu</span></summary>
+        <div class="rail-links">{{ links() }}</div>
+      </details>
+      <div class="rail-desktop">
+        <a class="brand" href="/">Neo<small>Catering lead-ləri və satış</small></a>
+        {{ links() }}
+      </div>
+    </nav>
+  {% endif %}
+    <main class="{{ 'main' if current else 'auth-wrap' }}">
+      {% if request.query_params.get('msg') %}
+        {% set opp_link = request.query_params.get('opp') %}
+        <div class="flash" role="status">{{ request.query_params.get('msg') }}{% if opp_link and opp_link.isdigit() %} · <a href="/opportunities/{{ opp_link }}">Fürsəti aç</a>{% endif %}</div>
       {% endif %}
-    </div>
-    {% if current %}
-    <div class="userbox">
-      <span>{{ current.full_name }} <span class="role">· {{ role_names[current.role_code] }}</span></span>
-      <form class="inline" method="post" action="/logout">{{ csrf_field(request) }}<button class="btn btn-sm" type="submit">Çıxış</button></form>
-    </div>
-    {% else %}
-    <span class="muted">Lead Scraping Admin</span>
-    {% endif %}
-  </header>
-  <main>
-    {% if request.query_params.get('msg') %}
-      <div class="flash">{{ request.query_params.get('msg') }}</div>
-    {% endif %}
-    {% if request.query_params.get('err') %}
-      <div class="flash error">{{ request.query_params.get('err') }}</div>
-    {% endif %}
-    {% block content %}{% endblock %}
-  </main>
+      {% if request.query_params.get('err') %}
+        <div class="flash error" role="alert">{{ request.query_params.get('err') }}</div>
+      {% endif %}
+      {% block content %}{% endblock %}
+    </main>
+  {% if current %}
+  </div>
+  {% endif %}
 </body>
 </html>

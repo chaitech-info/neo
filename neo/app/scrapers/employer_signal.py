@@ -66,9 +66,18 @@ _OWN_KITCHEN_RE = re.compile(
 )
 
 
+# "Pulsuz nahar", "ödənişsiz yemək" — imtiyaz sözü yemək sözündən ƏVVƏL (2026-10-05,
+# jobsearch.az: _PROVIDER_AFTER yalnız sonranı yoxlayırdı).
+_FREE_MEAL = re.compile(r"(pulsuz|ödənişsiz|бесплатн\w*|free)\s+(nahar|yemə[kyg]\w*|qidalanma|обед\w*|питани\w*|lunch|meals?)")
+
+
 def mentions_company_meal(text: str) -> bool:
     """Elan işçilərə yeməyin şirkət tərəfindən verildiyini deyirmi?"""
     t = fold(text)
+    for m in _FREE_MEAL.finditer(t):
+        window = t[max(0, m.start() - MEAL_WINDOW):m.end() + MEAL_WINDOW]
+        if not _NEGATION.search(window) and not _COOKING.search(t[m.end():m.end() + 30]):
+            return True
     for m in _MEAL_WORD.finditer(t):
         before = t[max(0, m.start() - MEAL_WINDOW):m.start()]
         after = t[m.end():m.end() + MEAL_WINDOW]

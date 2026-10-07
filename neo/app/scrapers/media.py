@@ -35,27 +35,11 @@ class MediaSite:
 
 
 MEDIA_SITES: list[MediaSite] = [
-    # APA bölmə səhifələri (/senaye-ve-energetika və s.) ana səhifəyə yönləndirir — ana səhifə oxunur,
-    # yalnız biznes bölmələrinin linkləri götürülür.
-    MediaSite("apa_business", "APA.az (sənaye, enerji, iqtisadiyyat)", "https://apa.az/az",
-              r"^https://apa\.az/(?:senaye-ve-energetika|infrastruktur|iqtisadi|economy|maliyye)/[a-z0-9-]{15,}$"),
-    MediaSite("azertac_construction", "AZƏRTAC Şəhərsalma və memarlıq",
-              "https://azertac.az/bolme/shehersalma_memarliq", r"^https://azertac\.az/xeber/[a-z0-9_]{15,}-\d+$"),
+    # Əsas xəbər/rəsmi saytlar (APA, Trend, AZƏRTAC, Banker, İqtisadiyyat Nazirliyi, AZPROMO, AFEZ, ASK...)
+    # app/sources.py-də RSS/listing mənbələridir — burada yalnız onlarda olmayanlar.
     MediaSite("businesstime", "BusinessTime.az", "https://businesstime.az/",
               r"^https://businesstime\.az/[a-z0-9-]{25,}$"),
-    MediaSite("banker", "Banker.az", "https://banker.az/",
-              r"^https://banker\.az/(?!category/|tag/|page/)[^/]{25,}/?$"),
-    MediaSite("trend_business", "Trend.az Business", "https://www.trend.az/business/",
-              r"^https://www\.trend\.az/(?:business|azerbaijan)/(?:[a-z-]+/)?\d+\.html$"),
-    MediaSite("afez", "AFEZ (Alat Azad İqtisadi Zonası)", "https://afez.az/media/news",
-              r"^https://afez\.az/media/news/[a-z0-9_-]{8,}$"),
-    MediaSite("economy_gov", "İqtisadiyyat Nazirliyi", "https://economy.gov.az/az/page/media/news",
-              r"^https://economy\.gov\.az/az/post/\d+/"),
-    MediaSite("azpromo", "AZPROMO", "https://azpromo.az/az/page/media/xeberler-ve-tedbirler",
-              r"^https://azpromo\.az/az/posts/\d+/"),
     MediaSite("tabib", "TƏBİB", "https://tabib.gov.az/media/xeberler", r"^https://tabib\.gov\.az/media/xeberler/\d+$"),
-    MediaSite("ask", "Azərbaycan Sahibkarlar Konfederasiyası", "https://ask.org.az/xeber/",
-              r"^https://ask\.org\.az/20\d\d/\d\d/\d\d/"),
     MediaSite("tuib", "TÜİB", "https://tuib.az/news", r"^https://tuib\.az/news/[a-z0-9-]{10,}$",
               category=LeadCategory.event),
     # Sərgi və konfranslar: iştirakçı şirkətlər və təşkilatçı (yemək alan tərəf) siqnalı.

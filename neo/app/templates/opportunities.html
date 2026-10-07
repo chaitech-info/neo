@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Fürsətlər — Neo{% endblock %}
+{% block content %}
+  <div class="page-head">
+    <div>
+      <h1>Fürsətlər</h1>
+      <p>{{ open_total }} açıq fürsət. Kartı açıb mərhələni dəyiş, tapşırıq əlavə et.</p>
+    </div>
+    <div class="seg" role="group" aria-label="Kimin fürsətləri">
+      <a class="{{ 'on' if owner == 'me' else '' }}" href="/opportunities?owner=me">Mənimkilər</a>
+      <a class="{{ 'on' if owner != 'me' else '' }}" href="/opportunities?owner=all">Hamısı</a>
+    </div>
+  </div>
+
+  {% if totals.values()|sum == 0 %}
+    <div class="empty"><b>Hələ fürsət yoxdur</b>Validasiyada lead-ə "Fürsət yarat" basanda burada görünəcək. <a href="/leads/pending_review">Validasiyaya keç</a></div>
+  {% else %}
+  <div class="board">
+    {% for stage, items in columns.items() %}
+    <section class="col {{ stage }}" aria-label="{{ stage_names[stage] }}">
+      <div class="col-head">{{ stage_names[stage] }}<span>{{ totals[stage] }}</span></div>
+      {% for opp, org, owner_user, next_due in items %}
+      <a class="opp {{ 'tender' if opp.tender_id else '' }}" href="/opportunities/{{ opp.id }}">
+        <b>{{ opp.title[:90] }}</b>
+        {% if org %}<span class="org">{{ org.name[:60] }}</span>{% endif %}
+        <span class="foot">
+          <span>{{ owner_user.full_name if owner_user else 'Məsul yoxdur' }}</span>
+          {% if next_due %}<span class="{{ 'overdue' if next_due < utcnow() else '' }}">{{ next_due|baku_time }}</span>{% endif %}
+        </span>
+      </a>
+      {% else %}
+      <div class="col-empty">Boş</div>
+      {% endfor %}
+      {% if totals[stage] > items|length %}<div class="col-empty">və daha {{ totals[stage] - items|length }}</div>{% endif %}
+    </section>
+    {% endfor %}
+  </div>
+  {% endif %}
+{% endblock %}
