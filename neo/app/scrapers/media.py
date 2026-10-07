@@ -8,7 +8,7 @@ import structlog
 from bs4 import BeautifulSoup
 
 from app.models import LeadCategory, RawLead
-from app.scrapers.base import NEWS_KEYWORDS, BaseScraper, fold
+from app.scrapers.base import NEWS_KEYWORDS, TENDER_KEYWORDS, BaseScraper, fold
 
 log = structlog.get_logger()
 
@@ -57,6 +57,13 @@ MEDIA_SITES: list[MediaSite] = [
               r"^https://bakubuild\.az/en/news(?:-for-all)?/[a-z0-9-]{10,}$", category=LeadCategory.event),
     MediaSite("translogistica", "TransLogistica Caspian", "https://translogistica.az/en/news",
               r"^https://translogistica\.az/en/news/[a-z0-9-]{10,}$", category=LeadCategory.event),
+    # --- Faza 5: assosiasiya/palata tədbirləri və tikinti sektoru (2026-10-07) ---
+    MediaSite("amcham", "AmCham Azerbaijan", "https://amcham.az/en/event-calendar",
+              r"^https://amcham\.az/en/event/\d+$", category=LeadCategory.event),
+    MediaSite("ahk", "AHK Azerbaijan (Alman-Azərbaycan Ticarət Palatası)", "https://aserbaidschan.ahk.de/en/events",
+              r"^https://aserbaidschan\.ahk\.de/en/events/[a-z0-9-]{10,}$", category=LeadCategory.event),
+    MediaSite("atia", "ATİA — Tikinti İstehsalçıları Assosiasiyası", "https://atia-az.az/",
+              r"^https://atia-az\.az/news/[a-z0-9-]{15,}$"),
     # --- Faza 4: böyük investor/şirkətlər (2026-10-07) ---
     # Masdar (newsroom JS ilə yüklənir) və TotalEnergies (/news qlobal köhnə məqalələr verir) sınanıb, qoşulmayıb.
     MediaSite("socar_press", "SOCAR press-relizlər", "https://www.socar.az/az/page/press-relizler",
@@ -92,6 +99,15 @@ def _anchor_title(a) -> str:
     if len(title) < MIN_TITLE_LEN:  # şəkil-linki: başlıq <img alt>-dadır
         img = a.find("img", alt=True)
         title = clean_title(img["alt"]) if img else title
+    if len(title) < MIN_TITLE_LEN:  # "Register now" düyməsi: başlıq kartın başlığındadır (≤3 səviyyə yuxarı)
+        node = a
+        for _ in range(3):
+            node = node.parent
+            if node is None:
+                break
+            heading = node.find(["h1", "h2", "h3", "h4", "h5"])
+            if heading is not None and len(clean_title(heading.get_text(" ", strip=True))) >= MIN_TITLE_LEN:
+                return clean_title(heading.get_text(" ", strip=True))
     return title
 
 
@@ -144,7 +160,9 @@ class MediaScraper(BaseScraper):
                 log.info("media_site_gated_out", site=site.key)
                 return []
 
-        keep = self.select_relevant([f"{t} — {site.org}" for _, t in candidates], self.keywords, kind="news")
+        # Tədbir saytlarında (palata/sərgi) tədbir sözləri də açar sözdür: forum, konfrans, sərgi, event, reception...
+        keywords = TENDER_KEYWORDS if site.category == LeadCategory.event else self.keywords
+        keep = self.select_relevant([f"{t} — {site.org}" for _, t in candidates], keywords, kind="news")
         leads: list[RawLead] = []
         for (url, title), selected in zip(candidates, keep):
             if not selected:

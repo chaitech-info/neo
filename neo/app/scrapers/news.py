@@ -151,15 +151,32 @@ class ReportSenayeScraper(BaseNewsHTMLScraper):
     source_name = "report"
     base_url = "https://report.az"
     listing_url = "https://report.az/senaye/"
+    section = "senaye"
     category = LeadCategory.corporate
 
     def article_links(self, soup: BeautifulSoup) -> list[tuple[str, str]]:
         results = []
-        for a in soup.select("a.news__item[href^='/senaye/']"):
+        for a in soup.select(f"a.news__item[href^='/{self.section}/']"):
             title = a.select_one(".news__title")
             if title:
                 results.append((f"{self.base_url}{a['href']}", title.get_text(" ", strip=True)))
         return results
+
+
+class ReportEnergetikaScraper(ReportSenayeScraper):
+    """report.az/energetika — neft-qaz, elektrik, enerji layihələri (2026-10-07, eyni kart markup-ı)."""
+
+    source_name = "report_energy"
+    listing_url = "https://report.az/energetika/"
+    section = "energetika"
+
+
+class ReportInfrastrukturScraper(ReportSenayeScraper):
+    """report.az/infrastruktur — yol, tikinti, nəqliyyat layihələri (tikinti/logistika sektoru)."""
+
+    source_name = "report_infra"
+    listing_url = "https://report.az/infrastruktur/"
+    section = "infrastruktur"
 
 
 class FedTenderScraper(FedScraper):

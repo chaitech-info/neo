@@ -101,3 +101,41 @@ def test_new_company_sites_patterns_match_real_urls():
         assert re.search(by_key[key].href_pattern, url), key
     assert clean_title("01/10/2026 SOCAR yeni zavod açır") == "SOCAR yeni zavod açır"
     assert clean_title("10/26 2021 What is a PPA? Read the article") == "What is a PPA?"
+
+
+def test_button_link_takes_title_from_card_heading_and_event_sites_use_event_keywords():
+    html = """
+<div class="card"><h3>German maritime industry delegation to Azerbaijan</h3>
+  <a href="https://ahk.example/en/events/maritime-delegation-2026">Register now</a></div>
+<div class="card"><h3>Weekly newsletter archive for members</h3>
+  <a href="https://ahk.example/en/events/newsletter-archive-members">Register now</a></div>
+"""
+    site = MediaSite("ahk", "AHK", "https://ahk.example/en/events", r"^https://ahk\.example/en/events/[a-z0-9-]{10,}$",
+                     category=LeadCategory.event)
+    scraper = _scraper([site])
+    scraper.get = lambda url: FakeResponse(html)
+    links = dict(scraper.article_links(site, BeautifulSoup(html, "lxml")))
+    assert links["https://ahk.example/en/events/maritime-delegation-2026"] == "German maritime industry delegation to Azerbaijan"
+
+    # "delegation" tədbir sözü deyil, "newsletter" də — amma "event/conference/forum" olan başlıq event saytında keçməlidir
+    html2 = '<div><h3>Annual business forum and networking event</h3><a href="https://ahk.example/en/events/annual-business-forum">Register now</a></div>'
+    scraper.get = lambda url: FakeResponse(html2)
+    assert [l.title for l in scraper.fetch_leads()] == ["Annual business forum and networking event"]
+
+
+def test_report_sections_share_markup_and_use_own_source_keys():
+    from app.scrapers.news import ReportEnergetikaScraper, ReportInfrastrukturScraper, ReportSenayeScraper
+    from app.sources import BY_KEY
+
+    html = """
+<a class="news__item" href="/energetika/yeni-elektrik-stansiyasi-tikilir-1"><h2 class="news__title">Yeni elektrik stansiyası tikilir</h2></a>
+<a class="news__item" href="/senaye/basqa-bolme-xeberi-2"><h2 class="news__title">Digər bölmə xəbəri burada</h2></a>
+<a class="news__item" href="/infrastruktur/yeni-yol-tikintisi-3"><h2 class="news__title">Yeni yol tikintisi başlayır</h2></a>
+"""
+    soup = BeautifulSoup(html, "lxml")
+    assert ReportEnergetikaScraper().article_links(soup) == [
+        ("https://report.az/energetika/yeni-elektrik-stansiyasi-tikilir-1", "Yeni elektrik stansiyası tikilir")]
+    assert [u for u, _ in ReportInfrastrukturScraper().article_links(soup)] == [
+        "https://report.az/infrastruktur/yeni-yol-tikintisi-3"]
+    assert [u for u, _ in ReportSenayeScraper().article_links(soup)] == ["https://report.az/senaye/basqa-bolme-xeberi-2"]
+    assert BY_KEY["report_energy"].scraper.source_name == "report_energy" and BY_KEY["report_energy"].local_only

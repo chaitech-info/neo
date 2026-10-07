@@ -210,6 +210,16 @@ Vəzifə siyahısı `employer_signal.TARGET_ROLES`-dadır; "x manager" ifadələ
 | Annual/Sustainability Reports | PDF, siqnal aşağı — izlənmir |
 | Şirkətlərin LinkedIn/Instagram/Facebook səhifələri | ToS — Faza 7 qərarı |
 
+### Faza 5 – sektor mediası və assosiasiyalar (2026-10-07)
+
+**Qoşuldu:**
+- `media.py`: **AmCham** (`amcham.az/en/event-calendar` → `/en/event/<id>`), **AHK Azerbaijan** (`aserbaidschan.ahk.de/en/events/<slug>`), **ATİA** — Tikinti İstehsalçıları Assosiasiyası (`atia-az.az/news/...`). Tədbir saytları (`category=event`) artıq tədbir açar sözləri ilə (forum, konfrans, event, reception...) süzülür; "Register now" düymə-linklərinin başlığı kartın `<h3>`-dən götürülür.
+- Yeni mənbələr `report_energy` (neft-qaz/enerji) və `report_infra` (yol, tikinti, nəqliyyat): report.az `/energetika/` və `/infrastruktur/` bölmələri `/senaye/` ilə eyni markup-dadır (`local_only`, ABŞ IP-dən 403).
+
+**Sektor mediası:** neft-qaz, tikinti və logistika üzrə ayrıca *ixtisaslaşmış* Azərbaycan xəbər saytı tapılmadı; bu sektorlar Trend/APA RSS-i, Report.az bölmələri, ATİA və sərgi saytları (Caspian Oil & Gas, BakuBuild, TransLogistica) ilə əhatə olunur.
+
+**Sınanıb, qoşulmadı:** caspiannews.com (403), interfax.az və cci.az/eurochamber.az/itca.az (cavab yox), azernews.az (bölmə ünvanı 404), neftegaz.ru (468 bloku), bcca.az (British Chamber — saytda xəbər/tədbir lenti yoxdur, yalnız statik səhifələr), DEİK (Türkiyə-Azərbaycan Biznes Şurası — xəbər lenti SSR-də yoxdur), Caspian Energy Club (cavab yox), İtaliya və Çin ticarət qurumları (rəsmi sayt tapılmadı). report.az/en/energy qoşulmadı: ingilis xəbərləri əsasən neft qiyməti/proqnozdur, yemək siqnalı yoxdur.
+
 ## Ümumi dərs
 
 İlk sənəd versiyası (development spec-in ilk qaralaması) hər saytın funksiyasını **görmədən, adından fərziyyə ilə** təsvir etmişdi (məs. "Marja.az = elan saytı", "Emlak.gov.az = qeydiyyat reyestri"). Bunların əksəriyyəti səhv çıxdı. **Nəticə:** yeni mənbə əlavə edərkən HƏMİŞƏ əvvəlcə brauzerdə real saytı aç, strukturu/API-ni tap, SONRA kodu yaz — adından güman etmə.

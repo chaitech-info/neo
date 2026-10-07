@@ -9,7 +9,15 @@ from app.scrapers.jobsearch import JobSearchScraper
 from app.scrapers.media import MediaScraper
 from app.scrapers.linkedin import LinkedInScraper
 from app.scrapers.marja import MarjaScraper
-from app.scrapers.news import FedScraper, FedTenderScraper, News1Scraper, OxuScraper, ReportSenayeScraper
+from app.scrapers.news import (
+    FedScraper,
+    FedTenderScraper,
+    News1Scraper,
+    OxuScraper,
+    ReportEnergetikaScraper,
+    ReportInfrastrukturScraper,
+    ReportSenayeScraper,
+)
 from app.scrapers.worldbank import WorldBankScraper
 
 ALL_SCRAPERS = [
@@ -19,6 +27,8 @@ ALL_SCRAPERS = [
     FedScraper,
     FedTenderScraper,
     ReportSenayeScraper,
+    ReportEnergetikaScraper,
+    ReportInfrastrukturScraper,
     EtenderScraper,
     EmlakScraper,
     CorporateTenderScraper,
@@ -41,6 +51,8 @@ __all__ = [
     "FedScraper",
     "FedTenderScraper",
     "ReportSenayeScraper",
+    "ReportEnergetikaScraper",
+    "ReportInfrastrukturScraper",
     "EtenderScraper",
     "EmlakScraper",
     "CorporateTenderScraper",
