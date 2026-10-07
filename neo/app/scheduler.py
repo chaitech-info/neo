@@ -14,8 +14,11 @@ from app.scrapers import (
     EtenderScraper,
     FedScraper,
     FedTenderScraper,
+    IntlTenderScraper,
+    JobSearchScraper,
     LinkedInScraper,
     MarjaScraper,
+    MediaScraper,
     News1Scraper,
     OxuScraper,
     ReportSenayeScraper,
@@ -43,6 +46,9 @@ SOURCE_TASKS = {
     "worldbank": WorldBankScraper,
     "bp_edp": BpEdpScraper,
     "boss": BossAzScraper,
+    "jobsearch": JobSearchScraper,
+    "media": MediaScraper,
+    "intl_tender": IntlTenderScraper,
     "linkedin": LinkedInScraper,
 }
 
@@ -123,5 +129,22 @@ celery_app.conf.beat_schedule = {
         "task": "scrape_source",
         "schedule": crontab(minute=45, hour=7),
         "args": ("boss",),
+    },
+    # jobsearch.az yalnız ən yeni ~30 elanı göstərir (səhifələmə yoxdur) — gündə 5 dəfə.
+    "scrape-jobsearch-5x-daily": {
+        "task": "scrape_source",
+        "schedule": crontab(minute=15, hour="8,11,14,17,20"),
+        "args": ("jobsearch",),
+    },
+    # 16 sayt × (siyahı + seçilmiş məqalələr) — saatlıq lazım deyil, gündə 2 dəfə kifayətdir.
+    "scrape-media-twice-daily": {
+        "task": "scrape_source",
+        "schedule": crontab(minute=35, hour="9,15"),
+        "args": ("media",),
+    },
+    "scrape-intl-tender-daily": {
+        "task": "scrape_source",
+        "schedule": crontab(minute=30, hour=7),
+        "args": ("intl_tender",),
     },
 }

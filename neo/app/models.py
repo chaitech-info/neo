@@ -21,6 +21,9 @@ class LeadSource(str, Enum):
     corporate = "corporate"  # şirkət/agentliklərin öz tender səhifələri (app/scrapers/corporate.py)
     report = "report"  # report.az/senaye — sənaye xəbərləri (app/scrapers/news.py)
     boss = "boss"  # boss.az vakansiyalarından işçilərinə nahar verən şirkətlər (app/scrapers/boss.py)
+    media = "media"  # biznes/dövlət/assosiasiya/sərgi saytları (app/scrapers/media.py)
+    intl_tender = "intl_tender"  # UNGM + EBRD ECEPP (app/scrapers/intl.py)
+    jobsearch = "jobsearch"  # jobsearch.az hədəf vəzifələr (app/scrapers/jobsearch.py)
 
 
 class LeadCategory(str, Enum):

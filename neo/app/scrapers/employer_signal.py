@@ -120,3 +120,41 @@ SIGNAL_PREFIX = (
     "[SİQNAL: işəgötürən vakansiya elanında işçilərinə nahar/yemək verdiyini "
     "yazır — şirkət artıq hər gün yemək təşkil edir]"
 )
+
+
+# Xüsusi vəzifə axtarışı (2026-10-07, müştəri siyahısı): bu vəzifələrə işçi
+# axtaran şirkətin obyekti/düşərgəsi/mətbəxi var — yemək xidməti üçün potensial
+# müştəridir. Fold() olunmuş mətndə axtarılır; hər ifadə ayrıca söz kimi
+# uyğunlaşır ("chef" "mechef"-də yox, "sous chef"-də var).
+TARGET_ROLES = (
+    "facility manager", "facilities manager", "camp manager", "camp boss",
+    "administrative manager", "administration manager", "procurement manager",
+    "hr manager", "human resources manager", "canteen manager", "chef",
+    "food service supervisor", "food services supervisor", "hse manager",
+    "site manager",
+    # Azərbaycan/rus qarşılıqları
+    "təsərrüfat müdiri", "inzibati menecer", "satınalma meneceri", "satınalma üzrə menecer",
+    "hr menecer", "insan resursları meneceri", "obyekt meneceri", "aşpaz",
+    "менеджер по закупкам", "начальник лагеря", "шеф-повар",
+)
+def _role_pattern(role: str) -> str:
+    """"x manager" → "x [bir söz] manager": "Facility Operations Manager" da tutulsun."""
+    role = fold(role)
+    if role.endswith(" manager"):
+        return re.escape(role[: -len(" manager")]) + r"(?:\s+\w+)?\s+manager"
+    return re.escape(role)
+
+
+_TARGET_ROLE_RE = re.compile(r"(?<!\w)(?:" + "|".join(_role_pattern(r) for r in TARGET_ROLES) + r")(?!\w)")
+
+
+def matches_target_role(position: str) -> str | None:
+    """Vəzifə adı hədəf siyahısındadırsa uyğun gələn ifadə (fold olunmuş), əks halda None."""
+    m = _TARGET_ROLE_RE.search(fold(position))
+    return m.group(0) if m else None
+
+
+ROLE_SIGNAL_PREFIX = (
+    "[SİQNAL: işəgötürən obyekt/düşərgə/mətbəx/satınalma idarəetməsi üzrə vəzifəyə işçi "
+    "axtarır — şirkətin işçilər üçün yemək xidmətinə ehtiyacı ola bilər]"
+)

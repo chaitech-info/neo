@@ -99,6 +99,41 @@ Hər mənbənin **real** strukturu — brauzerlə birbaşa yoxlanılıb (ilkin s
 | busy.az | `/api/` və `?`-li URL-lər qadağan | Filtrli siyahı `?` tələb edir — məhdud |
 | smartjob.az | `/api/` qadağan | Yalnız HTML |
 
+## Mənbə siyahısı auditi (2026-10-07)
+
+"Neo AI — Mənbə siyahısı" (7 qrup) kodla tutuşdurulub. Hər sayt canlı yoxlanılıb (əlçatanlıq, robots.txt, HTML/API).
+
+**Yeni qoşulanlar** (hamısı robots.txt-ə uyğun, hər biri testlə örtülüb):
+
+| Mənbə açarı | Nə oxuyur | Fayl |
+|---|---|---|
+| `media` | APA (sənaye/enerji/iqtisadiyyat), AZƏRTAC şəhərsalma, BusinessTime, Banker, Trend Business, AFEZ, İqtisadiyyat Nazirliyi, AZPROMO, TƏBİB, ASK, TÜİB, Caspian Oil & Gas, BakuBuild, TransLogistica, Rebuild Karabakh | `app/scrapers/media.py` (`MEDIA_SITES`) |
+| `intl_tender` | UNGM (ölkə=Azərbaycan, ID 2306) + EBRD ECEPP ("Azerbaijan:" açıq bildirişlər) | `app/scrapers/intl.py` |
+| `jobsearch` | jobsearch.az — hədəf vəzifələr (Facility/Camp/Canteen/Procurement/HR/HSE/Site Manager, Chef...) | `app/scrapers/jobsearch.py` |
+| `corporate` (+SOCAR) | SOCAR satınalma elanları cədvəli | `app/scrapers/corporate.py` |
+| `boss` (+rol siqnalı) | boss.az-da eyni hədəf vəzifələrə işçi axtaran şirkətlər | `app/scrapers/boss.py` |
+
+Vəzifə siyahısı `employer_signal.TARGET_ROLES`-dadır; "x manager" ifadələri bir aralıq sözə icazə verir ("Facility Operations Manager" də tutulur). Rəqib, öz mətbəxi olan (otel/restoran), anonim ("Company") və iş saytı/agentlik işəgötürənləri atılır. Lead açarı LinkedIn/boss ilə eynidir (`employer_url`) — eyni şirkət bir lead olur.
+
+**Kod olmadan əhatə olunanlar:** `etender.gov.az`, World Bank, bp EDP, LinkedIn (Apify), boss.az, Report.az, Marja, Fed, Oxu, 1news, Emlak.gov.az — əvvəldən var idi.
+
+**Qoşula bilməyənlər və səbəbi** (kodla keçməyə cəhd edilmir):
+
+| Mənbə | Səbəb |
+|---|---|
+| ADY, ASCO, AZAL, bp.com, adb.org | Bot qoruması — HTTP 403 |
+| metro.gov.az | `robots.txt` HTTP 500 qaytarır → `robots.py` "qadağan" sayır. Düzələndə `a[href*='/az/procurement/']`, başlıq `img[alt]` ilə qoşulur (bax `corporate.py` şərhi) |
+| abc.az, bakuseaport.az, aic.az, cabmin.gov.az, energetika.gov.az, mdt.gov.az, sdh.gov.az, caspianenergyclub.com, totalenergies.az | Yoxlama zamanı cavab vermədi (timeout/DNS). Sonra yenidən yoxlanmalıdır |
+| EU Funding & Tenders | Qrant çağırışlarıdır (Horizon və s.), təchizat tenderi deyil — catering/tədbir fürsəti çıxmır |
+| caliber.az | Geosiyasi analitika, biznes siqnalı yoxdur |
+| Offer.az | Cloudflare 526 (sertifikat xətası) |
+| LinkedIn/Instagram/Facebook səhifələri, Google Maps, "tikinti obyektləri üzrə sosial media" | ToS/robots icazə vermir; rəsmi API və ya lisenziyalı provayder (Apify tipli) lazımdır — ayrıca qərar. LinkedIn artıq Apify ilə var |
+| Şirkət saytlarının news/careers/annual-report bölmələri (BP, TotalEnergies, Masdar, ACWA...) | Hər saytın strukturu fərqlidir; hələ `MEDIA_SITES`-ə əlavə edilməyib. Struktur yoxlandıqca `MediaSite` ilə əlavə olunur (BP/Total bot qoruması/cavabsızlıq) |
+| Sənaye parkları (Sumqayıt, Ağdam, Hacıqabul, Araz Vadisi, Pirallahı, Mingəçevir, Balaxanı, Neftçala, Masallı, Sabirabad) | **Yoxlanılmayıb** — ayrı sayt ünvanları təsdiqlənməyib. AFEZ (Alat) və İqtisadiyyat Nazirliyi qoşuldu; Pirallahı kimi park xəbərləri APA/AZƏRTAC üzərindən gəlir |
+| AmCham, AHK, ASK, TÜİB, Türkiyə/İtaliya/Çin/Britaniya ticarət qurumları, Caspian Energy Club | ASK və TÜİB qoşuldu. AmCham `/en/news` səhifəsində xəbər lenti yoxdur (yalnız tədbir təqvimi linki — ayrıca baxılmalı); AHK, xarici ticarət palataları və Caspian Energy Club **yoxlanılmayıb/cavab vermədi** |
+
+**⚠️ jobsearch.az səhifələmə:** `?page=N` SSR-də həmişə ilk 30 elanı qaytarır, "Daha ətraflı" düyməsi `/vacancies/undefined`-ə gedir. Buna görə scheduler gündə 5 dəfə çağırır (ən yeni ~30 elan görünür).
+
 ## Ümumi dərs
 
 İlk sənəd versiyası (development spec-in ilk qaralaması) hər saytın funksiyasını **görmədən, adından fərziyyə ilə** təsvir etmişdi (məs. "Marja.az = elan saytı", "Emlak.gov.az = qeydiyyat reyestri"). Bunların əksəriyyəti səhv çıxdı. **Nəticə:** yeni mənbə əlavə edərkən HƏMİŞƏ əvvəlcə brauzerdə real saytı aç, strukturu/API-ni tap, SONRA kodu yaz — adından güman etmə.

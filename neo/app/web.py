@@ -35,8 +35,11 @@ from app.scrapers import (
     EtenderScraper,
     FedScraper,
     FedTenderScraper,
+    IntlTenderScraper,
+    JobSearchScraper,
     LinkedInScraper,
     MarjaScraper,
+    MediaScraper,
     News1Scraper,
     OxuScraper,
     ReportSenayeScraper,
@@ -62,6 +65,9 @@ SOURCES = {
     "worldbank": ("Dünya Bankı", WorldBankScraper),
     "bp_edp": ("bp EDP", BpEdpScraper),
     "boss": ("boss.az — işçilərinə nahar verən şirkətlər", BossAzScraper),
+    "jobsearch": ("jobsearch.az — hədəf vəzifələr", JobSearchScraper),
+    "media": ("Media, assosiasiya və sərgilər", MediaScraper),
+    "intl_tender": ("UNGM + EBRD tenderləri", IntlTenderScraper),
     "linkedin": ("LinkedIn (Apify)", LinkedInScraper),
 }
 

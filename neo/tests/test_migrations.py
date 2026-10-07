@@ -45,12 +45,15 @@ def test_fresh_database_gets_full_schema_and_seed(engine):
 
     tables = set(inspect(engine).get_table_names())
     assert CRM_TABLES | {"leads", "alembic_version"} <= tables
-    assert _version(engine) == "0002"
+    assert _version(engine) == "0003"
     with engine.connect() as c:
         assert c.execute(text("SELECT code FROM roles ORDER BY code")).scalars().all() == [
             "admin", "manager", "sales", "viewer"]
-        assert c.execute(text("SELECT count(*) FROM sources WHERE is_active")).scalar() == 13
+        assert c.execute(text("SELECT count(*) FROM sources WHERE is_active")).scalar() == 16
         assert c.execute(text("SELECT is_active FROM sources WHERE key='azerweb'")).scalar() == 0
+        assert c.execute(text(
+            "SELECT key FROM sources WHERE key IN ('media','intl_tender','jobsearch') ORDER BY key")
+        ).scalars().all() == ["intl_tender", "jobsearch", "media"]
         assert c.execute(text("SELECT respect_robots FROM sources WHERE key='linkedin'")).scalar() == 0
 
 
@@ -65,7 +68,7 @@ def test_legacy_database_is_upgraded_without_data_loss(engine):
     upgrade_to_head(engine)
     upgrade_to_head(engine)  # ikinci dəfə — heç nə etməməlidir
 
-    assert _version(engine) == "0002"
+    assert _version(engine) == "0003"
     cols = {c["name"] for c in inspect(engine).get_columns("leads")}
     assert NEW_LEAD_COLUMNS <= cols
     with engine.connect() as c:
