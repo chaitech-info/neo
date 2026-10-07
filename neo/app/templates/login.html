@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Giriş — Neo{% endblock %}
+{% block content %}
+  <div class="auth-card">
+    <div class="brand-line">Neo</div>
+    <h1>Giriş</h1>
+    <p class="muted">Catering lead-ləri və satış paneli.</p>
+    {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+    <form method="post" action="/login">
+      {{ csrf_field(request) }}
+      <input type="hidden" name="next" value="{{ next }}">
+      <div class="field">
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email" value="{{ email or '' }}" autocomplete="username" required autofocus>
+      </div>
+      <div class="field">
+        <label for="password">Şifrə</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+      </div>
+      <button class="btn btn-primary btn-lg" type="submit" style="width:100%">Daxil ol</button>
+    </form>
+    <p class="hint" style="margin-top:14px">Hesabın yoxdursa və ya şifrəni unutmusansa, admin-ə müraciət et.</p>
+  </div>
+{% endblock %}

@@ -24,7 +24,7 @@ flowchart LR
 | Scraper-lar | [`app/scrapers/`](../../app/scrapers) | Hər mənbə üçün ayrıca sinif, ortaq `BaseScraper` |
 | Normalizer | [`app/normalizer.py`](../../app/normalizer.py) | Dublikat yoxlaması (DB-yə əsaslanan) |
 | AI Filter | [`app/ai_filter.py`](../../app/ai_filter.py) | OpenAI API ilə skorlama, fail-safe (xəta → `pending_review`, YOX `rejected`) |
-| CRM Client | [`app/crm_client.py`](../../app/crm_client.py) | `/opportunities` POST sorğusu |
+| CRM | [`app/crm.py`](../../app/crm.py) | Fürsət + tapşırıq; "Təsdiqlə" lead-i fürsətə çevirir (öz CRM-imiz) |
 | Pipeline | [`app/pipeline.py`](../../app/pipeline.py) | Yuxarıdakıları bir-birinə bağlayan orkestrator |
 | DB qatı | [`app/db/`](../../app/db) | SQLAlchemy modeli + repository (CRUD, status keçidləri) |
 | Admin panel | [`app/web.py`](../../app/web.py) + [`app/templates/`](../../app/templates) | Manual scrape tetiklənməsi, validasiya UI |

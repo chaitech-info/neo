@@ -92,10 +92,22 @@ class ScrapeRun(Base):
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     status: Mapped[str] = mapped_column(_enum("run_status", *RUN_STATUSES), default="running")
     items_seen: Mapped[int] = mapped_column(Integer, default=0)
+    # Filtrdən əvvəl saytdan gələn elan (0003). items_seen = filtrdən keçən.
+    items_fetched: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     leads_new: Mapped[int] = mapped_column(Integer, default=0)
     leads_duplicate: Mapped[int] = mapped_column(Integer, default=0)
     leads_pending: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class TriageCache(Base):
+    """Başlıq süzgəcinin qərarı (0006) — app/ai_triage.py; açar sha1(növ|prompt versiyası|başlıq)."""
+
+    __tablename__ = "triage_cache"
+
+    key: Mapped[str] = mapped_column(String(40), primary_key=True)
+    fit: Mapped[bool] = mapped_column(Boolean)
+    created_at: Mapped[datetime] = mapped_column(DateTime, index=True)
 
 
 class InterestArea(Base):
@@ -186,8 +198,8 @@ class LeadRecord(Base):
 
     ai_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     ai_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    # Hələ sərbəst sətir: `sent_to_crm` → `converted` keçidi "Təsdiqlə" axını ilə
-    # birlikdə (PR 4) edilir; CHECK də onda əlavə olunacaq.
+    # Sərbəst sətir: new/pending_review/rejected/duplicate/converted (+ köhnə sent_to_crm).
+    # `converted` — "Təsdiqlə" lead-i fürsətə çevirəndə (app/crm.py).
     status: Mapped[str] = mapped_column(String(16), default="new")
 
     crm_opportunity_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
@@ -198,6 +210,8 @@ class LeadRecord(Base):
     tender_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tenders.id"), index=True, nullable=True)
     duplicate_of: Mapped[Optional[str]] = mapped_column(ForeignKey("leads.dedupe_key"), nullable=True)
     ai_model: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    # A/B/C — kommersiya kateqoriyası (0007, v2 qiymətləndirmə); None = v1 və ya rədd.
+    tier: Mapped[Optional[str]] = mapped_column(String(1), nullable=True, index=True)
     reviewed_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 

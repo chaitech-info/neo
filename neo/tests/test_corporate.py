@@ -64,3 +64,23 @@ def test_items_without_link_get_stable_unique_url_and_failing_site_is_isolated()
     leads = scraper.fetch_leads()
 
     assert [lead.source_url for lead in leads] == ["https://y.az/elanlar#186"]
+
+
+def test_title_from_attribute_and_slash_separated_date():
+    from datetime import date
+
+    html = """
+<a href="/az/procurement/341"><div><img alt="Sərfiyyat materiallarının satın alınması" src="x.jpg">
+<div>Satınalma və hərraclar Sərfiyyat materiallarının satın alınması 5 OKTYABR / 2026 / 11:04</div></div></a>
+<a href="/az/procurement/340"><div><img alt="Banket xidmətinin satın alınması" src="y.jpg">
+<div>Satınalma və hərraclar Banket xidmətinin satın alınması 1 OKTYABR / 2026 / 10:00</div></div></a>
+"""
+    site = SiteConfig(key="m", org="Metro", listing_url="https://m.gov.az/az/procurement",
+                      item_selector="a[href*='/az/procurement/']", title_selector="img", title_attr="alt")
+    scraper = _scraper([site])
+    scraper.get = lambda url: FakeResponse(html)
+    leads = scraper.fetch_leads()
+
+    assert [l.title for l in leads] == ["Banket xidmətinin satın alınması"]
+    assert leads[0].source_url == "https://m.gov.az/az/procurement/340"
+    assert parse_listing_date("5 OKTYABR / 2026 / 11:04").isoformat() == "2026-10-04T20:00:00"

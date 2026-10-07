@@ -9,3 +9,8 @@ neo_leads.db
 *.db
 .DS_Store
 .claude/
+.session_secret
+.celerybeat-schedule*
+.vercel
+.env.local
+eval_data/

@@ -125,6 +125,77 @@
   - **Bilinən hədd:** fed.az məqaləsi ↔ etender elanı tutulmur — başlıqlar tam fərqlidir, etender siyahı API-si sifarişçi VÖEN-ini vermir. fed.az mətnindəki VÖEN `organizations`-a yazılır (CRM üçün). AI müqayisəsi Faza 2.
   - Hər scrape `scrape_runs`-a yazılır; dashboard "Son nəticə" server yenidən başlayanda bazadan oxunur. Mesaj: "N yeni lead — X validasiyaya, Y AI rədd etdi, Z başqa mənbədə artıq var, W təkrar".
   - Köhnə lead-lər server başlayanda idempotent doldurulur (`app/db/backfill.py`).
+- **PR 3 (giriş və rollar, 2026-09-28):**
+  - Bütün səhifələr giriş tələb edir; ilk admin brauzerdən `/setup` ilə (yalnız istifadəçi yoxdursa), qalanları admin "İstifadəçilər" səhifəsindən.
+  - Rollar iyerarxikdir: viewer < sales (validasiya) < manager (scrape) < admin (istifadəçilər). Düymələr rola görə gizlənir, route-lar ayrıca qorunur (`app/auth/security.py`).
+  - Sessiya imzalı cookie (Starlette `SessionMiddleware`, `itsdangerous`), 12 saat; şifrə dəyişəndə/deaktivdə sessiya etibarsız olur (cookie-də şifrə hash-inin sonu). CSRF token bütün POST formlarında; SameSite=Lax. 5 səhv cəhd → 15 dəq blok (proses yaddaşında).
+  - `leads.reviewed_by_id/reviewed_at` təsdiq/rədd/qaytarmada yazılır.
+  - Testlər: `tests/conftest.py` admin panel testləri üçün "daxil olmuş admin" təyin edir; auth testləri `@pytest.mark.real_auth` ilə real məntiqdən keçir.
+
+- **PR 4 (fürsət/tapşırıq ekranları, açar sözlər bazadan, 24/7 Celery, 2026-09-30):**
+  - **"Təsdiqlə" → fürsət + ilk tapşırıq** (`app/crm.py::convert_lead`). Əvvəl xarici CRM-ə göndərirdi və həmişə xəta verirdi — `crm_client.py` silindi, `.env`-dən `CRM_*` çıxarıldı. Lead statusu `converted`, `crm_opportunity_id` = fürsət ID. Təşkilat `organizations`-da tapılır/yaradılır (`app/tenders.py::organization_for`), əlaqə məlumatı lead-dən köçürülür.
+  - **İlk tapşırıq:** tender → "Tender sənədlərini yoxla və təklif hazırla", son tarixdən 2 gün əvvəl (ən azı indidən 4 saat sonra), son tarixə ≤3 gün qalıbsa prioritet yüksək; digər lead → "İlk əlaqə: <təşkilat>", 1 gün, AI skoru ≥0.8-dirsə yüksək. Məsul — təsdiqləyən istifadəçi; `created_by_id` boş = sistem.
+  - **Ekranlar:** `/opportunities` (mərhələ filtrləri, "mənimkilər", növbəti tapşırığın vaxtı, gecikən qırmızı), `/opportunities/{id}` (mərhələ, uduzma səbəbi, dəyər, məsul, tapşırıqlar, mənbə lead), `/tasks` (təcililər yuxarıda). Rollar: viewer baxır, sales dəyişir, məsulu başqasına yalnız manager+ verir.
+  - **Mərhələ qaydaları:** tender fürsətində `contacted`/`negotiation` yoxdur; `lost` səbəbsiz olmaz; `won`/`lost` bağlayanda açıq tapşırıqlar `cancelled` olur; yenidən açmaq mümkündür.
+  - **Açar sözlər bazadan** (`app/keywords.py`): scraper-lər (`BaseScraper.select_relevant`) `kind`-ə uyğun (`tender` → all+tender, `news` → all+news) aktiv terminləri oxuyur; **mənfi söz** başlığı həm açar söz, həm AI yolunda bağlayır; `match`: prefix/word/phrase. AI promptları şirkət profilini **maraq sahələrindən** qurur (ad, prioritet, AI təsviri + ilk 20 siqnal sözü); triaj keşi prompt versiyası ilə açarlanır — təsvir dəyişəndə köhnə qərarlar keçərsiz. 60 san keş; panel dəyişiklikdə təmizləyir, Celery worker ≤1 dəq görür. Baza əlçatan deyilsə koddakı siyahılar (fallback). Emlak-ın hərrac sözləri mənbəyə xasdır — `extra` kimi əlavə olunur.
+  - **Panel:** `/settings/keywords` — maraq sahələri (ad, AI təsviri, prioritet, aktiv), yeni sahə, açar sözlər (bir neçəsi birdən, dil avtomatik, dublikat atlanır), söndür/sil, filtr. Redaktə: manager+.
+  - **24/7:** Redis (`brew services`, yalnız 127.0.0.1) + `scripts/run_worker.sh` (worker + beat, threads pool). Canlı yoxlanıb: tapşırıq Redis → worker → `scrape_runs` (`trigger=schedule`, `ok`). Planlı və əl ilə scrape eyni mənbədə üst-üstə düşmür — Redis kilidi (`app/locks.py`); Redis yoxdursa kilid atlanır.
+  - **Açıq:** worker-in kompüter yenidən başlayanda özü qalxması (launchd agent) — hələ qurulmayıb, istifadəçi qərarı; worker logları panelin "Loglar" səhifəsinə düşmür.
+  - **Kodda:** `app/crm.py`, `app/crm_routes.py`, `app/keywords.py`, `app/keyword_routes.py`, `app/locks.py`, `app/scheduler.py`, `scripts/run_worker.sh`, şablonlar `opportunities.html`, `opportunity.html`, `tasks.html`, `keywords.html`; testlər `tests/test_crm.py`, `tests/test_keywords_db.py`, `tests/test_locks_and_scheduler.py`
+
+### Phase 0 — etibarlılıq düzəlişləri (2026-10-05)
+- **Status:** Decided, deploy olunub
+- **Niyə:** 5 günlük production datası (370 lead, 477 run): 1news 112 run-dan 89-u uğursuz (sayt `/az/xronika/`-ni silib, 404); 41 lead heç vaxt skorlanmayıb (`new` — Neon bağlantısı AI mərhələsində düşüb, heç kim təkrar etmirdi); "0 elan" həm "uyğun yoxdur", həm "selector sınıb" demək idi; AI triajı say səhvində (37 başlığa 36 cavab) bütün partiyanı daxil edirdi (oxu: 37/37 tam qiymətləndirməyə getdi).
+- **Nə edildi:**
+  - 1news → `/az/lenta/` (`.newsList a span.title`).
+  - `scrape_runs.items_fetched` (miqrasiya 0003) — filtrdən əvvəlki say; dashboard-da mənbə sağlamlığı (`app/health.py`: OK / Xəta / Gecikir / Boş).
+  - Özünü bərpa: skorsuz `new` lead-lər növbəti run-da skorlanır; yarımçıq `running` run-lar `failed` olur; baza bağlantısı düşəndə bir təkrar; psycopg2 keepalive + connect_timeout.
+  - Triaj: pozuq partiya yarıya bölünüb yenidən soruşulur; yalnız ≤5 başlıqlıq pozuq partiya daxil edilir və bu "şübhə" cavabları keşlənmir.
+  - Testlər müvəqqəti SQLite-da (əvvəl `.env` → Neon idi).
+- **Worldbank 0 elan normaldır:** API Azərbaycan üzrə 50 elan qaytarır, açıq olan 1-2-si konsaltinqdir.
+- **Nəticə (canlı yoxlanıb):** 1news ok (24 gətirdi), 41 skorsuz lead skorlandı, oxu 37-dən 4-ü seçildi, bütün 13 mənbə "OK".
+- **Kodda:** `app/health.py`, `app/pipeline.py`, `app/db/repository.py`, `app/ai_triage.py`, `app/scheduler.py`, `app/db/engine.py`, `migrations/versions/0003_run_items_fetched.py`, `tests/test_pipeline_recovery.py`.
+
+### Phase 1 — filtr modeli: ölçmə, v2 qiymətləndirmə, triaj, dublikatlar (2026-10-05)
+- **Status:** Decided, deploy olunub (Modal + Mac worker; Neon miqrasiya 0004, 0005)
+- **Ölçmə aləti:** `scripts/eval_filter.py` (`collect` → `label` → `run` → `report`, `export`). Data `eval_data/`-dadır (git-də yox — lead mətnlərində əlaqə məlumatı var). 1317 element: 428 lead (tam mətn) + 889 başlıq (süzgəcdən ƏVVƏL tutulub). Qızıl etiket `gpt-5.2` (rubrika `GOLD_RUBRIC`, versiya g1) — insan düzəlişləri `eval_data/human_labels.csv`-də modeldən üstündür (`export` satış üçün CSV verir). Sabit bölgü: 70% dev (tənzimləmə), 30% test (yekun). Skorsuz/AI xətası >5% olsa ölçü dayanır (kredit bitəndə yanlış rəqəm verirdi).
+- **Nəticə (test hissəsi):**
+  | | Precision | Recall |
+  |---|---|---|
+  | v1 (gpt-4o-mini, köhnə prompt) | 0.82 | 0.77 |
+  | **v2 + gpt-4.1-mini** | **0.90** | **0.93** |
+  Bütün dəstdə v2: P 0.90 / R 0.96. gpt-5-mini v2: R 0.97, amma P 0.76; gpt-4.1-nano zəif (0.72/0.70).
+  Triaj (başlıq süzgəci, 945 başlıqlıq indiki kəsik): recall 0.54 → **0.81**, seçilən pay 9.8%.
+- **v2 qiymətləndirmə** (`app/ai_scoring.py`, defolt; `AI_SCORER=v1` geri qaytarır): model yalnız faktları sahələrə ayırır (siqnal, təşkilat, AZ-dadırmı, yemək biznesidirmi, işçi sayı, yemək qeyd olunubmu, sübut, səbəb); skor və A/B/C `compute_score`-da kodla. `ai_reason` `[A]/[B]/[C]` ilə başlayır; təşkilat adı `entity_name`-ə yazılır.
+- **Kod qaydaları (prompt etibarsız çıxdı):** xəbərdəki tədbir tender deyil (yemək yazılmayıbsa eşikdən aşağı); `expansion_hiring` eşikdən aşağı (qızıl dəstdə relevant yoxdur; fed.az tək vakansiyaları "kütləvi" sayılırdı); son tarix keçib → 0.1; xaricdə / yemək biznesi → 0.05.
+- **Triaj:** model gpt-4.1-mini (`AI_TRIAGE_MODEL`); cavab nömrə→0/1 obyekti, 20-lik partiya (40-lıq massivdə model sıranı itirirdi); boş tender başlığı ("T E N D E R — Azərenerji ASC", "Bildiriş-Uzatma") kodla həmişə daxil (`uninformative_title`); qaydalar genişləndi (içməli su, liqa/turnir təşkili, tender icmalı, hab).
+- **Açar sözlər:** 0004 — "təşkili", "keçirilməsi" (tender, tədbirlər); 0005 — mənfi "mətbəə" (gpt-4.1-mini "mətbəə"ni "mətbəx" sanıb çap tenderini 0.82 verirdi).
+- **Dublikatlar** (`app/story_dedup.py`): skorlamadan sonra, keçən lead üçün — eyni təşkilat (normalize_org) və ya başlıq üst-üstə düşməsi ≥75%, 14 gün → `duplicate` + `duplicate_of`.
+- **Testlər:** OpenAI açarı test mühitindən silinir — heç bir test real API-yə gedə bilməz.
+- **Açıq:** satış komandasının etiket yoxlaması (`eval_data/for_sales_review.csv`); köhnə (v1) lead-lərin v2 ilə yenidən skorlanması — qərar gözləyir; A/B/C panel filtri — növbəti scope.
+
+### Phase 2 — mənbə reyestri və 13 → 28 mənbə (2026-10-05)
+- **Status:** Davam edir; ilk iki partiya deploy olunub.
+- **Reyestr** (`app/sources.py`): mənbə əvvəl 7 yerdə əl ilə qeyd olunurdu (enum, sources cədvəli, panel, scheduler, beat, növ, LOCAL_ONLY). İndi bir `SourceSpec`; `sources` cədvəli `upgrade_to_head`-dən sonra `sync_sources` ilə yenilənir (miqrasiya lazım deyil). `RawLead.source` artıq sərbəst sətirdir — yoxlama bazadakı FK-dır.
+- **Ümumi scraper-lər:** RSS (9 mənbə), siyahı + URL nümunəsi (5), jobsearch.az JSON API (1). Bax 03-site-research → "Phase 2 mənbələri".
+- **Triaj keşi bazada** (miqrasiya 0006, `triage_cache`): Modal hər run-da təzə konteyner açır — yaddaş keşi boş idi, saatlıq lentlər eyni başlıqları təkrar AI-yə göndərəcəkdi (~25M token/ay). 30 gün saxlanılır.
+- **"Pulsuz nahar"** (imtiyaz sözü yeməkdən əvvəl) indi tutulur — boss.az-a da aiddir.
+- **Təxirə salınıb:** UNGM / EU / ADB (aşağı gəlir — 5 gündə Dünya Bankından AZ catering tenderi yoxdur), JS saytları, hellojob/position (HTML, detal səhifə lazım), tədbir təqvimləri (BakuBuild, Caspian Oil & Gas və s.).
+- **Partiya 3 (eyni gün):** position.az + hellojob.az (ümumi `JobBoardScraper`; işəgötürən qruplaşdırması `app/scrapers/employers.py`-da — jobsearch da işlədir), Baku Expo Center sərgi təqvimi (yeni kateqoriya `event_listing` — v2 bunu tender kimi sayır, amma maks. B 0.7: tədbir var, catering sorğusu yox). Cəmi **31 mənbə**.
+- **Şirkət adının qeyri-dəqiq uyğunlaşdırılması** (`story_dedup.same_org`): fold, domen sonluğu (xirman.az → xirman), hüquqi forma; adlardan biri digərinin söz-prefiksidirsə eyni şirkət ("Avromak MMC" ⊂ "Avromak MMC İstehsalat və satış"); yalnız ilk söz kifayət deyil. Mövcud növbəyə bir dəfə tətbiq olundu: 4 birləşmə.
+- **Kod qaydası:** adı "market/mağaza/store" olan təşkilat yemək biznesi sayılmır (model OBA-nı promptdakı açıq qeydə baxmayaraq "food_business" sayırdı).
+- **Reqressiya ölçüsü** (bütün dəyişikliklərdən sonra): v2 P 0.925 / R 0.961 (bütün dəst), test 0.875 / 0.933.
+
+### A/B/C kateqoriyası — panel və meyarlar (2026-10-06)
+- **Status:** Decided, deploy olunub (Neon miqrasiya 0007).
+- **Meyarlar** (`app/ai_scoring.py::compute_score`, paneldə "Kateqoriyalar nə deməkdir?"):
+  - **A — birbaşa tələbat:** catering/yemək/iaşə tenderi, ərzaq alışı, yeməyi açıq yazan tədbir tenderi.
+  - **B — güclü dolayı:** tədbir təşkili tenderi; işçilərinə nahar verən böyük/orta şirkət və ya 3+ vakansiya; adı çəkilən yeni zavod/obyekt; sərgi təqvimi.
+  - **C — zəif/erkən:** ölçüsü bilinməyən və ya kiçik işəgötürən (1-2 vakansiya), xəbərdə yeməyi qeyd olunan tədbir, erkən layihə.
+- **Ölçü:** qızıl kateqoriya ilə razılıq 0.48 → **0.87** (test 28/28). Əvvəl ölçüsü bilinməyən işəgötürənlər B-yə düşürdü — qızıl dəstdə onların 46/54-ü C-dir. `python -m scripts.eval_filter tiers` (çarpaz cədvəl).
+- **Panel:** `leads.tier` sütunu (əvvəl yalnız `ai_reason`-da "[A] " prefiksi idi); Validasiya A → B → C → kateqoriyasız, daxilində skor və yaxın son tarix; tablar (`?tier=A|B|C|none`) saylarla; dashboard-da A/B/C sayları; bütün lead-lər cədvəlində nişan.
+- **İstehsal növbəsi** yeni qaydalarla yenidən skorlandı: A 7 · B 60 · C 77 (əvvəl A 7 · B 136 · C 4).
+- **Mobil düzəliş:** `.main { min-width: 0 }` — grid elementi geniş məzmunla (tab paneli) ekrandan genişlənirdi.
 
 ## Açıq suallar (hələ qərar verilməyib)
 

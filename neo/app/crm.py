@@ -1,0 +1,211 @@
+"""Öz CRM-imiz: fürsətlər (opportunities) və tapşırıqlar (tasks).
+
+"Təsdiqlə" düyməsi lead-i fürsətə çevirir və ilk tapşırığı yaradır (əvvəl
+xarici CRM-ə göndərirdi, endpoint olmadığı üçün həmişə xəta verirdi — bax
+docs/knowledge-base/04-decisions.md → "CRM baza sxemi", qərar 1).
+
+Mərhələlər (qərar 3): new → contacted → qualified → proposal → negotiation →
+won | lost; tender üçün new → qualified → proposal → won | lost. `lost`
+səbəbsiz bağlana bilməz.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.db.models import LOST_REASONS, LeadRecord, Opportunity, Task
+from app.tenders import extract_voen, organization_for
+
+STAGE_NAMES = {
+    "new": "Yeni",
+    "contacted": "Əlaqə saxlanılıb",
+    "qualified": "Uyğundur",
+    "proposal": "Təklif göndərilib",
+    "negotiation": "Danışıqlar",
+    "won": "Qazanıldı",
+    "lost": "Uduzuldu",
+}
+PIPELINE = ["new", "contacted", "qualified", "proposal", "negotiation", "won", "lost"]
+TENDER_PIPELINE = ["new", "qualified", "proposal", "won", "lost"]
+CLOSED_STAGES = {"won", "lost"}
+
+LOST_REASON_NAMES = {
+    "price": "Qiymət",
+    "competitor": "Rəqib qazandı",
+    "no_response": "Cavab yoxdur",
+    "not_eligible": "Uyğun deyilik",
+    "deadline_missed": "Son tarix keçdi",
+    "other": "Digər",
+}
+TASK_STATUS_NAMES = {"open": "Açıq", "in_progress": "İcrada", "done": "Bitib", "cancelled": "Ləğv"}
+PRIORITY_NAMES = {"low": "Aşağı", "normal": "Normal", "high": "Yüksək"}
+
+# İlk tapşırığın son tarixi: tender üçün son tarixdən 2 gün əvvəl (sənəd
+# hazırlamağa vaxt), amma ən azı indidən 4 saat sonra; digər lead-lər üçün 1 gün.
+TENDER_PREP_BUFFER = timedelta(days=2)
+MIN_TASK_LEAD = timedelta(hours=4)
+DEFAULT_FIRST_CONTACT = timedelta(days=1)
+URGENT_WITHIN = timedelta(days=3)
+
+
+class CrmError(ValueError):
+    """İstifadəçiyə göstərilən biznes qaydası xətası (Azərbaycan dilində)."""
+
+
+@dataclass
+class Conversion:
+    opportunity: Opportunity
+    task: Task
+
+
+def is_tender(opp: Opportunity) -> bool:
+    return opp.tender_id is not None
+
+
+def pipeline_for(opp: Opportunity) -> list[str]:
+    return TENDER_PIPELINE if is_tender(opp) else PIPELINE
+
+
+def _now() -> datetime:
+    return datetime.utcnow()
+
+
+def _first_task(lead: LeadRecord, org_name: str | None, now: datetime) -> tuple[str, str, datetime, str]:
+    """(başlıq, təsvir, son tarix, prioritet) — lead növünə görə."""
+    who = org_name or lead.entity_name or "müştəri"
+    if lead.category == "tender" or lead.tender_id:
+        due = now + DEFAULT_FIRST_CONTACT
+        if lead.deadline_at:
+            due = max(lead.deadline_at - TENDER_PREP_BUFFER, now + MIN_TASK_LEAD)
+            due = min(due, lead.deadline_at)
+        urgent = lead.deadline_at is not None and lead.deadline_at - now <= URGENT_WITHIN
+        return (
+            f"Tender sənədlərini yoxla və təklif hazırla — {who}",
+            "Tender şərtlərini oxu, iştirak tələblərini və son tarixi yoxla, qiymət təklifini hazırla.",
+            due,
+            "high" if urgent else "normal",
+        )
+    contact = ", ".join(x for x in (lead.contact_phone, lead.contact_email, lead.contact_website) if x)
+    return (
+        f"İlk əlaqə: {who}",
+        "Zəng et və ya yaz, işçi qidalanması / tədbir ehtiyacını dəqiqləşdir, görüş təyin et."
+        + (f"\nƏlaqə: {contact}" if contact else ""),
+        now + DEFAULT_FIRST_CONTACT,
+        "high" if (lead.ai_score or 0) >= 0.8 else "normal",
+    )
+
+
+def convert_lead(session: Session, dedupe_key: str, user_id: int | None) -> Conversion:
+    """pending_review lead → fürsət + ilk tapşırıq; lead `converted` olur."""
+    lead = session.get(LeadRecord, dedupe_key)
+    if lead is None or lead.status != "pending_review":
+        raise CrmError("Lead tapılmadı və ya artıq emal olunub (yalnız validasiyadakı lead təsdiqlənə bilər)")
+    existing = session.execute(select(Opportunity).where(Opportunity.lead_key == dedupe_key)).scalar_one_or_none()
+    if existing is not None:
+        raise CrmError(f"Bu lead üçün artıq fürsət var (#{existing.id})")
+
+    org = None
+    if lead.organization_id is None:
+        org = organization_for(session, lead.entity_name, extract_voen(lead.raw_text))
+        if org is not None:
+            lead.organization_id = org.id
+            _fill_contacts(org, lead)
+    now = _now()
+
+    opp = Opportunity(
+        title=lead.title[:500],
+        lead_key=lead.dedupe_key,
+        organization_id=lead.organization_id,
+        tender_id=lead.tender_id,
+        owner_id=user_id,
+        stage="new",
+        currency="AZN",
+        expected_close_on=lead.deadline_at.date() if lead.deadline_at else None,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(opp)
+    session.flush()
+
+    title, description, due, priority = _first_task(lead, org.name if org else lead.entity_name, now)
+    task = Task(
+        opportunity_id=opp.id,
+        title=title,
+        description=description,
+        assignee_id=user_id,
+        created_by_id=None,  # sistem yaradıb
+        due_at=due,
+        status="open",
+        priority=priority,
+        created_at=now,
+    )
+    session.add(task)
+
+    lead.status = "converted"
+    lead.crm_opportunity_id = str(opp.id)
+    lead.reviewed_by_id = user_id
+    lead.reviewed_at = now
+    session.commit()
+    return Conversion(opp, task)
+
+
+def _fill_contacts(org, lead: LeadRecord) -> None:
+    org.phone = org.phone or lead.contact_phone
+    org.email = org.email or lead.contact_email
+    org.website = org.website or lead.contact_website
+
+
+def change_stage(session: Session, opp: Opportunity, stage: str,
+                 lost_reason: str | None = None, lost_note: str | None = None) -> None:
+    if stage not in pipeline_for(opp):
+        raise CrmError("Bu fürsət növü üçün yanlış mərhələ")
+    if opp.stage in CLOSED_STAGES and stage not in CLOSED_STAGES:
+        opp.closed_at = None  # yenidən açılır
+    if stage == "lost":
+        if lost_reason not in LOST_REASONS:
+            raise CrmError("Uduzma səbəbini seç")
+        opp.lost_reason_code = lost_reason
+        opp.lost_reason_note = (lost_note or "").strip() or None
+    else:
+        opp.lost_reason_code = opp.lost_reason_note = None
+    if stage in CLOSED_STAGES and opp.stage not in CLOSED_STAGES:
+        opp.closed_at = _now()
+        # Bağlanan fürsətin açıq tapşırıqları artıq aktual deyil.
+        for task in opp_tasks(session, opp.id):
+            if task.status in ("open", "in_progress"):
+                task.status = "cancelled"
+    opp.stage = stage
+    opp.updated_at = _now()
+    session.commit()
+
+
+def add_task(session: Session, opp: Opportunity, title: str, due_at: datetime | None,
+             assignee_id: int | None, created_by_id: int | None, priority: str = "normal",
+             description: str | None = None) -> Task:
+    title = (title or "").strip()
+    if not title:
+        raise CrmError("Tapşırığın adı boş ola bilməz")
+    if priority not in PRIORITY_NAMES:
+        raise CrmError("Yanlış prioritet")
+    task = Task(opportunity_id=opp.id, title=title[:500], description=(description or "").strip() or None,
+                due_at=due_at, assignee_id=assignee_id, created_by_id=created_by_id,
+                priority=priority, status="open", created_at=_now())
+    session.add(task)
+    opp.updated_at = _now()
+    session.commit()
+    return task
+
+
+def set_task_status(session: Session, task: Task, status: str) -> None:
+    if status not in TASK_STATUS_NAMES:
+        raise CrmError("Yanlış tapşırıq statusu")
+    task.status = status
+    task.completed_at = _now() if status == "done" else None
+    session.commit()
+
+
+def opp_tasks(session: Session, opp_id: int) -> list[Task]:
+    return list(session.scalars(select(Task).where(Task.opportunity_id == opp_id).order_by(Task.due_at)))

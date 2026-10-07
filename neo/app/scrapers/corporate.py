@@ -22,6 +22,11 @@ log = structlog.get_logger()
 # - AzerGold: tender siyahısı ayrıca portaldadır (satinalmalar.azergold.az) — ayrıca baxılmalı.
 # - ABB: Next.js RSC axınında gəlir, adi HTML-də siyahı yoxdur — ayrıca parser lazımdır.
 # - atb.az: robots.txt bütün crawling-i qadağan edir — qoşulmamalıdır.
+# - ADY, ASCO, AZAL: bot qoruması (403) — keçməyə cəhd edilmir.
+# - Bakı Limanı (bakuseaport.az), AIC (aic.az): 2026-10-07-də cavab vermədi.
+# - Bakı Metropoliteni (metro.gov.az/az/procurement): robots.txt HTTP 500 qaytarır — robots.py bunu
+#   "qadağan" sayır; sayt düzələndə SiteConfig(item_selector="a[href*='/az/procurement/']",
+#   title_selector="img", title_attr="alt") ilə qoşula bilər.
 
 
 @dataclass(frozen=True)
@@ -31,6 +36,7 @@ class SiteConfig:
     listing_url: str
     item_selector: str
     title_selector: str | None = None  # None: elementin öz mətni
+    title_attr: str | None = None      # None: mətn; məs. "alt" — başlıq <img alt>-dadır
     link_selector: str | None = None   # None: elementin öz href-i (məs. <tr href=...>)
     link_attr: str = "href"
     id_attr: str | None = None         # link yoxdursa stabil ID üçün (məs. data-id)
@@ -84,6 +90,14 @@ SITES: list[SiteConfig] = [
         link_selector="a[href*='tenderannouncementsdetail']",
         fetch_detail=True,
     ),
+    SiteConfig(
+        key="socar",
+        org="SOCAR",
+        listing_url="https://www.socar.az/az/page/satinalma-elanlari",
+        item_selector="tbody#table__procurements__body tr",
+        title_selector="td:nth-of-type(1)",
+        link_selector="a",  # link .doc/.pdf-dir — dedup üçün sənədin özü
+    ),
 ]
 
 _MONTHS = {
@@ -96,7 +110,7 @@ _MONTHS = {
     "august": 8, "september": 9, "october": 10, "november": 11, "december": 12,
 }
 _NUMERIC_DATE = re.compile(r"\b(\d{1,2})[./](\d{1,2})[./](\d{4})\b")  # 18.09.2026, 30/09/2026 (gün əvvəl)
-_WORD_DATE = re.compile(r"\b(\d{1,2})\s+([a-zəıöüğçş]+),?\s+(\d{4})\b")
+_WORD_DATE = re.compile(r"\b(\d{1,2})\s+([a-zəıöüğçş]+)\s*[,/]?\s*(\d{4})\b")  # "5 oktyabr / 2026" də
 
 
 def parse_listing_day(text: str) -> date | None:
@@ -165,7 +179,12 @@ class CorporateTenderScraper(BaseScraper):
                 continue
 
             title_el = item.select_one(site.title_selector) if site.title_selector else item
-            title = title_el.get_text(" ", strip=True) if title_el else ""
+            if title_el is None:
+                title = ""
+            elif site.title_attr:
+                title = (title_el.get(site.title_attr) or "").strip()
+            else:
+                title = title_el.get_text(" ", strip=True)
             if not title:
                 continue
             url = self._item_url(site, item, title)

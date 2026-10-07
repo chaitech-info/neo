@@ -1,14 +1,17 @@
 {% extends "base.html" %}
-{% block title %}Loglar — Lead Scraping Admin{% endblock %}
+{% block title %}Loglar — Neo{% endblock %}
 {% block content %}
   <div class="toolbar">
     <div>
       <h1>Loglar</h1>
-      <p class="muted">Scraping prosesi başdan-sona canlı: HTTP sorğuları, scraper nəticələri, dedup, hər lead-in AI skoru, xətalar. Son {{ 5000 }} yazı yaddaşda saxlanılır (server yenidən başlayanda sıfırlanır).</p>
+      <p class="muted">Paneldən başladılan yoxlamaların hər addımı canlı: sayt sorğuları, seçim, AI skorları, xətalar. Son 5000 yazı saxlanılır, server yenidən başlayanda sıfırlanır. Avtomatik yoxlamaların logu worker terminalındadır.</p>
     </div>
+    {% if has_role(request.state.user, 'manager') %}
     <form method="post" action="/scrape-all">
-      <button class="btn btn-primary btn-lg" type="submit" id="scrape-all-btn">Hamısını scrape et</button>
+      {{ csrf_field(request) }}
+      <button class="btn btn-primary btn-lg" type="submit" id="scrape-all-btn">Hamısını indi yoxla</button>
     </form>
+    {% endif %}
   </div>
 
   <div id="running" class="muted"></div>
@@ -31,14 +34,14 @@
         <option value="debug">debug</option>
       </select>
     </label>
-    <input type="search" id="f-text" placeholder="Mətndə axtar (məs. ai_scored, boss.az)">
-    <label><input type="checkbox" id="f-http" checked> HTTP sorğuları</label>
-    <label><input type="checkbox" id="f-follow" checked> Avtomatik aşağı sürüşdür</label>
+    <input type="search" id="f-text" placeholder="Axtar: ai_scored, boss.az…" style="flex:1 1 220px">
+    <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="f-http" checked> Sayt sorğuları</label>
+    <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="f-follow" checked> Yeni yazılara sürüşdür</label>
     <span class="muted" id="count"></span>
   </div>
 
   <div class="log-wrap" id="log">
-    <div class="empty" id="empty">Hələ log yoxdur — "Hamısını scrape et" və ya dashboard-dan bir mənbəni işə sal.</div>
+    <div class="empty" id="empty">Hələ log yoxdur. "Hamısını indi yoxla" düyməsi və ya Mənbələr səhifəsindən bir mənbəni yoxla.</div>
   </div>
 
   <script>
@@ -110,7 +113,7 @@
           btn.textContent = "İşləyir: " + running.length + " mənbə";
         } else {
           runningEl.textContent = "Hazırda heç bir scraper işləmir.";
-          btn.textContent = "Hamısını scrape et";
+          btn.textContent = "Hamısını indi yoxla";
         }
       }
 

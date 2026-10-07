@@ -19,14 +19,19 @@ DEFAULT_MODEL = "gpt-4o-mini"
 # SDK-da eksponensial gözləmə ilə təkrar olunsun, lead skorsuz qalmasın.
 OPENAI_MAX_RETRIES = 8
 
-SYSTEM_PROMPT = """\
-Sən Azərbaycandakı bir catering şirkəti üçün potensial müştəri (lead) qiymətləndirirsən.
-
+# Şirkət profili bazadakı maraq sahələrindən gəlir (paneldə redaktə olunur,
+# app/keywords.py::company_profile); baza əlçatan deyilsə bu mətn işlədilir.
+DEFAULT_COMPANY = """\
 Şirkətin əsas məhsulu: şirkətlərin əməkdaşları/işçiləri üçün gündəlik hazır
 yemək — paketlənmiş/porsiyalı nahar (lunch box, qab yeməyi), toplu çatdırılma.
 Müştərilər: ofislər, zavodlar, istehsal müəssisələri, tikinti obyektləri,
 anbarlar, sənaye parkları, dövlət qurumları. İkinci dərəcəli: korporativ tədbir
-və banket yeməkləri.
+və banket yeməkləri."""
+
+SYSTEM_PROMPT = """\
+Sən Azərbaycandakı bir catering şirkəti üçün potensial müştəri (lead) qiymətləndirirsən.
+
+{company}
 
 Sənə elan/xəbər/tender/LinkedIn post mətni veriləcək. Bu mətnin Azərbaycanda
 BİZDƏN yemək ALA BİLƏCƏK bir təşkilata işarə etmə ehtimalını qiymətləndir:
@@ -117,6 +122,10 @@ def annotate_deadline(text: str, today: date) -> str:
     return f"{text}\n\n[SON TARİX: BİTİB — {-days} gün əvvəl]"
 
 
+def today_baku() -> date:
+    return datetime.now(BAKU_TZ).date()
+
+
 class AIFilter:
     """Sənəd §6 Lead scoring & AI filtering-in tətbiqi."""
 
@@ -134,11 +143,16 @@ class AIFilter:
 
     @staticmethod
     def today() -> date:
-        return datetime.now(BAKU_TZ).date()
+        return today_baku()
 
     def system_prompt(self) -> str:
         # .replace — prompt-dakı JSON nümunəsinin {} mötərizələri .format-ı sındırardı.
-        return SYSTEM_PROMPT.replace("{today}", self.today().strftime("%d.%m.%Y"))
+        from app.keywords import company_profile
+
+        return (
+            SYSTEM_PROMPT.replace("{company}", company_profile() or DEFAULT_COMPANY)
+            .replace("{today}", self.today().strftime("%d.%m.%Y"))
+        )
 
     def score(self, lead: RawLead) -> RawLead:
         try:
@@ -165,7 +179,7 @@ class AIFilter:
             )
             log.info(
                 "ai_scored",
-                source=lead.source.value,
+                source=lead.source,
                 score=lead.ai_score,
                 status=lead.status.value,
                 title=lead.title[:90],

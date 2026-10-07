@@ -89,6 +89,30 @@ Hər mənbənin **real** strukturu — brauzerlə birbaşa yoxlanılıb (ilkin s
 - **Qeyd:** `/biznes/` bölməsi 404-dür.
 - **Kodda:** `app/scrapers/news.py::ReportSenayeScraper`
 
+## Phase 2 mənbələri (2026-10-05, Mac və Modal-dan yoxlanılıb)
+
+**RSS (app/scrapers/rss.py):** trend (`az.trend.az/rss` — `www.trend.az/rss` ingilis/Mərkəzi Asiya lentidir; gövdə `div.article-content`), apa (`/rss`), azertag (`/rss`), banker (`/feed/`), minval (`/feed/`, rus; gövdə `div.content-inner`), caliber (`/rss.xml`, rus, Yandex "turbo" — `<title>` yoxdur, başlıq `turbo:content` içindəki `<h1>`; Modal-a 403 → Mac), president.az (`/az/rss`; gövdə bir neçə `div.news_paragraph-block`), bizim.media (`/feed`), ask.org.az (`/feed/`).
+
+**Siyahı səhifəsi + URL nümunəsi (app/scrapers/listing.py):** portofbaku satınalma (`/az/elanlar/\d+`, başlıqda "04 AVQUST / 2026 / 21:00" prefiksi; Modal-a 403 → Mac), economy.gov.az xəbərlər (`/az/post/\d+`), azpromo (`/az/posts/\d+`), afez.az (`/media/news/...`, ingilis), minenergy (`/az/xeberler-arxivi/\d+`).
+
+**jobsearch.az (app/scrapers/jobsearch.py):** açıq JSON API — `/api-az/vacancies-az?page=1` (30 elan, `next`), detal `/api-az/vacancies-az/{slug}` (`text`). İlk run: 109 təzə elandan 14 işəgötürən (Baku Steel, Main Steel, Azersun, Cronos Construction...). Şirkət `company.id` ilə qruplaşdırılır (bir elanda korporativ email, digərində yox — əks halda iki lead).
+
+**İş elanı saytları (HTML, app/scrapers/jobboards.py):** position.az (`/az?page=N`, şirkət `.vacancy-company-header-title`, mətn `.vacancy-text`; detal səhifəsi yavaşdır ~4 san), hellojob.az (`/vakansiyalar?page=N`, şirkət `.company__row a.vacancies__category`, mətn `.company__text`). Artıq yoxlanmış siqnalsız elanın detalı təkrar çəkilmir (`triage_cache`, növ `jobad:<mənbə>`). İlk run: position 9, hellojob 5 işəgötürən.
+
+**Sərgi təqvimi (app/scrapers/events.py):** Baku Expo Center təqvimi — bakuexpocenter.az → `pashaproperty.az/properties/baku-expo-centre` (server HTML): "14 - 16 Okt BakuBuild 31-ci ..." + sərginin saytı; il göstərilmir (növbəti buraxılış). 19 sərgi. `iteca.events` — ITECA **Qazaxıstan**dır (səhv); iteca.az illik səhifələri JS, "təqvimi yüklə" linki ölüdür.
+
+**Qoşulmayıb:**
+| Sayt | Səbəb |
+| --- | --- |
+| metro.gov.az satınalma | robots.txt 500 qaytarır → RFC 9309: hamısı qadağan say |
+| socar.az satınalma, tabib.gov.az elanlar, azercosmos, airport.az | siyahı JavaScript ilə yüklənir / link yoxdur |
+| ady.az, asco.az, azal.az | Mac-dan da 403 (bot qoruması) — brauzer lazımdır |
+| ecepp.ebrd.com | `/feed/` WordPress bloqudur, satınalma elanları JS portalındadır |
+| ungm.org | axtarış POST-u anti-forgery token tələb edir (400) |
+| btime.az, abc.az, interfax.az | JS / timeout / domen işləmir |
+| cabmin, aic, abif, ezda, araz-valley, aay | domen tapılmadı (düzgün ünvan lazımdır) |
+| caspianenergy.net | domen qumar saytına yönləndirir |
+
 ## Yoxlanılıb, hələ qoşulmayıb
 
 | Sayt | robots.txt | Niyə hələ yox |
@@ -98,6 +122,38 @@ Hər mənbənin **real** strukturu — brauzerlə birbaşa yoxlanılıb (ilkin s
 | position.az | hər şeyə icazə | Strukturu hələ yoxlanmayıb |
 | busy.az | `/api/` və `?`-li URL-lər qadağan | Filtrli siyahı `?` tələb edir — məhdud |
 | smartjob.az | `/api/` qadağan | Yalnız HTML |
+
+## Mənbə siyahısı auditi (2026-10-07)
+
+"Neo AI — Mənbə siyahısı" (7 qrup) kodla tutuşdurulub. Hər sayt canlı yoxlanılıb (əlçatanlıq, robots.txt, HTML/API).
+
+**Yeni qoşulanlar** (robots.txt-ə uyğun, testlə örtülüb; `main`-dəki Phase 2 reyestri `app/sources.py` ilə birləşdirilib):
+
+| Mənbə açarı | Nə oxuyur | Fayl |
+|---|---|---|
+| `media` | BusinessTime, TƏBİB, TÜİB, Caspian Oil & Gas, BakuBuild, TransLogistica, Rebuild Karabakh (APA, Trend, AZƏRTAC, Banker, AFEZ, İqtisadiyyat Nazirliyi, AZPROMO, ASK artıq `sources.py`-də RSS/listing kimi var) | `app/scrapers/media.py` (`MEDIA_SITES`) |
+| `intl_tender` | UNGM (ölkə=Azərbaycan, ID 2306) + EBRD ECEPP ("Azerbaijan:" açıq bildirişlər) | `app/scrapers/intl.py` |
+| `corporate` (+SOCAR) | SOCAR satınalma elanları cədvəli | `app/scrapers/corporate.py` |
+| `boss` (+rol siqnalı) | boss.az-da hədəf vəzifələrə (Facility/Camp/Canteen/Procurement/HR/HSE/Site Manager, Chef...) işçi axtaran şirkətlər | `app/scrapers/boss.py`, `employers.py` |
+
+Vəzifə siyahısı `employer_signal.TARGET_ROLES`-dadır; "x manager" ifadələri bir aralıq sözə icazə verir. Rəqib, öz mətbəxi olan, anonim və iş saytı işəgötürənləri atılır; lead açarı `employer_url` ilə LinkedIn/boss ilə eynidir. Rol siqnalı hələlik yalnız boss.az-dadır — jobsearch.az/position/hellojob scraper-ləri (`EmployerCollector`) yalnız nahar siqnalı axtarır; rol siqnalını oraya da əlavə etmək mümkündür (`collect_role_employer`).
+
+**Kod olmadan əhatə olunanlar:** `etender.gov.az`, World Bank, bp EDP, LinkedIn (Apify), boss.az, Report.az, Marja, Fed, Oxu, 1news, Emlak.gov.az — əvvəldən var idi.
+
+**Qoşula bilməyənlər və səbəbi** (kodla keçməyə cəhd edilmir):
+
+| Mənbə | Səbəb |
+|---|---|
+| ADY, ASCO, AZAL, bp.com, adb.org | Bot qoruması — HTTP 403 |
+| metro.gov.az | (main-də də qeyd olunub) `robots.txt` HTTP 500 qaytarır → `robots.py` "qadağan" sayır. Düzələndə `a[href*='/az/procurement/']`, başlıq `img[alt]` ilə qoşulur (bax `corporate.py` şərhi) |
+| abc.az, bakuseaport.az, aic.az, cabmin.gov.az, energetika.gov.az, mdt.gov.az, sdh.gov.az, caspianenergyclub.com, totalenergies.az | Yoxlama zamanı cavab vermədi (timeout/DNS). Sonra yenidən yoxlanmalıdır |
+| EU Funding & Tenders | Qrant çağırışlarıdır (Horizon və s.), təchizat tenderi deyil — catering/tədbir fürsəti çıxmır |
+| caliber.az | Geosiyasi analitika, biznes siqnalı yoxdur |
+| Offer.az | Cloudflare 526 (sertifikat xətası) |
+| LinkedIn/Instagram/Facebook səhifələri, Google Maps, "tikinti obyektləri üzrə sosial media" | ToS/robots icazə vermir; rəsmi API və ya lisenziyalı provayder (Apify tipli) lazımdır — ayrıca qərar. LinkedIn artıq Apify ilə var |
+| Şirkət saytlarının news/careers/annual-report bölmələri (BP, TotalEnergies, Masdar, ACWA...) | Hər saytın strukturu fərqlidir; hələ `MEDIA_SITES`-ə əlavə edilməyib. Struktur yoxlandıqca `MediaSite` ilə əlavə olunur (BP/Total bot qoruması/cavabsızlıq) |
+| Sənaye parkları (Sumqayıt, Ağdam, Hacıqabul, Araz Vadisi, Pirallahı, Mingəçevir, Balaxanı, Neftçala, Masallı, Sabirabad) | **Yoxlanılmayıb** — ayrı sayt ünvanları təsdiqlənməyib. AFEZ (Alat) və İqtisadiyyat Nazirliyi qoşuldu; Pirallahı kimi park xəbərləri APA/AZƏRTAC üzərindən gəlir |
+| AmCham, AHK, ASK, TÜİB, Türkiyə/İtaliya/Çin/Britaniya ticarət qurumları, Caspian Energy Club | ASK və TÜİB qoşuldu. AmCham `/en/news` səhifəsində xəbər lenti yoxdur (yalnız tədbir təqvimi linki — ayrıca baxılmalı); AHK, xarici ticarət palataları və Caspian Energy Club **yoxlanılmayıb/cavab vermədi** |
 
 ## Ümumi dərs
 

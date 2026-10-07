@@ -28,13 +28,15 @@ class LeadCategory(str, Enum):
     corporate = "corporate"
     tender = "tender"
     real_estate = "real_estate"
+    event_listing = "event_listing"  # sərgi/tədbir təqvimindən yaxınlaşan tədbir (app/scrapers/events.py)
     other = "other"
 
 
 class LeadStatus(str, Enum):
     new = "new"
     pending_review = "pending_review"
-    sent_to_crm = "sent_to_crm"
+    sent_to_crm = "sent_to_crm"  # köhnə: xarici CRM-ə göndərilmiş (yeni lead-lər bunu almır)
+    converted = "converted"  # təsdiqlənib → fürsət yaradılıb (app/crm.py)
     rejected = "rejected"
     duplicate = "duplicate"
 
@@ -48,7 +50,7 @@ class ContactInfo(BaseModel):
 class RawLead(BaseModel):
     """Bir scraper-in qaytardığı vahid format. Bax: sənəd §4 Data Model."""
 
-    source: LeadSource
+    source: str  # mənbə açarı (sources.key; reyestr app/sources.py, bazada FK yoxlayır)
     source_url: str
     title: str
     raw_text: str
@@ -64,9 +66,10 @@ class RawLead(BaseModel):
 
     ai_score: float | None = None
     ai_reason: str | None = None
+    tier: str | None = None  # A | B | C (v2), rədd edilənlərdə None
     status: LeadStatus = LeadStatus.new
 
     def dedupe_key(self) -> str:
         """source + source_url üzrə hash. Sənəd §4-dəki deduplication qaydası."""
-        raw = f"{self.source.value}:{self.source_url}".encode("utf-8")
+        raw = f"{self.source}:{self.source_url}".encode("utf-8")
         return hashlib.sha256(raw).hexdigest()

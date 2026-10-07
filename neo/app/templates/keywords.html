@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Açar sözlər — Neo{% endblock %}
+{% block content %}
+  {% set can_edit = has_role(request.state.user, 'manager') %}
+  <h1>Açar sözlər və maraq sahələri</h1>
+  <p class="muted">Scraper-lər başlıqları bu sözlərlə seçir (+ AI triajı); AI qiymətləndirməsi maraq sahələrinin təsvirini oxuyur.
+    Dəyişiklik növbəti scrape-də keçərlidir (avtomatik scrape — ən gec 1 dəqiqəyə).
+    <b>Mənfi</b> söz uyğun gələn başlığı tam bağlayır (AI seçsə belə).</p>
+
+  <h2 style="margin-top:22px">Maraq sahələri</h2>
+  <div class="cards">
+    {% for a in areas %}
+    <div class="card {{ '' if a.is_active else 'task-done' }}">
+      {% if can_edit %}
+      <form method="post" action="/settings/areas/{{ a.id }}">
+        {{ csrf_field(request) }}
+        <div class="form-row"><label style="flex:1">Ad<input name="name" value="{{ a.name }}" required maxlength="120"></label></div>
+        <div class="form-row"><label style="flex:1">AI üçün təsvir<textarea name="ai_description" rows="4" maxlength="1000">{{ a.ai_description or '' }}</textarea></label></div>
+        <div class="form-row">
+          <label>Prioritet<select name="priority">{% for p in (1, 2, 3) %}<option value="{{ p }}" {% if p == a.priority %}selected{% endif %}>{{ p }}</option>{% endfor %}</select></label>
+          <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" name="is_active" value="1" {% if a.is_active %}checked{% endif %}> aktiv</label>
+          <button class="btn btn-sm" type="submit">Yadda saxla</button>
+        </div>
+      </form>
+      {% else %}
+      <h3>{{ a.name }}</h3><p class="muted">{{ a.ai_description or '' }}</p>
+      {% endif %}
+      <a class="muted" href="/settings/keywords?area={{ a.id }}">{{ counts.get(a.id, 0) }} açar söz · kod: {{ a.code }}</a>
+    </div>
+    {% endfor %}
+    {% if can_edit %}
+    <div class="card">
+      <form method="post" action="/settings/areas">
+        {{ csrf_field(request) }}
+        <h3>Yeni maraq sahəsi</h3>
+        <div class="form-row"><label style="flex:1">Kod<input name="code" required placeholder="məs. hospitals" pattern="[a-z][a-z0-9_]{1,31}"></label></div>
+        <div class="form-row"><label style="flex:1">Ad<input name="name" required maxlength="120" placeholder="məs. Xəstəxanaların qidalanması"></label></div>
+        <div class="form-row"><label style="flex:1">AI üçün təsvir<textarea name="ai_description" rows="3" maxlength="1000"></textarea></label></div>
+        <div class="form-row"><label>Prioritet<select name="priority"><option>1</option><option selected>2</option><option>3</option></select></label>
+          <button class="btn btn-primary btn-sm" type="submit">Əlavə et</button></div>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+
+  <h2 style="margin-top:28px">Açar sözlər</h2>
+  {% if can_edit %}
+  <div class="panel">
+    <form method="post" action="/settings/keywords">
+      {{ csrf_field(request) }}
+      <div class="form-row">
+        <label style="flex:1 1 280px">Söz(lər) — hər sətirdə biri<textarea name="terms" rows="3" required placeholder="məs.&#10;işçilərin qidalanması&#10;питание сотрудников"></textarea></label>
+        <label>Maraq sahəsi<select name="interest_area_id">{% for a in areas %}<option value="{{ a.id }}" {% if area == a.id|string %}selected{% endif %}>{{ a.name }}</option>{% endfor %}</select></label>
+        <label>Harada<select name="applies_to">{% for k, v in scope_names.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label>
+        <label>Uyğunluq<select name="match">{% for k, v in match_names.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label>
+        <label>Dil<select name="language"><option value="auto">avtomatik</option>{% for l in languages %}<option>{{ l }}</option>{% endfor %}</select></label>
+        <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" name="is_negative" value="1"> mənfi</label>
+        <button class="btn btn-primary" type="submit">Əlavə et</button>
+      </div>
+    </form>
+  </div>
+  {% endif %}
+
+  <form class="filters" method="get" action="/settings/keywords">
+    <select name="area"><option value="">bütün sahələr</option>{% for a in areas %}<option value="{{ a.id }}" {% if area == a.id|string %}selected{% endif %}>{{ a.name }}</option>{% endfor %}</select>
+    <select name="scope"><option value="">hər yerdə</option>{% for k, v in scope_names.items() %}<option value="{{ k }}" {% if scope == k %}selected{% endif %}>{{ v }}</option>{% endfor %}</select>
+    <input type="search" name="q" value="{{ q }}" placeholder="Axtar">
+    <button class="btn btn-sm" type="submit">Süz</button>
+    <span class="muted">{{ rows|length }} söz</span>
+  </form>
+
+  {% if rows %}
+  <table>
+    <tr><th>Söz</th><th>Maraq sahəsi</th><th>Harada</th><th>Uyğunluq</th><th>Dil</th><th>Növ</th><th>Status</th>{% if can_edit %}<th></th>{% endif %}</tr>
+    {% for k in rows %}
+    <tr class="{{ '' if k.is_active else 'task-done' }}">
+      <td><b>{{ k.term }}</b></td>
+      <td class="muted">{{ area_by_id[k.interest_area_id].name if k.interest_area_id in area_by_id else '—' }}</td>
+      <td>{{ scope_names[k.applies_to] }}</td>
+      <td class="muted">{{ match_names[k.match] }}</td>
+      <td class="muted">{{ k.language }}</td>
+      <td>{% if k.is_negative %}<span class="badge badge-rejected">mənfi</span>{% else %}<span class="badge badge-sent">müsbət</span>{% endif %}</td>
+      <td>{{ 'aktiv' if k.is_active else 'deaktiv' }}</td>
+      {% if can_edit %}
+      <td class="actions">
+        <form class="inline" method="post" action="/settings/keywords/{{ k.id }}/toggle">{{ csrf_field(request) }}<button class="btn btn-sm" type="submit">{{ 'Söndür' if k.is_active else 'Aktivləşdir' }}</button></form>
+        <form class="inline" method="post" action="/settings/keywords/{{ k.id }}/delete" onsubmit="return confirm('Açar söz silinsin?')">{{ csrf_field(request) }}<button class="btn btn-reject btn-sm" type="submit">Sil</button></form>
+      </td>
+      {% endif %}
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+    <div class="empty">Bu filtrdə açar söz yoxdur.</div>
+  {% endif %}
+{% endblock %}

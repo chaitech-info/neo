@@ -17,7 +17,7 @@ app/
   scrapers/           hər mənbə üçün ayrıca scraper (marja, azerweb, news, etender, emlak, linkedin)
   normalizer.py       dedup məntiqi
   ai_filter.py        LLM ilə skorlama (§6)
-  crm_client.py       CRM API inteqrasiyası (§9)
+  crm.py              Öz CRM: fürsətlər, tapşırıqlar, "Təsdiqlə" → fürsət
   pipeline.py         scrape -> normalize -> score axını + CRM-ə göndərmə/rədd funksiyaları
   celery_app.py       Celery broker konfiqurasiyası
   scheduler.py         Celery Beat cədvəli (§7, avtomatik/production üçün)
@@ -39,6 +39,21 @@ cp .env.example .env   # dəyərləri doldur
 python -m scripts.init_db                 # baza → ən son sxem (köhnə baza itkisiz yenilənir)
 python -m scripts.create_user --email ad@sirket.az --name "Ad Soyad" --role admin   # şifrə gizli soruşulur
 ```
+
+## Giriş və rollar
+
+Admin panelin bütün səhifələri giriş tələb edir. **İlk dəfə** açanda (bazada istifadəçi yoxdursa) `/setup` səhifəsi ilk **admin** hesabını yaratmağı təklif edir; bir hesab yarananda bu səhifə bağlanır. Digər istifadəçiləri admin **İstifadəçilər** səhifəsindən yaradır (CLI da işləyir: `python -m scripts.create_user`).
+
+| Rol | Nə edə bilir |
+|---|---|
+| Müşahidəçi (`viewer`) | yalnız baxır |
+| Satış (`sales`) | + lead-ləri təsdiqləyir / rədd edir / validasiyaya qaytarır |
+| Menecer (`manager`) | + scrape-i işə salır |
+| Administrator (`admin`) | + istifadəçiləri yaradır, rolunu dəyişir, deaktiv edir, şifrəsini sıfırlayır |
+
+- Sessiya imzalı cookie-dədir (12 saat). Açar: `.env`-dəki `SESSION_SECRET`; yoxdursa bir dəfə yaradılıb `neo/.session_secret`-ə yazılır (gitignore-da). **Production-da `.env`-də təyin et.**
+- Şifrə dəyişəndə və ya istifadəçi deaktiv ediləndə onun açıq sessiyaları avtomatik bağlanır. 5 səhv cəhddən sonra giriş 15 dəqiqə bloklanır. Bütün POST formları CSRF token ilə qorunur.
+- Sonuncu aktiv admin-i deaktiv etmək və ya rolunu endirmək olmur.
 
 ## Baza sxemi və miqrasiyalar
 
@@ -72,12 +87,11 @@ DB defolt olaraq layihə qovluğunda `neo_leads.db` (SQLite) faylıdır — Post
 ## İşə salma (production — avtomatik 24/7 scraping)
 
 ```bash
-# Celery worker
-celery -A app.celery_app worker --loglevel=info
-
-# Celery beat (scheduler, §7-dəki cədvəllə)
-celery -A app.scheduler beat --loglevel=info
+brew install redis && brew services start redis   # bir dəfə; login-də özü başlayır
+./scripts/run_worker.sh                            # Celery worker + beat (cədvəl) bir prosesdə
 ```
+
+Ətraflı: `docs/knowledge-base/05-runbook.md` → "Avtomatik 24/7 scraping".
 
 ## Testlər
 
@@ -89,5 +103,4 @@ pytest
 
 - Hər scraper-in CSS seçiciləri (`TODO(dev)` şərhli) real sayt strukturuna uyğunlaşdırılmalıdır.
 - LinkedIn: rəsmi API / lisenziyalı provider qərarı gözlənilir (`app/scrapers/linkedin.py`).
-- CRM `/opportunities` endpoint-inin dəqiq forması CRM komandası ilə təsdiqlənməlidir (`app/crm_client.py`).
 - Hər saytın ToS/robots.txt-i development başlamazdan əvvəl hüquq şöbəsi ilə yoxlanılmalıdır.

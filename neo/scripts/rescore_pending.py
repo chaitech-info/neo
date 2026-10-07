@@ -13,7 +13,7 @@ import sys
 
 from sqlalchemy.orm import sessionmaker
 
-from app.ai_filter import AIFilter
+from app.pipeline import make_scorer
 from app.db.engine import engine
 from app.db.repository import LeadRepository
 from app.scrapers import ALL_SCRAPERS
@@ -29,19 +29,19 @@ def main(dry_run: bool = False) -> None:
     records = [r for r in repo.list_by_status("pending_review") if r.ai_score is None]
     print(f"Skorsuz pending_review lead: {len(records)}")
 
-    ai_filter = AIFilter()
+    ai_filter = make_scorer()
     counts = {"pending_review": 0, "rejected": 0, "failed": 0}
     for record in records:
         lead = repo.to_raw_lead(record)
 
-        if lead.source.value in ENRICHABLE_SOURCES and lead.raw_text == lead.title and not dry_run:
-            scraper = SCRAPERS_BY_SOURCE[lead.source.value]()
+        if lead.source in ENRICHABLE_SOURCES and lead.raw_text == lead.title and not dry_run:
+            scraper = SCRAPERS_BY_SOURCE[lead.source]()
             lead = scraper.enrich(lead)
             record.raw_text = lead.raw_text
             record.posted_at = lead.posted_at
 
         if dry_run:
-            print(f"  [{lead.source.value}] {lead.title[:80]}")
+            print(f"  [{lead.source}] {lead.title[:80]}")
             continue
 
         lead = ai_filter.score(lead)
@@ -49,7 +49,7 @@ def main(dry_run: bool = False) -> None:
         outcome = "failed" if lead.ai_score is None else lead.status.value
         counts[outcome] += 1
         score = "—" if lead.ai_score is None else f"{lead.ai_score:.2f}"
-        print(f"  {score:>4} {lead.status.value:<14} [{lead.source.value}] {lead.title[:60]}")
+        print(f"  {score:>4} {lead.status.value:<14} [{lead.source}] {lead.title[:60]}")
         print(f"       {lead.ai_reason}")
 
     if not dry_run:

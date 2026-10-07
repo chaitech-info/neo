@@ -1,46 +1,80 @@
 {% extends "base.html" %}
-{% block title %}Dashboard — Lead Scraping Admin{% endblock %}
+{% block title %}Mənbələr — Neo{% endblock %}
 {% block content %}
   {% if running %}
-    {# İşləyən mənbə varsa səhifə özü yenilənir ki, status kartlarda görünsün. #}
+    {# İşləyən mənbə varsa səhifə özü yenilənir ki, status görünsün. #}
     <meta http-equiv="refresh" content="5">
   {% endif %}
-  <div class="toolbar">
-    <div>
-      <h1>Mənbələr</h1>
-      <p class="muted">Hər kartda "Scrape indi" düyməsi həmin mənbəni dərhal işə salır (nəticə Validasiya səhifəsinə düşür).</p>
+  {% set can_scrape = has_role(request.state.user, 'manager') %}
+  {% set my = nav_counts(request.state.user) %}
+
+  <div class="metrics">
+    <a class="metric {{ 'hot' if stats.pending_review else '' }}" href="/leads/pending_review">
+      <span class="v">{{ stats.pending_review }}</span><span class="l">lead validasiyada gözləyir</span>
+    </a>
+    <a class="metric {{ 'late' if my.late else '' }}" href="/tasks">
+      <span class="v">{{ my.tasks or 0 }}</span><span class="l">açıq tapşırığım{% if my.late %}, {{ my.late }}-nin vaxtı keçib{% endif %}</span>
+    </a>
+    <a class="metric" href="/opportunities">
+      <span class="v">{{ open_opps }}</span><span class="l">açıq fürsət</span>
+    </a>
+    <div class="metric">
+      <span class="v">{{ last_auto or '—' }}</span><span class="l">son avtomatik yoxlama</span>
     </div>
-    <form method="post" action="/scrape-all">
-      <button class="btn btn-primary btn-lg" type="submit" {% if running|length == sources|length %}disabled{% endif %}>
-        {% if running %}İşləyir: {{ running|length }}/{{ sources|length }} mənbə{% else %}Hamısını scrape et{% endif %}
-      </button>
-    </form>
-  </div>
-  {% if running %}
-    <div class="flash">{{ running|length }} mənbə paralel işləyir — gedişatı <a href="/logs">Loglar</a> səhifəsində canlı izlə. Səhifə hər 5 saniyədən bir yenilənir.</div>
-  {% endif %}
-  <div class="cards">
-    {% for key, label in sources.items() %}
-      <div class="card {% if key in running %}card-running{% endif %}">
-        <h3>{{ label }}</h3>
-        <span class="muted">Son nəticə: {{ last_run.get(key, 'hələ işə salınmayıb') }}</span>
-        <div class="card-actions">
-          <form method="post" action="/scrape/{{ key }}">
-            <button class="btn btn-primary" type="submit" {% if key in running %}disabled{% endif %}>
-              {% if key in running %}İşləyir…{% else %}Scrape indi{% endif %}
-            </button>
-          </form>
-          <a class="btn btn-sm" href="/logs?source={{ key }}">Loglar</a>
-        </div>
-      </div>
-    {% endfor %}
   </div>
 
-  <h1 style="margin-top:36px">Statistika</h1>
-  <table>
-    <tr><th>Status</th><th>Say</th></tr>
-    {% for status, count in stats.items() %}
-      <tr><td>{{ status }}</td><td>{{ count }}</td></tr>
-    {% endfor %}
-  </table>
+  <div class="page-head">
+    <div>
+      <h1>Mənbələr</h1>
+      <p>Hər mənbə cədvəl üzrə avtomatik yoxlanılır. Yeni lead-lər Validasiyaya düşür.</p>
+    </div>
+    {% if can_scrape %}
+    <form method="post" action="/scrape-all">
+      {{ csrf_field(request) }}
+      <button class="btn btn-primary btn-lg" type="submit" {% if running|length == sources|length %}disabled{% endif %}>
+        {% if running %}{{ running|length }} mənbə işləyir{% else %}Hamısını indi yoxla{% endif %}
+      </button>
+    </form>
+    {% endif %}
+  </div>
+
+  {% if running %}
+    <div class="flash info" role="status"><span class="pulse"></span>{{ running|length }} mənbə yoxlanılır. Gedişat <a href="/logs">Loglar</a> səhifəsində canlı görünür.</div>
+  {% endif %}
+
+  <div class="table-wrap">
+    <table class="sources">
+      <tr><th>Mənbə</th><th>Vəziyyət</th><th>Cədvəl</th><th>Son nəticə</th><th></th></tr>
+      {% for s in sources %}
+      <tr class="{{ 'running' if s.key in running else '' }}">
+        <td>{{ s.label }}<span class="kind">{{ kind_names[s.kind] }}</span></td>
+        <td>{% if s.health %}<span class="badge health-{{ s.health.state }}" title="{{ s.health.detail }}">{{ s.health.label }}</span>{% if s.health.state != 'ok' %}<span class="health-note">{{ s.health.detail.split(' · ')[0] }}</span>{% endif %}{% endif %}</td>
+        <td class="muted">{{ s.schedule }}</td>
+        <td class="result">
+          {% if s.key in running %}<span class="pulse"></span>yoxlanılır…{% else %}{{ s.last or 'hələ yoxlanılmayıb' }}{% endif %}
+        </td>
+        <td>
+          <div class="actions" style="justify-content:flex-end">
+            <a class="btn btn-sm" href="/logs?source={{ s.key }}">Loglar</a>
+            {% if can_scrape %}
+            <form class="inline" method="post" action="/scrape/{{ s.key }}">
+              {{ csrf_field(request) }}
+              <button class="btn btn-sm" type="submit" {% if s.key in running %}disabled{% endif %}>İndi yoxla</button>
+            </form>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+
+  <h2>Lead-lər statusa görə</h2>
+  <div class="actions">
+    <a class="badge badge-pending" href="/leads/pending_review">Validasiyada: {{ stats.pending_review }}</a>
+    {% for t in ["A", "B", "C"] %}{% if tier_counts[t] %}<a class="badge" href="/leads/pending_review?tier={{ t }}"><span class="tier tier-{{ t }}">{{ t }}</span> {{ tier_counts[t] }}</a>{% endif %}{% endfor %}
+    <span class="badge badge-sent">Fürsətə çevrilib: {{ stats.converted }}</span>
+    <a class="badge badge-rejected" href="/leads/ai_rejected">Rədd edilib: {{ stats.rejected }}</a>
+    <span class="badge">Dublikat: {{ stats.duplicate }}</span>
+  </div>
 {% endblock %}
