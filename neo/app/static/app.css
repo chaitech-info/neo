@@ -676,6 +676,44 @@ details[open] summary { margin-bottom: 6px; }
 .auth-wrap .flash { background: var(--s1); border-color: var(--line); color: var(--tx); border-radius: 12px; }
 .auth-wrap .flash.error { background: var(--err-w); border-color: color-mix(in srgb, var(--err) 35%, transparent); color: var(--err); }
 
+/* --- Lead siyahısı (AI rədd etdi, Bütün lead-lər): rahat kartlar -------------------- */
+
+.main.mc-leads > .lr-list, .main.mc-leads > .lr-bar { max-width: 860px; }
+.lr-bar { display: flex; align-items: center; gap: 12px 16px; flex-wrap: wrap; margin: 6px 0 14px; }
+.lr-search { position: relative; flex: 1 1 320px; display: block; }
+.lr-search .ic { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: var(--tx2); pointer-events: none; }
+.lr-search input { width: 100%; min-height: 44px; padding: 0 14px 0 38px; border-radius: 10px; border: 1px solid var(--line); background: var(--s1); color: var(--tx); font: 400 15px var(--font); transition: border-color 150ms ease; }
+.lr-search input::placeholder { color: var(--tx3); }
+.lr-search input:focus { outline: 2px solid var(--run); outline-offset: 0; border-color: var(--run); }
+.lr-count { font-size: 13.5px; color: var(--tx2); }
+
+.lr-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.lr { --g: var(--k-news); position: relative; background: var(--s1); border: 1px solid var(--line); border-radius: 14px; padding: 18px 22px 16px 26px; transition: border-color 150ms ease, background-color 150ms ease; }
+.lr[hidden] { display: none; }
+.lr::before { content: ""; position: absolute; left: 0; top: 14px; bottom: 14px; width: 3px; border-radius: 0 3px 3px 0; background: var(--g); }
+.lr.k-tender { --g: var(--k-tender); } .lr.k-employer { --g: var(--k-employer); } .lr.k-news { --g: var(--k-news); }
+@media (hover: hover) and (pointer: fine) { .lr:hover { border-color: var(--bd2); } }
+.lr-top { display: flex; align-items: center; justify-content: space-between; gap: 8px 14px; flex-wrap: wrap; margin-bottom: 8px; }
+.lr-chips { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.lr-score { font: 600 12px/1 var(--font); color: var(--tx2); background: var(--s2); border-radius: 100px; padding: 6px 10px; }
+.lr-st { font: 600 12px/1 var(--font); border-radius: 100px; padding: 6px 11px; background: var(--s2); color: var(--tx2); }
+.lr-st.st-pending { background: var(--warn-w); color: var(--warn); }
+.lr-st.st-sent { background: var(--go-w); color: var(--go); }
+.lr-st.st-rejected { background: var(--err-w); color: var(--err); }
+.lr-title { margin: 0 0 12px; font: 600 18px/1.4 var(--font); overflow-wrap: anywhere; }
+.lr-title a { color: var(--tx); transition: color 150ms ease; }
+@media (hover: hover) and (pointer: fine) { .lr-title a:hover { text-decoration: underline; text-underline-offset: 4px; } }
+.lr-why { margin: 0 0 4px; padding: 12px 14px; background: var(--s2); border-radius: 10px; font-size: 14.5px; line-height: 1.6; color: var(--tx); max-width: 70ch; }
+.lr-why span { display: block; font-size: 11.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--tx3); margin-bottom: 3px; }
+.lr .lead-dup { margin: 8px 0 0; }
+.lr .lead-more { margin-top: 10px; }
+.lr-act { display: flex; justify-content: flex-end; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line2); }
+.lr-act form { display: contents; }
+.lr-none { text-align: center; color: var(--tx2); padding: 34px 0; }
+.lr-more { display: flex; justify-content: center; margin: 16px 0 6px; }
+.lr-more .mc-btn[hidden] { display: none; }
+@media (max-width: 700px) { .lr { padding: 16px 16px 14px 20px; } .lr-title { font-size: 16.5px; } .lr-act .mc-btn { width: 100%; min-height: 44px; } }
+
 /* --- Tema düyməsi ---------------------------------------------------------------- */
 
 .theme-toggle { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 36px; padding: 0 10px; margin-bottom: 10px; border: 1px solid var(--bd2); border-radius: var(--radius); background: transparent; color: var(--rail-ink); font: 500 13px var(--font); cursor: pointer; transition: background-color 150ms ease, color 150ms ease, transform 160ms var(--ease-out); }

@@ -90,43 +90,74 @@
   </div>
 
   {% elif leads %}
-  <div class="table-wrap">
-    <table>
-      <tr>
-        <th>Lead</th><th>Son tarix</th><th>AI</th><th>Əsaslandırma</th><th>Status</th>
-        {% if can_review and show_restore %}<th></th>{% endif %}
-      </tr>
-      {% for lead in leads %}
-      <tr>
-        <td style="max-width:420px">
-          <a href="{{ lead.source_url }}" target="_blank" rel="noopener"><b>{{ lead.title[:110] }}</b></a>
-          <div class="muted">{{ kind_names[lead_kind(lead.source)] }} · {{ lead.source }}{% if lead.posted_at %} · {{ lead.posted_at|baku_time }}{% endif %}</div>
-          {% if lead.raw_text and lead.raw_text != lead.title %}
-          <details><summary>Tam mətn</summary><div class="raw">{{ lead.raw_text[lead.title|length:]|trim|truncate(1500) }}</div></details>
-          {% endif %}
-        </td>
-        <td class="muted">
-          {% if lead.deadline_at %}{{ lead.deadline_at|baku_time }}{% if lead.deadline_at < utcnow() %}<br><span class="expired">keçib</span>{% endif %}{% else %}—{% endif %}
-        </td>
-        <td class="score">{{ (lead.ai_score * 100)|round|int if lead.ai_score is not none else "—" }}{% if lead.tier %} <span class="tier tier-{{ lead.tier }}">{{ lead.tier }}</span>{% endif %}</td>
-        <td class="muted" style="max-width:320px">{{ lead.ai_reason or "—" }}</td>
-        <td>
-          <span class="badge badge-{{ status_badge.get(lead.status, 'new') }}">{{ status_names.get(lead.status, lead.status) }}</span>
-          {% if lead.status == 'converted' and lead.crm_opportunity_id %}<div class="dup-note"><a href="/opportunities/{{ lead.crm_opportunity_id }}">Fürsət #{{ lead.crm_opportunity_id }}</a></div>{% endif %}
-          {% if lead.original %}<div class="dup-note muted">ilk dəfə: <a href="{{ lead.original.source_url }}" target="_blank" rel="noopener">{{ lead.original.source }}</a></div>{% endif %}
-        </td>
-        {% if can_review and show_restore %}
-        <td>
-          <form class="inline" method="post" action="/leads/{{ lead.dedupe_key }}/restore">
-            {{ csrf_field(request) }}
-            <button class="mc-btn mc-btn-sm" type="submit">Validasiyaya qaytar</button>
-          </form>
-        </td>
-        {% endif %}
-      </tr>
-      {% endfor %}
-    </table>
+  <div class="lr-bar">
+    <label class="lr-search"><span class="sr">Lead axtar</span>
+      <svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      <input type="search" id="lr-q" placeholder="Başlıq, səbəb və ya sayt üzrə axtar…" autocomplete="off">
+    </label>
+    <span class="lr-count" id="lr-count" role="status"></span>
   </div>
+
+  <ul class="lr-list" id="lr-list">
+    {% for lead in leads %}
+    {% set kind = lead_kind(lead.source) %}
+    <li class="lr k-{{ kind }}" data-q="{{ (lead.title ~ ' ' ~ (lead.ai_reason or '') ~ ' ' ~ lead.source)|lower }}">
+      <div class="lr-top">
+        <span class="lead-kind"><i></i>{{ kind_names[kind] }} · {{ lead.source }}{% if lead.posted_at %} · {{ lead.posted_at|baku_time }}{% endif %}</span>
+        <span class="lr-chips">
+          {% if lead.deadline_at %}{% if lead.deadline_at < utcnow() %}<span class="due gone">Son tarix keçib</span>{% else %}<span class="due">Son tarix: {{ lead.deadline_at|baku_time }}</span>{% endif %}{% endif %}
+          {% if lead.ai_score is not none %}<span class="lr-score" title="AI uyğunluq skoru (0–100)">AI {{ (lead.ai_score * 100)|round|int }}</span>{% endif %}
+          {% if lead.tier %}<span class="tier tier-{{ lead.tier }}">{{ lead.tier }}</span>{% endif %}
+          <span class="lr-st st-{{ status_badge.get(lead.status, 'new') }}">{{ status_names.get(lead.status, lead.status) }}</span>
+        </span>
+      </div>
+      <h3 class="lr-title"><a href="{{ lead.source_url }}" target="_blank" rel="noopener">{{ lead.title[:160] }}</a></h3>
+      {% if lead.ai_reason %}<p class="lr-why"><span>AI-nin qeydi</span>{{ lead.ai_reason }}</p>{% endif %}
+      {% if lead.status == 'converted' and lead.crm_opportunity_id %}<p class="lead-dup"><a href="/opportunities/{{ lead.crm_opportunity_id }}">Fürsət #{{ lead.crm_opportunity_id }} →</a></p>{% endif %}
+      {% if lead.original %}<p class="lead-dup">Bu lead əvvəl də tapılıb: <a href="{{ lead.original.source_url }}" target="_blank" rel="noopener">{{ lead.original.source }}</a></p>{% endif %}
+      {% if lead.raw_text and lead.raw_text != lead.title %}
+      <details class="lead-more"><summary>Tam mətni göstər</summary><div class="raw">{{ lead.raw_text[lead.title|length:]|trim|truncate(1500) }}</div></details>
+      {% endif %}
+      {% if can_review and show_restore %}
+      <div class="lr-act">
+        <form method="post" action="/leads/{{ lead.dedupe_key }}/restore">
+          {{ csrf_field(request) }}
+          <button class="mc-btn mc-btn-sm" type="submit" title="Bu lead-i təsdiq növbəsinə geri qaytar">Validasiyaya qaytar</button>
+        </form>
+      </div>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  <p class="lr-none" id="lr-none" hidden>Heç nə tapılmadı. Axtarışı dəyiş.</p>
+  <div class="lr-more"><button type="button" class="mc-btn" id="lr-more" hidden>Daha çox göstər</button></div>
+
+  <script>
+    /* Çoxlu lead üçün rahatlıq: axtarış + 30-30 göstərmə (hamısı səhifədə qalır, yalnız gizlədilir). */
+    (function () {
+      var list = document.getElementById('lr-list'), q = document.getElementById('lr-q');
+      var more = document.getElementById('lr-more'), none = document.getElementById('lr-none'), count = document.getElementById('lr-count');
+      if (!list) return;
+      var items = Array.prototype.slice.call(list.children), STEP = 30, shown = STEP;
+      function render() {
+        var term = q.value.trim().toLowerCase(), matched = 0, visible = 0;
+        items.forEach(function (li) {
+          var ok = !term || li.dataset.q.indexOf(term) > -1;
+          if (ok) matched++;
+          var show = ok && matched <= shown;
+          li.hidden = !show;
+          if (show) visible++;
+        });
+        none.hidden = matched > 0;
+        more.hidden = matched <= shown;
+        more.textContent = 'Daha çox göstər (' + Math.min(STEP, matched - shown) + ' / ' + (matched - shown) + ' qalıb)';
+        count.textContent = term ? matched + ' nəticə' : items.length + ' lead';
+      }
+      more.addEventListener('click', function () { shown += STEP; render(); });
+      q.addEventListener('input', function () { shown = STEP; render(); });
+      render();
+    })();
+  </script>
 
   {% elif show_actions %}
     <div class="empty"><b>Hamısı baxılıb</b>Neo yeni lead tapanda burada görünəcək.</div>
