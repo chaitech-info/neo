@@ -1,39 +1,72 @@
 {% extends "base.html" %}
 {% block title %}Fürsətlər — Neo{% endblock %}
+{% block head %}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+{% endblock %}
+{% block main_class %}mc mc-opps{% endblock %}
 {% block content %}
-  <div class="page-head">
-    <div>
-      <h1>Fürsətlər</h1>
-      <p>{{ open_total }} açıq fürsət. Kartı açıb mərhələni dəyiş, tapşırıq əlavə et.</p>
-    </div>
-    <div class="seg" role="group" aria-label="Kimin fürsətləri">
-      <a class="{{ 'on' if owner == 'me' else '' }}" href="/opportunities?owner=me">Mənimkilər</a>
-      <a class="{{ 'on' if owner != 'me' else '' }}" href="/opportunities?owner=all">Hamısı</a>
-    </div>
+  {% set open_stages = ['new', 'contacted', 'qualified', 'proposal', 'negotiation'] %}
+  {% set closed_stages = ['won', 'lost'] %}
+
+  {% macro card(opp, org, owner_user, next_due) %}
+    <li>
+      <a class="op {{ 'is-tender' if opp.tender_id else '' }}" href="/opportunities/{{ opp.id }}">
+        <span class="op-main">
+          <b>{{ opp.title[:100] }}</b>
+          {% if org %}<small>{{ org.name[:70] }}</small>{% endif %}
+        </span>
+        <span class="op-side">
+          {% if opp.tender_id %}<span class="tag">Tender</span>{% endif %}
+          <span class="op-who">{{ owner_user.full_name if owner_user else 'Məsul təyin edilməyib' }}</span>
+          {% if next_due %}
+            {% if next_due < utcnow() %}<span class="op-due late">Tapşırığın vaxtı keçib · {{ next_due|baku_time }}</span>
+            {% else %}<span class="op-due">Növbəti tapşırıq · {{ next_due|baku_time }}</span>{% endif %}
+          {% endif %}
+        </span>
+      </a>
+    </li>
+  {% endmacro %}
+
+  <header class="ld-head">
+    <h1 class="mc-title">Fürsətlər</h1>
+    <p class="ld-sub">Təsdiq etdiyin lead-lər burada izlənir. Birini aç — mərhələsini dəyiş, tapşırıq əlavə et. <b>{{ open_total }} açıq fürsət.</b></p>
+  </header>
+
+  <div class="ld-filter" role="group" aria-label="Kimin fürsətləri">
+    <a class="{{ 'on' if owner == 'me' else '' }}" href="/opportunities?owner=me">Mənimkilər</a>
+    <a class="{{ 'on' if owner != 'me' else '' }}" href="/opportunities?owner=all">Hamısı</a>
   </div>
 
   {% if totals.values()|sum == 0 %}
-    <div class="empty"><b>Hələ fürsət yoxdur</b>Validasiyada lead-ə "Fürsət yarat" basanda burada görünəcək. <a href="/leads/pending_review">Validasiyaya keç</a></div>
+    <div class="empty"><b>Hələ fürsət yoxdur</b>Validasiyada “Uyğundur” deyəndə fürsət burada görünəcək.<br><a class="mc-btn mc-btn-sm" style="margin-top:14px" href="/leads/pending_review">Validasiyaya keç</a></div>
   {% else %}
-  <div class="board">
-    {% for stage, items in columns.items() %}
-    <section class="col {{ stage }}" aria-label="{{ stage_names[stage] }}">
-      <div class="col-head">{{ stage_names[stage] }}<span>{{ totals[stage] }}</span></div>
-      {% for opp, org, owner_user, next_due in items %}
-      <a class="opp {{ 'tender' if opp.tender_id else '' }}" href="/opportunities/{{ opp.id }}">
-        <b>{{ opp.title[:90] }}</b>
-        {% if org %}<span class="org">{{ org.name[:60] }}</span>{% endif %}
-        <span class="foot">
-          <span>{{ owner_user.full_name if owner_user else 'Məsul yoxdur' }}</span>
-          {% if next_due %}<span class="{{ 'overdue' if next_due < utcnow() else '' }}">{{ next_due|baku_time }}</span>{% endif %}
-        </span>
-      </a>
-      {% else %}
-      <div class="col-empty">Boş</div>
-      {% endfor %}
-      {% if totals[stage] > items|length %}<div class="col-empty">və daha {{ totals[stage] - items|length }}</div>{% endif %}
+
+  <nav class="op-steps" aria-label="Mərhələlər">
+    {% for stage in open_stages %}{% if totals[stage] %}<a class="s-{{ stage }}" href="#st-{{ stage }}"><i></i>{{ stage_names[stage] }} <b>{{ totals[stage] }}</b></a>{% endif %}{% endfor %}
+  </nav>
+
+  {% for stage in open_stages %}
+    {% if totals[stage] %}
+    <section class="op-grp s-{{ stage }}" id="st-{{ stage }}">
+      <h2><i></i>{{ stage_names[stage] }} <em>{{ totals[stage] }}</em></h2>
+      <ul class="op-list">
+        {% for opp, org, owner_user, next_due in columns[stage] %}{{ card(opp, org, owner_user, next_due) }}{% endfor %}
+      </ul>
     </section>
-    {% endfor %}
-  </div>
+    {% endif %}
+  {% endfor %}
+
+  {% for stage in closed_stages %}
+    {% if totals[stage] %}
+    <details class="op-closed s-{{ stage }}">
+      <summary><span><i></i>{{ stage_names[stage] }} <em>{{ totals[stage] }}</em></span><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></summary>
+      <ul class="op-list">
+        {% for opp, org, owner_user, next_due in columns[stage] %}{{ card(opp, org, owner_user, next_due) }}{% endfor %}
+      </ul>
+      {% if totals[stage] > columns[stage]|length %}<p class="op-more">və daha {{ totals[stage] - columns[stage]|length }} fürsət</p>{% endif %}
+    </details>
+    {% endif %}
+  {% endfor %}
   {% endif %}
 {% endblock %}

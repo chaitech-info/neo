@@ -1,50 +1,55 @@
 {% extends "base.html" %}
 {% block title %}Tapşırıqlar — Neo{% endblock %}
+{% block main_class %}mc mc-tasks{% endblock %}
 {% block content %}
   {% set can_edit = has_role(request.state.user, 'sales') %}
   {% set now = utcnow() %}
   {% set back = '/tasks?who=' ~ who ~ '&status=' ~ status %}
 
   {% macro task_row(t, opp, org, assignee) %}
-    {% set late = t.due_at and t.due_at < now and t.status in ('open', 'in_progress') %}
-    <div class="task">
-      <div class="what {{ 'task-done' if t.status in ('done', 'cancelled') else '' }}">
-        <b class="{{ 'prio-high' if t.priority == 'high' else '' }}">{{ t.title }}</b>
-        <a href="/opportunities/{{ opp.id }}">#{{ opp.id }} {{ (org.name if org else opp.title)[:70] }}</a>
+    {% set is_open = t.status in ('open', 'in_progress') %}
+    {% set late = t.due_at and t.due_at < now and is_open %}
+    <li class="tk {{ 'is-late' if late else '' }} {{ 'is-done' if not is_open else '' }}">
+      <div class="tk-main">
+        <b>{{ t.title }}{% if t.priority == 'high' %} <span class="tk-hi">Vacib</span>{% endif %}</b>
+        <a href="/opportunities/{{ opp.id }}">{{ (org.name if org else opp.title)[:80] }}</a>
       </div>
-      <div class="when {{ 'overdue' if late else '' }}">{{ t.due_at|baku_time if t.due_at else 'Tarixsiz' }}</div>
-      <div class="who">{{ assignee.full_name if assignee else 'Məsul yoxdur' }}</div>
-      <div>
-        {% if can_edit and t.status in ('open', 'in_progress') %}
+      <div class="tk-side">
+        <span class="tk-when {{ 'late' if late else '' }}">
+          {% if t.due_at %}{% if late %}Vaxtı keçib · {% endif %}{{ t.due_at|baku_time }}{% else %}Tarixsiz{% endif %}
+        </span>
+        {% if who != 'me' %}<span class="tk-who">{{ assignee.full_name if assignee else 'Məsul təyin edilməyib' }}</span>{% endif %}
+      </div>
+      <div class="tk-act">
+        {% if can_edit and is_open %}
         <form method="post" action="/tasks/{{ t.id }}/status">
           {{ csrf_field(request) }}<input type="hidden" name="status" value="done"><input type="hidden" name="back" value="{{ back }}">
-          <button class="btn btn-sm btn-approve" type="submit">Bitdi</button>
+          <button class="mc-btn mc-btn-sm tk-done" type="submit" title="Bu tapşırığı bitmiş kimi qeyd et"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 8.6l3 3L12.8 4.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Bitdi</button>
         </form>
-        {% elif t.status == 'done' %}<span class="badge badge-sent">Bitib</span>
-        {% else %}<span class="badge">{{ task_status_names[t.status] }}</span>{% endif %}
+        {% elif t.status == 'done' %}<span class="tk-state ok">Bitib</span>
+        {% else %}<span class="tk-state">{{ task_status_names[t.status] }}</span>{% endif %}
       </div>
-    </div>
+    </li>
   {% endmacro %}
 
-  <div class="page-head">
-    <div>
-      <h1>{{ 'Tapşırıqlarım' if who == 'me' else 'Bütün tapşırıqlar' }}</h1>
-      <p>Hər fürsət yarananda ilk tapşırıq avtomatik açılır. Bitəni qeyd et ki, növbəti addım görünsün.</p>
+  <header class="ld-head">
+    <h1 class="mc-title">{{ 'Tapşırıqlarım' if who == 'me' else 'Bütün tapşırıqlar' }}</h1>
+    <p class="ld-sub">Fürsət yaranan kimi ilk tapşırıq özü açılır. Etdiyini “Bitdi” et — növbəti addım görünsün.</p>
+  </header>
+
+  <div class="tk-filters">
+    <div class="ld-filter" role="group" aria-label="Kimin">
+      <a class="{{ 'on' if who == 'me' else '' }}" href="/tasks?who=me&status={{ status }}">Mənimkilər</a>
+      <a class="{{ 'on' if who != 'me' else '' }}" href="/tasks?who=all&status={{ status }}">Hamısı</a>
     </div>
-    <div class="actions">
-      <div class="seg" role="group" aria-label="Kimin">
-        <a class="{{ 'on' if who == 'me' else '' }}" href="/tasks?who=me&status={{ status }}">Mənimkilər</a>
-        <a class="{{ 'on' if who != 'me' else '' }}" href="/tasks?who=all&status={{ status }}">Hamısı</a>
-      </div>
-      <div class="seg" role="group" aria-label="Status">
-        <a class="{{ 'on' if status == 'open' else '' }}" href="/tasks?who={{ who }}&status=open">Açıq</a>
-        <a class="{{ 'on' if status == 'done' else '' }}" href="/tasks?who={{ who }}&status=done">Bitmiş</a>
-      </div>
+    <div class="ld-filter" role="group" aria-label="Status">
+      <a class="{{ 'on' if status == 'open' else '' }}" href="/tasks?who={{ who }}&status=open">Açıq</a>
+      <a class="{{ 'on' if status == 'done' else '' }}" href="/tasks?who={{ who }}&status=done">Bitmiş</a>
     </div>
   </div>
 
   {% if not rows %}
-    <div class="empty"><b>{{ 'Açıq tapşırıq yoxdur' if status == 'open' else 'Bitmiş tapşırıq yoxdur' }}</b>{% if status == 'open' %}Yeni tapşırıqlar Validasiyada fürsət yaradanda və ya fürsət səhifəsindən əlavə olunur.{% endif %}</div>
+    <div class="empty"><b>{{ 'Açıq tapşırıq yoxdur' if status == 'open' else 'Bitmiş tapşırıq yoxdur' }}</b>{% if status == 'open' %}Hər şey görülüb. Yeni tapşırıq fürsət yaradanda və ya fürsət səhifəsindən əlavə olunur.{% endif %}</div>
   {% elif status == 'open' %}
     {% set groups = [
       ('late', 'Vaxtı keçib', rows|selectattr('0.due_at')|selectattr('0.due_at', 'lt', now)|list),
@@ -53,16 +58,12 @@
       ('none', 'Tarixsiz', rows|rejectattr('0.due_at')|list),
     ] %}
     {% for key, title, items in groups if items %}
-    <section class="task-group {{ key }}">
-      <h2>{{ title }}<span>{{ items|length }}</span></h2>
-      <div class="task-list {{ 'no-who' if who == 'me' else '' }}">
-        {% for t, opp, org, assignee in items %}{{ task_row(t, opp, org, assignee) }}{% endfor %}
-      </div>
+    <section class="tk-grp g-{{ key }}">
+      <h2><i></i>{{ title }} <em>{{ items|length }}</em></h2>
+      <ul class="tk-list">{% for t, opp, org, assignee in items %}{{ task_row(t, opp, org, assignee) }}{% endfor %}</ul>
     </section>
     {% endfor %}
   {% else %}
-    <div class="task-list {{ 'no-who' if who == 'me' else '' }}">
-      {% for t, opp, org, assignee in rows %}{{ task_row(t, opp, org, assignee) }}{% endfor %}
-    </div>
+    <ul class="tk-list">{% for t, opp, org, assignee in rows %}{{ task_row(t, opp, org, assignee) }}{% endfor %}</ul>
   {% endif %}
 {% endblock %}

@@ -1,162 +1,172 @@
 {% extends "base.html" %}
 {% block title %}Fürsət #{{ opp.id }} — Neo{% endblock %}
+{% block main_class %}mc mc-kw mc-opp{% endblock %}
 {% block content %}
   {% set can_edit = has_role(request.state.user, 'sales') %}
   {% set me = request.state.user %}
-  <p class="muted"><a href="/opportunities">Fürsətlər</a> / #{{ opp.id }}</p>
-  <h1>{{ opp.title }}</h1>
-  <p><span class="stage stage-{{ opp.stage }}">{{ stage_names[opp.stage] }}</span>
-    {% if tender %}<span class="badge badge-new">tender</span>{% endif %}
-    {% if opp.stage == 'lost' and opp.lost_reason_code %}<span class="muted"> — {{ lost_reasons[opp.lost_reason_code] }}{% if opp.lost_reason_note %}: {{ opp.lost_reason_note }}{% endif %}</span>{% endif %}
-  </p>
 
-  <div class="grid2">
-    <div>
-      <div class="panel">
-        <h2>Tapşırıqlar</h2>
-        {% if tasks %}
-        <table>
-          <tr><th>Tapşırıq</th><th>Son tarix</th><th>Məsul</th><th>Status</th>{% if can_edit %}<th></th>{% endif %}</tr>
-          {% for t in tasks %}
-          <tr>
-            <td class="{{ 'task-done' if t.status in ('done', 'cancelled') else '' }}">
-              <span class="{{ 'prio-high' if t.priority == 'high' else '' }}">{{ t.title }}</span>
-              {% if t.description %}<details class="muted"><summary>Ətraflı</summary>{{ t.description }}</details>{% endif %}
-            </td>
-            <td class="{{ 'overdue' if t.due_at and t.due_at < utcnow() and t.status in ('open', 'in_progress') else 'muted' }}">{{ t.due_at|baku_time }}</td>
-            <td class="muted">{{ users[t.assignee_id].full_name if t.assignee_id in users else '—' }}</td>
-            <td>{{ task_status_names[t.status] }}</td>
-            {% if can_edit %}
-            <td class="actions">
-              {% if t.status in ('open', 'in_progress') %}
-              <form class="inline" method="post" action="/tasks/{{ t.id }}/status">
-                {{ csrf_field(request) }}<input type="hidden" name="status" value="done"><input type="hidden" name="back" value="/opportunities/{{ opp.id }}">
-                <button class="btn btn-approve btn-sm" type="submit">Bitdi</button>
-              </form>
-              {% else %}
-              <form class="inline" method="post" action="/tasks/{{ t.id }}/status">
-                {{ csrf_field(request) }}<input type="hidden" name="status" value="open"><input type="hidden" name="back" value="/opportunities/{{ opp.id }}">
-                <button class="btn btn-sm" type="submit">Yenidən aç</button>
-              </form>
-              {% endif %}
-            </td>
+  <nav class="od-crumb" aria-label="Yol"><a href="/opportunities">← Fürsətlər</a></nav>
+  <header class="ld-head od-head">
+    <h1 class="mc-title">{{ opp.title }}</h1>
+    <p class="od-tags">
+      <span class="stg s-{{ opp.stage }}"><i></i>{{ stage_names[opp.stage] }}</span>
+      {% if tender %}<span class="tag">Tender</span>{% endif %}
+      {% if opp.stage == 'lost' and opp.lost_reason_code %}<span class="od-lost">{{ lost_reasons[opp.lost_reason_code] }}{% if opp.lost_reason_note %}: {{ opp.lost_reason_note }}{% endif %}</span>{% endif %}
+    </p>
+  </header>
+
+  <section class="od-card">
+    <h2>Növbəti addımlar <em>{{ tasks|length }}</em></h2>
+    {% if tasks %}
+    <ul class="tk-list">
+      {% for t in tasks %}
+      {% set is_open = t.status in ('open', 'in_progress') %}
+      {% set late = t.due_at and t.due_at < utcnow() and is_open %}
+      <li class="tk {{ 'is-late' if late else '' }} {{ 'is-done' if not is_open else '' }}">
+        <div class="tk-main">
+          <b>{{ t.title }}{% if t.priority == 'high' %} <span class="tk-hi">Vacib</span>{% endif %}</b>
+          {% if t.description %}<details class="od-more"><summary>Ətraflı</summary>{{ t.description }}</details>{% endif %}
+        </div>
+        <div class="tk-side">
+          <span class="tk-when {{ 'late' if late else '' }}">{% if t.due_at %}{% if late %}Vaxtı keçib · {% endif %}{{ t.due_at|baku_time }}{% else %}Tarixsiz{% endif %}</span>
+          <span class="tk-who">{{ users[t.assignee_id].full_name if t.assignee_id in users else 'Məsul təyin edilməyib' }}</span>
+        </div>
+        <div class="tk-act">
+          {% if can_edit %}
+            {% if is_open %}
+            <form method="post" action="/tasks/{{ t.id }}/status">
+              {{ csrf_field(request) }}<input type="hidden" name="status" value="done"><input type="hidden" name="back" value="/opportunities/{{ opp.id }}">
+              <button class="mc-btn mc-btn-sm tk-done" type="submit"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 8.6l3 3L12.8 4.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Bitdi</button>
+            </form>
+            {% else %}
+            <form method="post" action="/tasks/{{ t.id }}/status">
+              {{ csrf_field(request) }}<input type="hidden" name="status" value="open"><input type="hidden" name="back" value="/opportunities/{{ opp.id }}">
+              <button class="mc-btn mc-btn-sm" type="submit">Yenidən aç</button>
+            </form>
             {% endif %}
-          </tr>
-          {% endfor %}
-        </table>
-        {% else %}
-          <div class="empty">Tapşırıq yoxdur.</div>
-        {% endif %}
+          {% else %}<span class="tk-state {{ 'ok' if t.status == 'done' else '' }}">{{ task_status_names[t.status] }}</span>{% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+      <p class="od-empty">Hələ tapşırıq yoxdur.</p>
+    {% endif %}
 
-        {% if can_edit %}
-        <form method="post" action="/opportunities/{{ opp.id }}/tasks" style="margin-top:14px">
-          {{ csrf_field(request) }}
-          <div class="form-row">
-            <label style="flex:1 1 240px">Yeni tapşırıq<input name="title" required maxlength="300" placeholder="məs. Təklifi göndər"></label>
-            <label>Son tarix (Bakı)<input type="datetime-local" name="due_at"></label>
-            <label>Məsul
-              <select name="assignee_id">
-                {% for u in user_list %}<option value="{{ u.id }}" {% if u.id == me.id %}selected{% endif %}>{{ u.full_name }}</option>{% endfor %}
-              </select>
-            </label>
-            <label>Prioritet
-              <select name="priority">{% for k, v in priority_names.items() %}<option value="{{ k }}" {% if k == 'normal' %}selected{% endif %}>{{ v }}</option>{% endfor %}</select>
-            </label>
-            <button class="btn btn-primary" type="submit">Əlavə et</button>
-          </div>
-        </form>
-        {% endif %}
-      </div>
+    {% if can_edit %}
+    <details class="od-add">
+      <summary>+ Tapşırıq əlavə et</summary>
+      <form method="post" action="/opportunities/{{ opp.id }}/tasks">
+        {{ csrf_field(request) }}
+        <label class="kw-f">Nə etmək lazımdır?<input name="title" required maxlength="300" placeholder="məs. Təklifi göndər"></label>
+        <div class="kw-row">
+          <label class="kw-f">Son tarix (Bakı vaxtı)<input type="datetime-local" name="due_at"></label>
+          <label class="kw-f">Məsul
+            <select name="assignee_id">{% for u in user_list %}<option value="{{ u.id }}" {% if u.id == me.id %}selected{% endif %}>{{ u.full_name }}</option>{% endfor %}</select>
+          </label>
+          <label class="kw-f">Vacibliyi
+            <select name="priority">{% for k, v in priority_names.items() %}<option value="{{ k }}" {% if k == 'normal' %}selected{% endif %}>{{ v }}</option>{% endfor %}</select>
+          </label>
+        </div>
+        <button class="mc-btn mc-btn-hero" type="submit">Tapşırığı əlavə et</button>
+      </form>
+    </details>
+    {% endif %}
+  </section>
 
-      {% if lead %}
-      <div class="panel">
-        <h2>Haradan gəldi</h2>
-        <dl class="kv">
-          <dt>Mənbə</dt><dd>{{ kind_names[lead_kind(lead.source)] }} · {{ lead.source }} · <a href="{{ lead.source_url }}" target="_blank" rel="noopener">Elanı aç</a></dd>
-          <dt>AI skoru</dt><dd>{{ (lead.ai_score * 100)|round|int if lead.ai_score is not none else "—" }}{% if lead.ai_reason %} · {{ lead.ai_reason }}{% endif %}</dd>
-          <dt>Dərc</dt><dd>{{ lead.posted_at|baku_time }}</dd>
-          <dt>Son tarix</dt><dd>{{ lead.deadline_at|baku_time if lead.deadline_at else '—' }}</dd>
-        </dl>
-        <details><summary>Tam mətn</summary><div class="raw">{{ lead.raw_text|truncate(4000) }}</div></details>
-      </div>
-      {% endif %}
-    </div>
+  <div class="od-grid">
+    {% if can_edit %}
+    <section class="od-card">
+      <h2>Mərhələ</h2>
+      <form method="post" action="/opportunities/{{ opp.id }}/stage">
+        {{ csrf_field(request) }}
+        <label class="kw-f">Fürsət indi harada?
+          <select name="stage" id="stage-select">{% for s in stages %}<option value="{{ s }}" {% if s == opp.stage %}selected{% endif %}>{{ stage_names[s] }}</option>{% endfor %}</select>
+        </label>
+        <div id="lost-box" class="od-lost-box">
+          <label class="kw-f" id="lost-reason">Niyə uduzuldu?
+            <select name="lost_reason">
+              <option value="">— seç —</option>
+              {% for k, v in lost_reasons.items() %}<option value="{{ k }}" {% if k == opp.lost_reason_code %}selected{% endif %}>{{ v }}</option>{% endfor %}
+            </select>
+          </label>
+          <label class="kw-f">Qeyd<input name="lost_note" value="{{ opp.lost_reason_note or '' }}" maxlength="500"></label>
+        </div>
+        <button class="mc-btn mc-btn-hero" type="submit">Mərhələni dəyiş</button>
+        {% if tender %}<p class="od-hint">Tender fürsətində “Əlaqə saxlanılıb” və “Danışıqlar” mərhələləri yoxdur.</p>{% endif %}
+      </form>
+    </section>
+    {% endif %}
 
-    <div>
+    <section class="od-card">
+      <h2>Məlumat</h2>
       {% if can_edit %}
-      <div class="panel">
-        <h2>Mərhələ</h2>
-        <form method="post" action="/opportunities/{{ opp.id }}/stage">
-          {{ csrf_field(request) }}
-          <div class="form-row">
-            <label>Mərhələ
-              <select name="stage" id="stage-select">
-                {% for s in stages %}<option value="{{ s }}" {% if s == opp.stage %}selected{% endif %}>{{ stage_names[s] }}</option>{% endfor %}
-              </select>
-            </label>
-            <label id="lost-reason">Uduzma səbəbi
-              <select name="lost_reason">
-                <option value="">— seç —</option>
-                {% for k, v in lost_reasons.items() %}<option value="{{ k }}" {% if k == opp.lost_reason_code %}selected{% endif %}>{{ v }}</option>{% endfor %}
-              </select>
-            </label>
-          </div>
-          <div class="form-row"><label style="flex:1">Qeyd (uduzduqda)<input name="lost_note" value="{{ opp.lost_reason_note or '' }}" maxlength="500"></label></div>
-          <button class="btn btn-primary" type="submit">Mərhələni dəyiş</button>
-          {% if tender %}<p class="muted">Tender fürsəti: "Əlaqə saxlanılıb" və "Danışıqlar" mərhələləri yoxdur.</p>{% endif %}
-        </form>
-      </div>
+      <form method="post" action="/opportunities/{{ opp.id }}/details">
+        {{ csrf_field(request) }}
+        <div class="kw-row" style="margin-top:0">
+          <label class="kw-f">Gözlənilən dəyər (AZN)<input name="expected_value" inputmode="decimal" value="{{ opp.expected_value if opp.expected_value is not none else '' }}"></label>
+          <label class="kw-f">Gözlənilən bağlanma<input type="date" name="expected_close_on" value="{{ opp.expected_close_on or '' }}"></label>
+        </div>
+        <label class="kw-f">Məsul şəxs
+          <select name="owner_id">
+            <option value="">— təyin edilməyib —</option>
+            {% for u in user_list %}<option value="{{ u.id }}" {% if u.id == opp.owner_id %}selected{% endif %}>{{ u.full_name }}</option>{% endfor %}
+          </select>
+        </label>
+        <button class="mc-btn" style="margin-top:14px" type="submit">Yadda saxla</button>
+      </form>
+      {% else %}
+      <dl class="od-kv">
+        <dt>Gözlənilən dəyər</dt><dd>{{ opp.expected_value or '—' }} {{ opp.currency }}</dd>
+        <dt>Bağlanma</dt><dd>{{ opp.expected_close_on or '—' }}</dd>
+        <dt>Məsul</dt><dd>{{ users[opp.owner_id].full_name if opp.owner_id in users else '—' }}</dd>
+      </dl>
       {% endif %}
+    </section>
 
-      <div class="panel">
-        <h2>Məlumat</h2>
-        {% if can_edit %}
-        <form method="post" action="/opportunities/{{ opp.id }}/details">
-          {{ csrf_field(request) }}
-          <div class="form-row">
-            <label>Gözlənilən dəyər (AZN)<input name="expected_value" inputmode="decimal" value="{{ opp.expected_value if opp.expected_value is not none else '' }}"></label>
-            <label>Gözlənilən bağlanma<input type="date" name="expected_close_on" value="{{ opp.expected_close_on or '' }}"></label>
-          </div>
-          <div class="form-row">
-            <label>Məsul
-              <select name="owner_id">
-                <option value="">— yoxdur —</option>
-                {% for u in user_list %}<option value="{{ u.id }}" {% if u.id == opp.owner_id %}selected{% endif %}>{{ u.full_name }}</option>{% endfor %}
-              </select>
-            </label>
-            <button class="btn" type="submit">Yadda saxla</button>
-          </div>
-        </form>
-        {% else %}
-        <dl class="kv">
-          <dt>Gözlənilən dəyər</dt><dd>{{ opp.expected_value or '—' }} {{ opp.currency }}</dd>
-          <dt>Bağlanma</dt><dd>{{ opp.expected_close_on or '—' }}</dd>
-          <dt>Məsul</dt><dd>{{ users[opp.owner_id].full_name if opp.owner_id in users else '—' }}</dd>
-        </dl>
-        {% endif %}
-      </div>
+    {% if lead %}
+    <section class="od-card">
+      <h2>Haradan gəldi</h2>
+      <dl class="od-kv">
+        <dt>Sayt</dt><dd>{{ kind_names[lead_kind(lead.source)] }} · {{ lead.source }} · <a href="{{ lead.source_url }}" target="_blank" rel="noopener">Elanı aç ↗</a></dd>
+        <dt>Uyğunluq</dt><dd>{{ (lead.ai_score * 100)|round|int ~ '/100' if lead.ai_score is not none else "—" }}{% if lead.ai_reason %} — {{ lead.ai_reason }}{% endif %}</dd>
+        <dt>Dərc</dt><dd>{{ lead.posted_at|baku_time }}</dd>
+        <dt>Son tarix</dt><dd>{{ lead.deadline_at|baku_time if lead.deadline_at else '—' }}</dd>
+      </dl>
+      <details class="od-more"><summary>Tam mətni göstər</summary><div class="raw">{{ lead.raw_text|truncate(4000) }}</div></details>
+    </section>
+    {% endif %}
 
-      <div class="panel">
-        <h2>Təşkilat</h2>
-        {% if org %}
-        <dl class="kv">
-          <dt>Ad</dt><dd>{{ org.name }}</dd>
-          {% if org.voen %}<dt>VÖEN</dt><dd>{{ org.voen }}</dd>{% endif %}
-          {% if org.phone %}<dt>Telefon</dt><dd>{{ org.phone }}</dd>{% endif %}
-          {% if org.email %}<dt>Email</dt><dd>{{ org.email }}</dd>{% endif %}
-          {% if org.website %}<dt>Sayt</dt><dd><a href="{{ org.website }}" target="_blank" rel="noopener">{{ org.website }}</a></dd>{% endif %}
-        </dl>
-        {% else %}
-          <p class="muted">Təşkilat müəyyən edilməyib.</p>
-        {% endif %}
-        {% if tender %}
-        <dl class="kv" style="margin-top:12px">
-          <dt>Tender</dt><dd>{{ tender.title }}</dd>
-          {% if tender.reference_no %}<dt>Nömrə</dt><dd>{{ tender.reference_no }}</dd>{% endif %}
-          <dt>Son tarix</dt><dd>{{ tender.deadline_at|baku_time if tender.deadline_at else '—' }}</dd>
-        </dl>
-        {% endif %}
-      </div>
-    </div>
+    <section class="od-card">
+      <h2>Təşkilat</h2>
+      {% if org %}
+      <dl class="od-kv">
+        <dt>Ad</dt><dd>{{ org.name }}</dd>
+        {% if org.voen %}<dt>VÖEN</dt><dd>{{ org.voen }}</dd>{% endif %}
+        {% if org.phone %}<dt>Telefon</dt><dd>{{ org.phone }}</dd>{% endif %}
+        {% if org.email %}<dt>Email</dt><dd>{{ org.email }}</dd>{% endif %}
+        {% if org.website %}<dt>Sayt</dt><dd><a href="{{ org.website }}" target="_blank" rel="noopener">{{ org.website }} ↗</a></dd>{% endif %}
+      </dl>
+      {% else %}
+        <p class="od-empty">Təşkilat müəyyən edilməyib.</p>
+      {% endif %}
+      {% if tender %}
+      <dl class="od-kv od-tender">
+        <dt>Tender</dt><dd>{{ tender.title }}</dd>
+        {% if tender.reference_no %}<dt>Nömrə</dt><dd>{{ tender.reference_no }}</dd>{% endif %}
+        <dt>Son tarix</dt><dd>{{ tender.deadline_at|baku_time if tender.deadline_at else '—' }}</dd>
+      </dl>
+      {% endif %}
+    </section>
   </div>
+
+  <script>
+    /* “Niyə uduzuldu?” yalnız mərhələ “Uduzuldu” seçiləndə göstərilir. */
+    (function () {
+      var sel = document.getElementById('stage-select'), box = document.getElementById('lost-box');
+      if (!sel || !box) return;
+      function sync() { box.hidden = sel.value !== 'lost'; }
+      sel.addEventListener('change', sync); sync();
+    })();
+  </script>
 {% endblock %}

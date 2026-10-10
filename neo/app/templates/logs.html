@@ -1,48 +1,57 @@
 {% extends "base.html" %}
 {% block title %}Loglar — Neo{% endblock %}
+{% block main_class %}mc mc-logs{% endblock %}
 {% block content %}
-  <div class="toolbar">
+  <header class="lg-head">
     <div>
-      <h1>Loglar</h1>
-      <p class="muted">Paneldən başladılan yoxlamaların hər addımı canlı: sayt sorğuları, seçim, AI skorları, xətalar. Son 5000 yazı saxlanılır, server yenidən başlayanda sıfırlanır. Avtomatik yoxlamaların logu worker terminalındadır.</p>
+      <h1 class="mc-title">Loglar</h1>
+      <p class="ld-sub">Neo hər yoxlamada nə etdiyini burada yazır. Nəsə işləmirsə, “Xəta” süzgəcini seç.</p>
     </div>
     {% if has_role(request.state.user, 'manager') %}
     <form method="post" action="/scrape-all">
       {{ csrf_field(request) }}
-      <button class="btn btn-primary btn-lg" type="submit" id="scrape-all-btn">Hamısını indi yoxla</button>
+      <button class="mc-btn mc-btn-hero" type="submit" id="scrape-all-btn">Hamısını indi yoxla</button>
     </form>
     {% endif %}
-  </div>
+  </header>
 
-  <div id="running" class="muted"></div>
+  <div id="running" class="lg-status" role="status"><span class="lg-dot"></span><span id="running-text">Yoxlanılır…</span></div>
 
-  <div class="filters">
-    <label>Mənbə
+  <div class="lg-bar">
+    <label class="lg-f">Sayt
       <select id="f-source">
-        <option value="">hamısı</option>
+        <option value="">Hamısı</option>
         {% for key, label in sources.items() %}
           <option value="{{ key }}" {% if request.query_params.get('source') == key %}selected{% endif %}>{{ label }}</option>
         {% endfor %}
       </select>
     </label>
-    <label>Səviyyə
+    <label class="lg-f">Önəm
       <select id="f-level">
-        <option value="">hamısı</option>
-        <option value="info">info</option>
-        <option value="warning">warning</option>
-        <option value="error">error</option>
-        <option value="debug">debug</option>
+        <option value="">Hamısı</option>
+        <option value="info">Məlumat</option>
+        <option value="warning">Xəbərdarlıq</option>
+        <option value="error">Xəta</option>
+        <option value="debug">Texniki detal</option>
       </select>
     </label>
-    <input type="search" id="f-text" placeholder="Axtar: ai_scored, boss.az…" style="flex:1 1 220px">
-    <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="f-http" checked> Sayt sorğuları</label>
-    <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="f-follow" checked> Yeni yazılara sürüşdür</label>
-    <span class="muted" id="count"></span>
+    <label class="lg-f lg-grow">Axtar
+      <input type="search" id="f-text" placeholder="məs. boss.az və ya ai_scored" autocomplete="off">
+    </label>
+  </div>
+  <div class="lg-toggles">
+    <label class="lg-chk"><input type="checkbox" id="f-http"> Sayt sorğularını da göstər</label>
+    <label class="lg-chk"><input type="checkbox" id="f-follow" checked> Ən yeni yazını izlə</label>
+    <span class="lg-count" id="count"></span>
   </div>
 
-  <div class="log-wrap" id="log">
-    <div class="empty" id="empty">Hələ log yoxdur. "Hamısını indi yoxla" düyməsi və ya Mənbələr səhifəsindən bir mənbəni yoxla.</div>
+  <div class="lg-card">
+    <div class="lg-cols" aria-hidden="true"><span>Vaxt</span><span>Önəm</span><span>Sayt</span><span>Nə oldu</span><span>Təfərrüat</span></div>
+    <div class="log-wrap" id="log">
+      <div class="empty" id="empty">Hələ log yoxdur. “Hamısını indi yoxla” düyməsini və ya Mənbələr səhifəsindən bir saytı yoxla.</div>
+    </div>
   </div>
+  <p class="lg-note">Son 5000 yazı saxlanılır, server yenidən başlayanda sıfırlanır. Avtomatik yoxlamaların logu worker terminalındadır.</p>
 
   <script>
     (function () {
@@ -101,19 +110,14 @@
       }
 
       function showRunning(running) {
+        const txt = document.getElementById("running-text");
+        runningEl.classList.toggle("on", running.length > 0);
         if (running.length) {
-          runningEl.innerHTML = "";
-          runningEl.append("İşləyir: ");
-          running.forEach((k) => {
-            const pill = document.createElement("span");
-            pill.className = "running-pill";
-            pill.textContent = k;
-            runningEl.appendChild(pill);
-          });
-          btn.textContent = "İşləyir: " + running.length + " mənbə";
+          txt.textContent = "İndi yoxlanılır: " + running.join(", ");
+          if (btn) btn.textContent = "İşləyir: " + running.length + " sayt";
         } else {
-          runningEl.textContent = "Hazırda heç bir scraper işləmir.";
-          btn.textContent = "Hamısını indi yoxla";
+          txt.textContent = "Hazırda heç bir yoxlama getmir.";
+          if (btn) btn.textContent = "Hamısını indi yoxla";
         }
       }
 
@@ -133,7 +137,7 @@
           }
           showRunning(data.running);
         } catch (err) {
-          runningEl.textContent = "Loglar alınmadı: " + err;
+          document.getElementById("running-text").textContent = "Loglar alınmadı: " + err;
         }
         setTimeout(poll, 2000);
       }

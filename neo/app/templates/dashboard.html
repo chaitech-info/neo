@@ -1,80 +1,136 @@
 {% extends "base.html" %}
 {% block title %}Mənbələr — Neo{% endblock %}
+{% block head %}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+{% endblock %}
+{% block main_class %}mc{% endblock %}
 {% block content %}
-  {% if running %}
-    {# İşləyən mənbə varsa səhifə özü yenilənir ki, status görünsün. #}
-    <meta http-equiv="refresh" content="5">
-  {% endif %}
   {% set can_scrape = has_role(request.state.user, 'manager') %}
   {% set my = nav_counts(request.state.user) %}
+  {% set n_all = sources|length %}
+  {% set errs = sources|selectattr('health')|selectattr('health.state', 'equalto', 'error')|list %}
+  {% set n_ok = sources|selectattr('health')|selectattr('health.state', 'equalto', 'ok')|list|length %}
+  {% set n_bad = n_all - n_ok %}
+  {% set words = {'ok': 'İşləyir', 'stale': 'Gecikib', 'empty': 'Boşdur', 'error': 'Xəta var', 'none': '—'} %}
+  {% set hints = {'ok': '', 'stale': 'Vaxtında yoxlanmayıb', 'empty': 'Saytdan heç nə gətirmir', 'error': 'Son 3 yoxlama alınmayıb', 'none': ''} %}
 
-  <div class="metrics">
-    <a class="metric {{ 'hot' if stats.pending_review else '' }}" href="/leads/pending_review">
-      <span class="v">{{ stats.pending_review }}</span><span class="l">lead validasiyada gözləyir</span>
-    </a>
-    <a class="metric {{ 'late' if my.late else '' }}" href="/tasks">
-      <span class="v">{{ my.tasks or 0 }}</span><span class="l">açıq tapşırığım{% if my.late %}, {{ my.late }}-nin vaxtı keçib{% endif %}</span>
-    </a>
-    <a class="metric" href="/opportunities">
-      <span class="v">{{ open_opps }}</span><span class="l">açıq fürsət</span>
-    </a>
-    <div class="metric">
-      <span class="v">{{ last_auto or '—' }}</span><span class="l">son avtomatik yoxlama</span>
-    </div>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+      <symbol id="i-ok" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M5 8.4l2 2 4-4.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-late" viewBox="0 0 16 16"><path d="M8 2l6.3 11.2H1.7z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 6.5v3M8 11.4v.1" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+      <symbol id="i-err" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M5.8 5.8l4.4 4.4M10.2 5.8l-4.4 4.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+      <symbol id="i-run" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".25"/><path d="M8 1.5a6.5 6.5 0 0 1 6.5 6.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+      <symbol id="i-arrow" viewBox="0 0 16 16"><path d="M3 8h9M8.5 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    </defs>
+  </svg>
+
+  {% macro row(s) %}
+    {% set st = s.health.state if s.health else 'none' %}
+    {% set parts = (s.last or '').split(' — ') %}
+    {% set isrun = s.key in running %}
+    <li class="row st-{{ st }} {{ 'is-running' if isrun else '' }}" id="src-{{ s.key }}">
+      <span class="pill">
+        {% if isrun %}<svg class="ic spin" aria-hidden="true"><use href="#i-run"/></svg>Yoxlanılır
+        {% elif st == 'ok' %}<svg class="ic" aria-hidden="true"><use href="#i-ok"/></svg>{{ words[st] }}
+        {% elif st == 'error' %}<svg class="ic" aria-hidden="true"><use href="#i-err"/></svg>{{ words[st] }}
+        {% else %}<svg class="ic" aria-hidden="true"><use href="#i-late"/></svg>{{ words[st] }}{% endif %}
+      </span>
+      <div class="r-main">
+        <b>{{ s.label }}</b>
+        <small>
+          {% if isrun %}Hazırda yoxlanılır…
+          {% elif hints[st] %}{{ hints[st] }}{% if s.last %} · son yoxlama {{ parts[0] }}{% endif %}
+          {% elif s.last %}Son yoxlama {{ parts[0] }}{% if parts|length > 1 %} · {{ parts[1:]|join(' — ') }}{% endif %}
+          {% else %}Hələ yoxlanılmayıb{% endif %}
+        </small>
+      </div>
+      <div class="r-act">
+        <a class="link" href="/logs?source={{ s.key }}">Tarixçə</a>
+        {% if can_scrape %}
+        <form class="inline" method="post" action="/scrape/{{ s.key }}">
+          {{ csrf_field(request) }}
+          <button class="mc-btn mc-btn-sm" type="submit" {% if isrun %}disabled{% endif %}>İndi yoxla</button>
+        </form>
+        {% endif %}
+      </div>
+    </li>
+  {% endmacro %}
+
+  <div id="live" data-running="{{ 1 if running else 0 }}">
+    <h1 class="mc-title">Mənbələr</h1>
+
+    <section class="go {{ 'has' if stats.pending_review else '' }}">
+      {% if stats.pending_review %}
+        <p class="go-num"><b>{{ stats.pending_review }}</b> yeni lead</p>
+        <p class="go-txt">Neo tapdı. Hər birinə baxıb “uyğundur” və ya “uyğun deyil” de.</p>
+        <a class="mc-btn mc-btn-hero" href="/leads/pending_review">Baxmağa başla <svg class="ic" aria-hidden="true"><use href="#i-arrow"/></svg></a>
+      {% else %}
+        <p class="go-num go-none">Hamısı baxılıb</p>
+        <p class="go-txt">Təsdiq gözləyən yeni lead yoxdur. Neo yenisini tapanda burada görünəcək.</p>
+      {% endif %}
+      <p class="go-more">
+        <a href="/tasks">{{ my.tasks or 0 }} açıq tapşırığım{% if my.late %} <em>({{ my.late }} gecikib)</em>{% endif %}</a>
+        <span aria-hidden="true">·</span>
+        <a href="/opportunities">{{ open_opps }} açıq fürsət</a>
+      </p>
+    </section>
+
+    <section class="src">
+      <div class="src-head">
+        <div role="status" aria-atomic="true" class="src-line">
+          {% if running %}<svg class="ic spin t-run" aria-hidden="true"><use href="#i-run"/></svg><span><b>{{ running|length }} sayt</b> indi yoxlanılır</span>
+          {% elif not n_bad %}<svg class="ic t-ok" aria-hidden="true"><use href="#i-ok"/></svg><span><b>Bütün {{ n_all }} sayt</b> düzgün işləyir</span>
+          {% elif errs %}<svg class="ic t-err" aria-hidden="true"><use href="#i-err"/></svg><span><b>{{ errs|length }} saytda xəta var.</b> Qalan {{ n_all - errs|length }} saytın {{ n_ok }}-i işləyir</span>
+          {% else %}<svg class="ic t-late" aria-hidden="true"><use href="#i-late"/></svg><span><b>{{ n_all }} saytdan {{ n_bad }}-i</b> vaxtında yoxlanmayıb</span>{% endif %}
+        </div>
+        {% if can_scrape %}
+        <form method="post" action="/scrape-all">
+          {{ csrf_field(request) }}
+          <button class="mc-btn" type="submit" {% if running|length == n_all %}disabled{% endif %}>Hamısını indi yoxla</button>
+        </form>
+        {% endif %}
+      </div>
+      {% if last_auto %}<p class="src-sub">Son avtomatik yoxlama: {{ last_auto }}. Neo özü saytlara cədvəl üzrə baxır.</p>{% endif %}
+
+      {% if errs %}
+      <ul class="rows rows-top">{% for s in errs|sort(attribute='label') %}{{ row(s) }}{% endfor %}</ul>
+      {% endif %}
+
+      <details class="all">
+        <summary><span>Bütün {{ n_all }} saytı göstər</span><svg class="ic" aria-hidden="true"><use href="#i-chev"/></svg></summary>
+        {% for kind, items in sources|groupby('kind') %}
+        <h2 class="kind">{{ kind_names[kind] }} saytları</h2>
+        <ul class="rows">{% for s in items|sort(attribute='label') %}{{ row(s) }}{% endfor %}</ul>
+        {% endfor %}
+      </details>
+    </section>
   </div>
 
-  <div class="page-head">
-    <div>
-      <h1>Mənbələr</h1>
-      <p>Hər mənbə cədvəl üzrə avtomatik yoxlanılır. Yeni lead-lər Validasiyaya düşür.</p>
-    </div>
-    {% if can_scrape %}
-    <form method="post" action="/scrape-all">
-      {{ csrf_field(request) }}
-      <button class="btn btn-primary btn-lg" type="submit" {% if running|length == sources|length %}disabled{% endif %}>
-        {% if running %}{{ running|length }} mənbə işləyir{% else %}Hamısını indi yoxla{% endif %}
-      </button>
-    </form>
-    {% endif %}
-  </div>
-
-  {% if running %}
-    <div class="flash info" role="status"><span class="pulse"></span>{{ running|length }} mənbə yoxlanılır. Gedişat <a href="/logs">Loglar</a> səhifəsində canlı görünür.</div>
-  {% endif %}
-
-  <div class="table-wrap">
-    <table class="sources">
-      <tr><th>Mənbə</th><th>Vəziyyət</th><th>Cədvəl</th><th>Son nəticə</th><th></th></tr>
-      {% for s in sources %}
-      <tr class="{{ 'running' if s.key in running else '' }}">
-        <td>{{ s.label }}<span class="kind">{{ kind_names[s.kind] }}</span></td>
-        <td>{% if s.health %}<span class="badge health-{{ s.health.state }}" title="{{ s.health.detail }}">{{ s.health.label }}</span>{% if s.health.state != 'ok' %}<span class="health-note">{{ s.health.detail.split(' · ')[0] }}</span>{% endif %}{% endif %}</td>
-        <td class="muted">{{ s.schedule }}</td>
-        <td class="result">
-          {% if s.key in running %}<span class="pulse"></span>yoxlanılır…{% else %}{{ s.last or 'hələ yoxlanılmayıb' }}{% endif %}
-        </td>
-        <td>
-          <div class="actions" style="justify-content:flex-end">
-            <a class="btn btn-sm" href="/logs?source={{ s.key }}">Loglar</a>
-            {% if can_scrape %}
-            <form class="inline" method="post" action="/scrape/{{ s.key }}">
-              {{ csrf_field(request) }}
-              <button class="btn btn-sm" type="submit" {% if s.key in running %}disabled{% endif %}>İndi yoxla</button>
-            </form>
-            {% endif %}
-          </div>
-        </td>
-      </tr>
-      {% endfor %}
-    </table>
-  </div>
-
-  <h2>Lead-lər statusa görə</h2>
-  <div class="actions">
-    <a class="badge badge-pending" href="/leads/pending_review">Validasiyada: {{ stats.pending_review }}</a>
-    {% for t in ["A", "B", "C"] %}{% if tier_counts[t] %}<a class="badge" href="/leads/pending_review?tier={{ t }}"><span class="tier tier-{{ t }}">{{ t }}</span> {{ tier_counts[t] }}</a>{% endif %}{% endfor %}
-    <span class="badge badge-sent">Fürsətə çevrilib: {{ stats.converted }}</span>
-    <a class="badge badge-rejected" href="/leads/ai_rejected">Rədd edilib: {{ stats.rejected }}</a>
-    <span class="badge">Dublikat: {{ stats.duplicate }}</span>
-  </div>
+  <script>
+  /* Yoxlama gedəndə yalnız #live blokunu səssiz yeniləyir; açıq/bağlı siyahı vəziyyəti saxlanır. */
+  (function () {
+    var live = document.getElementById('live');
+    if (!live || live.dataset.running !== '1') return;
+    var timer = setInterval(tick, 4000), busy = false;
+    function tick() {
+      if (busy || document.hidden) return;
+      busy = true;
+      fetch(location.href, { credentials: 'same-origin', headers: { 'X-Requested-With': 'fetch' } })
+        .then(function (r) { if (!r.ok) throw 0; return r.text(); })
+        .then(function (html) {
+          var next = new DOMParser().parseFromString(html, 'text/html').getElementById('live');
+          if (!next) throw 0;
+          var d = live.querySelector('details.all'), wasOpen = d && d.open;
+          live.innerHTML = next.innerHTML;
+          live.dataset.running = next.dataset.running;
+          var nd = live.querySelector('details.all'); if (nd && wasOpen) nd.open = true;
+          if (next.dataset.running !== '1') clearInterval(timer);
+        })
+        .catch(function () {})
+        .then(function () { busy = false; });
+    }
+  })();
+  </script>
 {% endblock %}

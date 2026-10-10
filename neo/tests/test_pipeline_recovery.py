@@ -158,7 +158,7 @@ def test_dashboard_shows_health_column():
     from app import web
 
     page = TestClient(web.app).get("/")
-    assert page.status_code == 200 and "Vəziyyət" in page.text
+    assert page.status_code == 200 and 'class="pill"' in page.text   # hər mənbə üçün sağlamlıq nişanı
 
 
 def test_validation_queue_sorts_and_filters_by_tier():

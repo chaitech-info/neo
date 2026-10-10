@@ -115,12 +115,12 @@ def test_role_permissions(db, monkeypatch):
     viewer = _client(); _login(viewer, "v@neo.az")
     home = viewer.get("/").text
     assert 'action="/scrape/' not in home and 'action="/scrape-all"' not in home and "İstifadəçilər" not in home
-    assert "Rədd et" not in viewer.get("/leads/pending_review").text
+    assert "Uyğun deyil" not in viewer.get("/leads/pending_review").text
     r = viewer.post("/scrape/oxu", data={"csrf_token": _csrf(viewer, "/")})
     assert r.status_code == 403 and "Menecer" in r.text
 
     sales = _client(); _login(sales, "s@neo.az")
-    assert "Rədd et" in sales.get("/leads/pending_review").text
+    assert "Uyğun deyil" in sales.get("/leads/pending_review").text
     assert sales.post("/scrape/oxu", data={"csrf_token": _csrf(sales, "/")}).status_code == 403
     r = sales.post(f"/leads/{'k' * 64}/reject", data={"csrf_token": _csrf(sales, "/")}, follow_redirects=False)
     assert "msg=" in r.headers["location"]

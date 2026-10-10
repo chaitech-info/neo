@@ -1,5 +1,10 @@
 {% extends "base.html" %}
 {% block title %}{{ heading }} — Neo{% endblock %}
+{% block head %}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+{% endblock %}
+{% block main_class %}mc mc-leads{% endblock %}
 {% block content %}
 {% set status_names = {"pending_review": "Validasiyada", "converted": "Fürsətə çevrilib", "rejected": "Rədd edilib",
                        "duplicate": "Dublikat", "sent_to_crm": "CRM-ə göndərilib", "new": "Yeni"} %}
@@ -16,76 +21,70 @@
 {% endmacro %}
 
   {% set can_review = has_role(request.state.user, 'sales') %}
-  <div class="page-head">
-    <div>
-      <h1>{{ heading }}</h1>
-      <p>{{ subtitle }}</p>
-    </div>
-    {% if leads %}<span class="muted">{{ leads|length }} lead</span>{% endif %}
-  </div>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+      <symbol id="i-check" viewBox="0 0 16 16"><path d="M3.2 8.6l3 3L12.8 4.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-x" viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+      <symbol id="i-out" viewBox="0 0 16 16"><path d="M7 3H3.5v9.5H13V9M9.5 3H13v3.5M13 3L7.5 8.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    </defs>
+  </svg>
+
+  <header class="ld-head">
+    <h1 class="mc-title">{{ heading }}</h1>
+    <p class="ld-sub">{{ subtitle }}{% if leads %} <b>{{ leads|length }} lead.</b>{% endif %}</p>
+  </header>
 
   {% if tier_counts %}
-  <div class="tier-bar">
-    <div class="seg" role="group" aria-label="Kateqoriya">
-      <a class="{{ 'on' if not tier else '' }}" href="/leads/pending_review">Hamısı <b>{{ tier_counts.values()|sum }}</b></a>
-      {% for t in ["A", "B", "C"] %}
-      <a class="{{ 'on' if tier == t else '' }}" href="/leads/pending_review?tier={{ t }}" title="{{ tier_info[t][1] }}"><span class="tier tier-{{ t }}">{{ t }}</span> {{ tier_info[t][0] }} <b>{{ tier_counts[t] }}</b></a>
-      {% endfor %}
-      {% if tier_counts.none %}<a class="{{ 'on' if tier == 'none' else '' }}" href="/leads/pending_review?tier=none" title="Köhnə qiymətləndirmə və ya AI skoru yoxdur">Kateqoriyasız <b>{{ tier_counts.none }}</b></a>{% endif %}
-    </div>
-    <details class="tier-help"><summary>Kateqoriyalar nə deməkdir?</summary>
-      <dl>{% for t in ["A", "B", "C"] %}<dt><span class="tier tier-{{ t }}">{{ t }}</span> {{ tier_info[t][0] }}</dt><dd>{{ tier_info[t][1] }}</dd>{% endfor %}</dl>
-    </details>
+  <div class="ld-filter" role="group" aria-label="Kateqoriya">
+    <a class="{{ 'on' if not tier else '' }}" href="/leads/pending_review">Hamısı <i>{{ tier_counts.values()|sum }}</i></a>
+    {% for t in ["A", "B", "C"] %}
+    <a class="{{ 'on' if tier == t else '' }}" href="/leads/pending_review?tier={{ t }}" title="{{ tier_info[t][1] }}"><span class="tier tier-{{ t }}">{{ t }}</span>{{ tier_info[t][0] }} <i>{{ tier_counts[t] }}</i></a>
+    {% endfor %}
+    {% if tier_counts.none %}<a class="{{ 'on' if tier == 'none' else '' }}" href="/leads/pending_review?tier=none" title="Köhnə qiymətləndirmə və ya AI skoru yoxdur">Kateqoriyasız <i>{{ tier_counts.none }}</i></a>{% endif %}
   </div>
+  <details class="ld-help"><summary>A, B, C nə deməkdir?</summary>
+    <dl>{% for t in ["A", "B", "C"] %}<dt><span class="tier tier-{{ t }}">{{ t }}</span> {{ tier_info[t][0] }}</dt><dd>{{ tier_info[t][1] }}</dd>{% endfor %}</dl>
+  </details>
   {% endif %}
 
   {% if leads and show_actions %}
-  <div class="legend" aria-label="Rəng izahı">
-    <span><i style="background:var(--saffron)"></i>Tender</span>
-    <span><i style="background:var(--herb)"></i>İşəgötürən (işçilərinə nahar verir)</span>
-    <span><i style="background:var(--news, #6F8A96)"></i>Xəbər</span>
-  </div>
-  <div class="tickets">
+  <div class="ld-list">
     {% for lead in leads %}
     {% set kind = lead_kind(lead.source) %}
-    <article class="ticket k-{{ kind }}">
-      <div class="stamp" title="AI skoru (0-100)">
-        {% if lead.ai_score is not none %}
-          <span class="n {{ 'hi' if lead.ai_score >= 0.8 else 'mid' }}">{{ (lead.ai_score * 100)|round|int }}</span>
-        {% else %}<span class="n na">—</span>{% endif %}
-        <span class="t">AI skoru</span>
-        {% if lead.tier %}<span class="tier tier-{{ lead.tier }}" title="{{ tier_info[lead.tier][0] if tier_info else '' }}">{{ lead.tier }}</span>{% endif %}
+    <article class="lead k-{{ kind }}">
+      <div class="lead-top">
+        <span class="lead-kind"><i></i>{{ kind_names[kind] }} · {{ lead.source }}</span>
+        <span class="lead-flags">
+          {{ deadline_chip(lead) }}
+          {% if lead.tier %}<span class="tier tier-{{ lead.tier }}" title="{{ tier_info[lead.tier][0] if tier_info else '' }}">{{ lead.tier }}</span>{% endif %}
+        </span>
       </div>
-      <div class="ticket-body">
-        <h3 class="ticket-title"><a href="{{ lead.source_url }}" target="_blank" rel="noopener">{{ lead.title }}</a></h3>
-        <div class="ticket-meta">
-          <span>{{ kind_names[kind] }} · {{ lead.source }}</span>
-          {% if lead.entity_name and lead.entity_name not in lead.title %}<span>{{ lead.entity_name[:60] }}</span>{% endif %}
-          {% if lead.posted_at %}<span>Dərc: {{ lead.posted_at|baku_time }}</span>{% endif %}
-          {% if lead.contact_email %}<span>{{ lead.contact_email }}</span>{% endif %}
-          {% if lead.contact_phone %}<span>{{ lead.contact_phone }}</span>{% endif %}
-        </div>
-        {% if lead.ai_reason %}<p class="ticket-reason">{{ lead.ai_reason }}</p>{% endif %}
-        {% if lead.original %}<div class="dup-note muted">İlk dəfə tapılıb: <a href="{{ lead.original.source_url }}" target="_blank" rel="noopener">{{ lead.original.source }}</a></div>{% endif %}
-        {% if lead.raw_text and lead.raw_text != lead.title %}
-        <details><summary>Tam mətn</summary><div class="raw">{{ lead.raw_text[lead.title|length:]|trim|truncate(2000) }}</div></details>
-        {% endif %}
+      <h3 class="lead-title"><a href="{{ lead.source_url }}" target="_blank" rel="noopener">{{ lead.title }}<svg class="ic" aria-hidden="true"><use href="#i-out"/></svg></a></h3>
+      {% if lead.ai_reason %}
+      <p class="lead-why"><span>Neo niyə seçdi</span>{{ lead.ai_reason }}{% if lead.ai_score is not none %} <em title="AI skoru (0–100)">· uyğunluq {{ (lead.ai_score * 100)|round|int }}/100</em>{% endif %}</p>
+      {% endif %}
+      <p class="lead-meta">
+        {% if lead.entity_name and lead.entity_name not in lead.title %}<span>{{ lead.entity_name[:60] }}</span>{% endif %}
+        {% if lead.posted_at %}<span>Dərc: {{ lead.posted_at|baku_time }}</span>{% endif %}
+        {% if lead.contact_email %}<span>{{ lead.contact_email }}</span>{% endif %}
+        {% if lead.contact_phone %}<span>{{ lead.contact_phone }}</span>{% endif %}
+      </p>
+      {% if lead.original %}<p class="lead-dup">Bu lead əvvəl də tapılıb: <a href="{{ lead.original.source_url }}" target="_blank" rel="noopener">{{ lead.original.source }}</a></p>{% endif %}
+      {% if lead.raw_text and lead.raw_text != lead.title %}
+      <details class="lead-more"><summary>Tam mətni göstər</summary><div class="raw">{{ lead.raw_text[lead.title|length:]|trim|truncate(2000) }}</div></details>
+      {% endif %}
+      {% if can_review %}
+      <div class="lead-act">
+        <form method="post" action="/leads/{{ lead.dedupe_key }}/approve">
+          {{ csrf_field(request) }}
+          <button class="mc-btn mc-btn-yes" type="submit"><svg class="ic" aria-hidden="true"><use href="#i-check"/></svg>Uyğundur — fürsət yarat</button>
+        </form>
+        <form method="post" action="/leads/{{ lead.dedupe_key }}/reject">
+          {{ csrf_field(request) }}
+          <button class="mc-btn mc-btn-no" type="submit"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg>Uyğun deyil</button>
+        </form>
       </div>
-      <div class="ticket-side">
-        {{ deadline_chip(lead) }}
-        {% if can_review %}
-        <div class="ticket-actions">
-          <form method="post" action="/leads/{{ lead.dedupe_key }}/approve">
-            {{ csrf_field(request) }}
-            <button class="btn btn-approve" type="submit">Fürsət yarat</button>
-          </form>
-          <form method="post" action="/leads/{{ lead.dedupe_key }}/reject">
-            {{ csrf_field(request) }}
-            <button class="btn btn-reject" type="submit">Rədd et</button>
-          </form>
-        </div>
-        {% endif %}
-      </div>
+      {% endif %}
     </article>
     {% endfor %}
   </div>
@@ -120,7 +119,7 @@
         <td>
           <form class="inline" method="post" action="/leads/{{ lead.dedupe_key }}/restore">
             {{ csrf_field(request) }}
-            <button class="btn btn-sm" type="submit">Validasiyaya qaytar</button>
+            <button class="mc-btn mc-btn-sm" type="submit">Validasiyaya qaytar</button>
           </form>
         </td>
         {% endif %}
@@ -130,7 +129,7 @@
   </div>
 
   {% elif show_actions %}
-    <div class="empty"><b>Validasiya boşdur</b>Yeni lead-lər avtomatik scrape-dən sonra burada görünəcək.</div>
+    <div class="empty"><b>Hamısı baxılıb</b>Neo yeni lead tapanda burada görünəcək.</div>
   {% else %}
     <div class="empty"><b>Burada hələ lead yoxdur</b></div>
   {% endif %}
