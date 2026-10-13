@@ -77,6 +77,10 @@ def test_fetch_leads_keeps_buyer_post_with_contact_info():
     assert lead.contact_info.website == "https://www.linkedin.com/in/shabnam"
     assert lead.contact_info.email == "procurement@example.az"
     assert "Azeri Steel" in lead.raw_text
+    assert lead.origin_url == "https://www.linkedin.com/posts/buyer-activity-1"
+    assert lead.author.name == "Shabnam Mammadli"
+    assert lead.author.url == "https://www.linkedin.com/in/shabnam"
+    assert "İnsan Resursları" in lead.author.title
 
 
 def test_fetch_leads_skips_when_no_api_token(monkeypatch):
@@ -155,6 +159,8 @@ def test_vacancy_with_company_lunch_becomes_one_employer_lead():
     assert lead.contact_info.email == "hr@vumes.az"
     assert lead.raw_text.startswith("[SİQNAL")
     assert "https://li/p/1" in lead.raw_text
+    assert lead.origin_url == "https://li/p/1"  # paneldə "LinkedIn-də aç" — source_url şirkət saytıdır
+    assert lead.author.name == "AzVak"
 
 
 def test_vacancy_without_meal_signal_is_still_rejected():

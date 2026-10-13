@@ -197,6 +197,14 @@
 - **İstehsal növbəsi** yeni qaydalarla yenidən skorlandı: A 7 · B 60 · C 77 (əvvəl A 7 · B 136 · C 4).
 - **Mobil düzəliş:** `.main { min-width: 0 }` — grid elementi geniş məzmunla (tab paneli) ekrandan genişlənirdi.
 
+### Rədd tarixçəsi, LinkedIn linkləri, kontaktlar, AI məktub, LinkedIn şərhi (2026-10-14)
+- **Status:** Decided, kodda (miqrasiya 0008); deploy gözləyir.
+- **Rədd edilənlər** (`/leads/rejected`, tablar "İnsan rədd etdi" / "AI rədd etdi"): `leads.rejected_by` (ai/human) — köhnə `ai_score < eşik` filtri geri qaytarılıb yenidən rədd edilən lead-i AI-nin sayırdı. Hər təsdiq/rədd/qaytarma `lead_events`-ə yazılır. Rəddən dərhal sonra flash-da "Geri al". `/leads/ai_rejected` → AI tabına yönləndirir.
+- **LinkedIn linkləri:** `leads.origin_url` (əsl post) + `author_name/title/url`. İşəgötürən lead-ində `source_url` şirkət saytı qalır (dedup buna bağlıdır), post və müəllif ayrıca. Köhnə lead-lərin post linki miqrasiyada mətndəki "Elan:" sətrindən götürüldü.
+- **Kontaktlar** (`contacts`, `app/contacts.py`) — pulsuz mənbələr, yalnız validasiyaya düşən lead-lər üçün: mətndəki email/telefon (AZ formatları → +994…), v2 skorlamanın `contacts` sahəsi (yalnız mətndə adı çəkilən şəxslər — əlavə AI çağırışı yox), LinkedIn müəllifi, şirkət saytının ana + ≤3 əlaqə səhifəsi (robots.txt, run başına ≤15 sayt, `CONTACT_CRAWL=off`). İş elanı saytlarının/agentliklərin poçtu saxlanılmır. Təsdiqdə kontaktlar təşkilata bağlanır. Fürsət səhifəsində kart + əl ilə əlavə/sil. Pullu zənginləşdirmə (`source=enrichment`) — sonrakı addım.
+- **AI məktub** (`app/outreach/mail.py`): fürsətdə "AI ilə məktub yaz" → ~10 cümlə, lead-in dilində (az/ru/en, dəyişmək olur), imza avtomatik; əməkdaş düzəldib "Göndər" — Google Workspace SMTP (app password), Reply-To = əməkdaşın ünvanı. Göndəriş `outreach`-a, 3 gün sonra "cavabı yoxla" tapşırığı, mərhələ Yeni → Əlaqə saxlanılıb. Uğursuz göndəriş də yazılır.
+- **LinkedIn şərhi** (`app/outreach/linkedin_comment.py`): istifadəçi qərarı — mətn yoxlanmadan, avtomatik, bir satış hesabından, Unipile API ilə. Yalnız açar sözlə tapılan **alıcı postu** təsdiqlənəndə (işəgötürən siqnalı və şirkət səhifəsi postları yox). Qoruyucular: `LINKEDIN_AUTOCOMMENT` açarı (defolt off), gündəlik limit (10), bir posta bir şərh; xəta fürsəti bloklamır, səhifədə "Yenidən cəhd et". **Risk:** LinkedIn qaydalarına ziddir — hesabın məhdudlaşdırılma riski aşağıdır, sıfır deyil.
+
 ## Açıq suallar (hələ qərar verilməyib)
 
 ### CRM real endpoint-i

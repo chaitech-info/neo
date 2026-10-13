@@ -72,6 +72,12 @@ def no_deploy_env(monkeypatch):
                  "AI_MODEL", "AI_MODEL_V2", "AI_REASONING_EFFORT", "AI_TRIAGE_MODEL",
                  "OPENAI_API_KEY"):  # açarsız heç bir test real OpenAI-yə gedə bilməz
         monkeypatch.delenv(name, raising=False)
+    # Pipeline testləri şirkət saytlarına real sorğu göndərməsin (app/contacts.py); lazım olan test özü açır.
+    monkeypatch.setenv("CONTACT_CRAWL", "off")
+    # Ünsiyyət kanalları: heç bir test real email/LinkedIn şərhi göndərməsin.
+    for name in ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "UNIPILE_DSN", "UNIPILE_API_KEY",
+                 "UNIPILE_ACCOUNT_ID", "LINKEDIN_AUTOCOMMENT"):
+        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture(autouse=True)

@@ -141,3 +141,17 @@ Hər şey `app/sources.py`-dadır — scheduler, panel, Modal/Mac bölgüsü, `s
 5. `app/scheduler.py::SOURCE_TASKS` + `beat_schedule`-ə əlavə et (production cədvəli)
 6. Əl ilə test et (yuxarıdakı bölmə), sonra admin paneldən "Scrape indi" ilə yoxla
 7. `docs/lead-scraping-spec.md` §2 cədvəlinə və `03-site-research.md`-ə qeyd əlavə et
+
+## Ünsiyyət kanalları: Gmail və LinkedIn şərhi (2026-10-14)
+Dəyişənlər `.env.example`-dadır. Hər üç yerdə eyni olmalıdır: lokal `.env`, Vercel env (panel — məktub və təsdiqdəki şərh buradan gedir), Modal secret `neo-secrets` (yalnız `CONTACT_CRAWL` lazımdır, defolt `on`).
+
+**Gmail (Google Workspace):**
+1. Satış poçt qutusunda 2 addımlı doğrulamanı aç → Google hesabı → Security → **App passwords** → yeni açar.
+2. `SMTP_USER=<satış poçtu>`, `SMTP_PASSWORD=<app password>`, `MAIL_FROM_NAME`, `COMPANY_NAME`, `COMPANY_PHONE`, `COMPANY_SIGNATURE`.
+3. Yoxla: hər hansı fürsətdə "AI ilə məktub yaz" → öz ünvanına göndər. Xəta mətni fürsətin "Ünsiyyət" kartında görünür.
+
+**LinkedIn şərhi (Unipile):**
+1. Unipile hesabı → satış LinkedIn hesabını qoş → `UNIPILE_DSN` (məs. `api1.unipile.com:13111`), `UNIPILE_API_KEY`, `UNIPILE_ACCOUNT_ID`.
+2. `LINKEDIN_AUTOCOMMENT=on` (söndürmək: `off`), `LINKEDIN_COMMENT_DAILY_CAP=10`.
+3. Yoxla: test postunda LinkedIn lead-ini təsdiqlə → flash "LinkedIn şərhi yazıldı"; fürsət səhifəsində şərhin mətni.
+4. Problem: "Unipile xətası 401" → açar/hesab; "post nömrəsi tapılmadı" → lead-in `origin_url`-u LinkedIn post linki deyil.

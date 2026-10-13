@@ -10,7 +10,7 @@ import structlog
 from dotenv import load_dotenv
 
 load_dotenv()
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, Form, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -31,6 +31,7 @@ from app.db.migrate import upgrade_to_head
 from app.db.repository import LeadRepository
 from app import crm
 from app.crm_routes import router as crm_router
+from app.outreach import linkedin_comment
 from app.keyword_routes import router as keyword_router
 from app.locks import source_lock
 from app.pipeline import PipelineResult, reject_lead, restore_lead, run_pipeline
@@ -402,6 +403,7 @@ def leads_pending(request: Request, tier: str = "", user: User = Depends(REQUIRE
     try:
         repo = LeadRepository(session)
         all_leads = sorted(repo.list_by_status("pending_review"), key=tier_sort_key)
+        contact_counts = repo.contact_counts([lead.dedupe_key for lead in all_leads])
     finally:
         session.close()
     tier_counts = {t: sum(1 for lead in all_leads if lead.tier == t) for t in TIER_ORDER}
@@ -417,6 +419,7 @@ def leads_pending(request: Request, tier: str = "", user: User = Depends(REQUIRE
             "heading": "Validasiya",
             "subtitle": "AI-nin satış fürsəti saydığı lead-lər, A → B → C sırası ilə. Uyğundursa fürsət yarat — ilk tapşırıq avtomatik açılır; deyilsə rədd et.",
             "leads": leads,
+            "contact_counts": contact_counts,
             "show_actions": True,
             "tier": tier,
             "tier_counts": tier_counts,
@@ -425,12 +428,28 @@ def leads_pending(request: Request, tier: str = "", user: User = Depends(REQUIRE
     )
 
 
-@app.get("/leads/ai_rejected")
-def leads_ai_rejected(request: Request, user: User = Depends(REQUIRE["viewer"])):
+REJECTED_TABS = {
+    "human": ("İnsan rədd etdi", "Komandanın \"Uyğun deyil\" dediyi lead-lər, ən təzəsi yuxarıda. "
+              "Səhvən basılıbsa, Validasiyaya qaytar."),
+    "ai": ("AI rədd etdi", f"AI skoru {int(SCORE_THRESHOLD * 100)}-dən aşağı olan lead-lər. "
+           "Fürsət görsən, Validasiyaya qaytar."),
+}
+
+
+@app.get("/leads/rejected")
+def leads_rejected(request: Request, by: str = "human", user: User = Depends(REQUIRE["viewer"])):
+    by = by if by in REJECTED_TABS else "human"
     session = SessionLocal()
     try:
         repo = LeadRepository(session)
-        leads = repo.list_ai_rejected(SCORE_THRESHOLD)
+        leads = repo.list_rejected(by)
+        counts = repo.count_rejected()
+        if by == "human":
+            from sqlalchemy import select
+
+            reviewers = {u.id: u.full_name for u in session.execute(select(User)).scalars()}
+        else:
+            reviewers = {}
     finally:
         session.close()
 
@@ -438,17 +457,23 @@ def leads_ai_rejected(request: Request, user: User = Depends(REQUIRE["viewer"]))
         request, "leads.html",
         {
             "request": request,
-            "active": "ai_rejected",
-            "heading": "AI rədd etdi",
-            "subtitle": (
-                f"AI skoru {int(SCORE_THRESHOLD * 100)}-dən aşağı olan lead-lər. "
-                "Fürsət görsən, Validasiyaya qaytar."
-            ),
+            "active": "rejected",
+            "heading": "Rədd edilənlər",
+            "subtitle": REJECTED_TABS[by][1],
             "leads": leads,
             "show_actions": False,
             "show_restore": True,
+            "rejected_by": by,
+            "rejected_tabs": {k: (v[0], counts[k]) for k, v in REJECTED_TABS.items()},
+            "reviewers": reviewers,
+            "back_to": f"/leads/rejected?by={by}",
         },
     )
+
+
+@app.get("/leads/ai_rejected")
+def leads_ai_rejected():
+    return RedirectResponse(url="/leads/rejected?by=ai", status_code=303)
 
 
 @app.get("/leads")
@@ -469,6 +494,8 @@ def leads_all(request: Request, user: User = Depends(REQUIRE["viewer"])):
             "subtitle": "Son 200 lead, bütün statuslar.",
             "leads": leads,
             "show_actions": False,
+            "show_restore": True,  # yalnız rədd edilmiş lead-lərdə görünür
+            "back_to": "/leads",
         },
     )
 
@@ -483,19 +510,37 @@ def approve_lead(dedupe_key: str, user: User = Depends(REQUIRE["sales"])):
     try:
         conversion = crm.convert_lead(session, dedupe_key, user.id)
         opp_id = conversion.opportunity.id
+        # LinkedIn alıcı postu → avtomatik qısa şərh (app/outreach/linkedin_comment.py). Xəta fürsəti bloklamır.
+        comment = linkedin_comment.auto_comment(session, conversion.opportunity, user_id=user.id)
     except crm.CrmError as exc:
         return RedirectResponse(url=f"/leads/pending_review?err={quote(str(exc))}", status_code=303)
     finally:
         session.close()
 
-    msg = quote(f"Fürsət #{opp_id} və ilk tapşırıq yaradıldı")
+    note = ""
+    if comment is not None:
+        note = ". LinkedIn şərhi yazıldı" if comment.status == "sent" else ". LinkedIn şərhi yazılmadı — fürsət səhifəsinə bax"
+    msg = quote(f"Fürsət #{opp_id} və ilk tapşırıq yaradıldı{note}")
     return RedirectResponse(url=f"/leads/pending_review?msg={msg}&opp={opp_id}", status_code=303)
 
 
+def _back(next_url: str) -> str:
+    """Formdan gələn qayıdış ünvanı — yalnız paneldaxili lead səhifələri (açıq yönləndirmə olmasın)."""
+    path = next_url.split("?", 1)[0]
+    if path in ("/leads/pending_review", "/leads/rejected", "/leads") and "//" not in next_url:
+        return next_url
+    return "/leads/rejected"
+
+
+def _with(url: str, **params: str) -> str:
+    return url + ("&" if "?" in url else "?") + "&".join(f"{k}={quote(v)}" for k, v in params.items())
+
+
 @app.post("/leads/{dedupe_key}/restore", dependencies=[Depends(verify_csrf)])
-def restore_lead_route(dedupe_key: str, user: User = Depends(REQUIRE["sales"])):
+def restore_lead_route(dedupe_key: str, next: str = Form("/leads/rejected"), user: User = Depends(REQUIRE["sales"])):
+    back = _back(next)
     if not dedupe_key or len(dedupe_key) != 64:
-        return RedirectResponse(url="/leads/ai_rejected?err=Yanlış lead ID", status_code=303)
+        return RedirectResponse(url=_with(back, err="Yanlış lead ID"), status_code=303)
 
     session = SessionLocal()
     try:
@@ -504,11 +549,8 @@ def restore_lead_route(dedupe_key: str, user: User = Depends(REQUIRE["sales"])):
         session.close()
 
     if not ok:
-        return RedirectResponse(
-            url="/leads/ai_rejected?err=Lead tapılmadı və ya artıq rədd statusunda deyil",
-            status_code=303,
-        )
-    return RedirectResponse(url="/leads/ai_rejected?msg=Lead Validasiyaya qaytarıldı", status_code=303)
+        return RedirectResponse(url=_with(back, err="Lead tapılmadı və ya artıq rədd statusunda deyil"), status_code=303)
+    return RedirectResponse(url=_with(back, msg="Lead Validasiyaya qaytarıldı"), status_code=303)
 
 
 @app.post("/leads/{dedupe_key}/reject", dependencies=[Depends(verify_csrf)])
@@ -527,4 +569,5 @@ def reject_lead_route(dedupe_key: str, user: User = Depends(REQUIRE["sales"])):
             url="/leads/pending_review?err=Lead tapılmadı və ya artıq emal olunub (yalnız pending_review rədd edilə bilər)",
             status_code=303,
         )
-    return RedirectResponse(url="/leads/pending_review?msg=Lead rədd edildi", status_code=303)
+    # undo=<key> → flash-da "Geri al" düyməsi (base.html), səhvən basılanı bir kliklə qaytarmaq üçün.
+    return RedirectResponse(url=f"/leads/pending_review?msg={quote('Lead rədd edildi')}&undo={dedupe_key}", status_code=303)

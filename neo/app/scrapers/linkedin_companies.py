@@ -112,6 +112,7 @@ class LinkedInCompaniesScraper(BaseScraper):
                 raw_text=f"{content}\n\n— Şirkət səhifəsi: {name} (LinkedIn)",
                 entity_name=name,
                 contact_info=ContactInfo(website=author.get("linkedinUrl")),
+                origin_url=item["linkedinUrl"],
                 category=LeadCategory.corporate,
                 location="Azərbaycan",
                 posted_at=_parse_posted_at((item.get("postedAt") or {}).get("date")),

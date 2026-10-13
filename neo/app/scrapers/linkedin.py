@@ -6,7 +6,7 @@ from datetime import datetime
 
 import structlog
 
-from app.models import ContactInfo, LeadCategory, RawLead
+from app.models import Author, ContactInfo, LeadCategory, RawLead
 from app.scrapers.base import BaseScraper
 from app.scrapers.employer_signal import (
     EMAIL_RE,
@@ -182,6 +182,7 @@ class LinkedInScraper(BaseScraper):
             author_info = author.get("info") or ""
             posted_at = _parse_posted_at((item.get("postedAt") or {}).get("date"))
             email = EMAIL_RE.search(content)
+            person = Author(name=author_name or None, title=author_info or None, url=author.get("linkedinUrl"))
 
             reason = rejection_reason(content, author_name, author_info)
             if reason == "vacancy" and mentions_company_meal(content):
@@ -192,7 +193,7 @@ class LinkedInScraper(BaseScraper):
                     continue
                 if employer and employer[1] not in seen_employers:
                     seen_employers.add(employer[1])
-                    leads.append(self._employer_lead(employer, url, content, email, posted_at))
+                    leads.append(self._employer_lead(employer, url, content, email, posted_at, person))
                     employer_leads += 1
                     continue
             if reason:
@@ -212,6 +213,8 @@ class LinkedInScraper(BaseScraper):
                         website=author.get("linkedinUrl"),
                         email=email.group(0) if email else None,
                     ),
+                    origin_url=url,
+                    author=person,
                     category=LeadCategory.corporate,
                     location="Azərbaycan",
                     posted_at=posted_at,
@@ -227,7 +230,7 @@ class LinkedInScraper(BaseScraper):
         return leads
 
     @staticmethod
-    def _employer_lead(employer, post_url, content, email, posted_at) -> RawLead:
+    def _employer_lead(employer, post_url, content, email, posted_at, author: Author | None = None) -> RawLead:
         name, company_url = employer
         return RawLead(
             source="linkedin",
@@ -241,6 +244,9 @@ class LinkedInScraper(BaseScraper):
                 website=company_url,
                 email=email.group(0) if email else None,
             ),
+            # Post linki ayrıca (paneldə "LinkedIn-də aç"); elanı yazan çox vaxt HR-dır — kontakt.
+            origin_url=post_url,
+            author=author,
             category=LeadCategory.corporate,
             location="Azərbaycan",
             posted_at=posted_at,

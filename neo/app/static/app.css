@@ -860,3 +860,27 @@ details[open] summary { margin-bottom: 6px; }
 
 /* .shell grid-dir: məzmun (geniş tab paneli və s.) əsas sütunu ekrandan genişləndirməsin */
 .main { min-width: 0; }
+
+/* LinkedIn post / müəllif linkləri (lead kartları, fürsət səhifəsi) */
+.lead-links { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 4px 0 6px; font-size: 13px; color: var(--tx2); }
+.lead-links a { display: inline-flex; align-items: center; gap: 4px; color: var(--run); text-decoration: none; }
+.lead-links a:hover { text-decoration: underline; }
+.lead-links .ic { width: 12px; height: 12px; }
+
+/* Fürsət səhifəsi: kontaktlar */
+.ct-list { list-style: none; margin: 0; padding: 0; }
+.ct { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+.ct:first-child { border-top: 0; }
+.ct-main { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.ct-role { color: var(--tx2); font-size: 13px; }
+.ct-ways { display: flex; flex-wrap: wrap; gap: 4px 12px; width: 100%; font-size: 13px; }
+.ct-ways a { color: var(--run); text-decoration: none; overflow-wrap: anywhere; }
+.ct-ways a:hover { text-decoration: underline; }
+.ct-src { color: var(--tx3); font-size: 12px; white-space: nowrap; }
+.ct form { margin: 0; }
+
+/* Fürsət səhifəsi: AI məktub */
+.em-form textarea { width: 100%; min-height: 320px; resize: vertical; font: inherit; line-height: 1.5; }
+.em-act { display: flex; gap: 10px; align-items: center; margin-top: 12px; }
+.em-start { align-items: end; }
+.em-history { margin-top: 14px; }

@@ -10,6 +10,18 @@
                        "duplicate": "Dublikat", "sent_to_crm": "CRM-ə göndərilib", "new": "Yeni"} %}
 {% set status_badge = {"pending_review": "pending", "converted": "sent", "sent_to_crm": "sent", "rejected": "rejected"} %}
 
+{# LinkedIn: post və müəllif profili. İşəgötürən lead-ində başlıq şirkət saytına aparır, post isə ayrıca;
+   LinkedIn postunda başlıq da posta aparır, amma "LinkedIn-də aç" açıq görünsün deyə yenə göstərilir. #}
+{% macro origin_links(lead) %}
+  {% set show_origin = lead.origin_url and (lead.origin_url != lead.source_url or 'linkedin.com' in lead.origin_url) %}
+  {% if show_origin or lead.author_url %}
+  <p class="lead-links">
+    {% if show_origin %}<a href="{{ lead.origin_url }}" target="_blank" rel="noopener">{{ 'LinkedIn-də aç' if 'linkedin.com' in lead.origin_url else 'Elanı aç' }}<svg class="ic" aria-hidden="true"><use href="#i-out"/></svg></a>{% endif %}
+    {% if lead.author_url %}<a href="{{ lead.author_url }}" target="_blank" rel="noopener">{{ lead.author_name or 'Müəllif' }} — profil<svg class="ic" aria-hidden="true"><use href="#i-out"/></svg></a>{% if lead.author_title %}<span>{{ lead.author_title[:90] }}</span>{% endif %}{% endif %}
+  </p>
+  {% endif %}
+{% endmacro %}
+
 {% macro deadline_chip(lead) %}
   {% if lead.deadline_at %}
     {% set left = lead.deadline_at - utcnow() %}
@@ -33,6 +45,14 @@
     <h1 class="mc-title">{{ heading }}</h1>
     <p class="ld-sub">{{ subtitle }}{% if leads %} <b>{{ leads|length }} lead.</b>{% endif %}</p>
   </header>
+
+  {% if rejected_tabs %}
+  <div class="ld-filter" role="group" aria-label="Kim rədd edib">
+    {% for key, (label, n) in rejected_tabs.items() %}
+    <a class="{{ 'on' if rejected_by == key else '' }}" href="/leads/rejected?by={{ key }}">{{ label }} <i>{{ n }}</i></a>
+    {% endfor %}
+  </div>
+  {% endif %}
 
   {% if tier_counts %}
   <div class="ld-filter" role="group" aria-label="Kateqoriya">
@@ -60,6 +80,7 @@
         </span>
       </div>
       <h3 class="lead-title"><a href="{{ lead.source_url }}" target="_blank" rel="noopener">{{ lead.title }}<svg class="ic" aria-hidden="true"><use href="#i-out"/></svg></a></h3>
+      {{ origin_links(lead) }}
       {% if lead.ai_reason %}
       <p class="lead-why"><span>Neo niyə seçdi</span>{{ lead.ai_reason }}{% if lead.ai_score is not none %} <em title="AI skoru (0–100)">· uyğunluq {{ (lead.ai_score * 100)|round|int }}/100</em>{% endif %}</p>
       {% endif %}
@@ -68,6 +89,7 @@
         {% if lead.posted_at %}<span>Dərc: {{ lead.posted_at|baku_time }}</span>{% endif %}
         {% if lead.contact_email %}<span>{{ lead.contact_email }}</span>{% endif %}
         {% if lead.contact_phone %}<span>{{ lead.contact_phone }}</span>{% endif %}
+        {% if contact_counts and contact_counts.get(lead.dedupe_key, 0) > 1 %}<span title="Təsdiqləndikdən sonra fürsət səhifəsində hamısı görünür">{{ contact_counts[lead.dedupe_key] }} kontakt</span>{% endif %}
       </p>
       {% if lead.original %}<p class="lead-dup">Bu lead əvvəl də tapılıb: <a href="{{ lead.original.source_url }}" target="_blank" rel="noopener">{{ lead.original.source }}</a></p>{% endif %}
       {% if lead.raw_text and lead.raw_text != lead.title %}
@@ -112,16 +134,18 @@
         </span>
       </div>
       <h3 class="lr-title"><a href="{{ lead.source_url }}" target="_blank" rel="noopener">{{ lead.title[:160] }}</a></h3>
+      {{ origin_links(lead) }}
       {% if lead.ai_reason %}<p class="lr-why"><span>AI-nin qeydi</span>{{ lead.ai_reason }}</p>{% endif %}
       {% if lead.status == 'converted' and lead.crm_opportunity_id %}<p class="lead-dup"><a href="/opportunities/{{ lead.crm_opportunity_id }}">Fürsət #{{ lead.crm_opportunity_id }} →</a></p>{% endif %}
       {% if lead.original %}<p class="lead-dup">Bu lead əvvəl də tapılıb: <a href="{{ lead.original.source_url }}" target="_blank" rel="noopener">{{ lead.original.source }}</a></p>{% endif %}
       {% if lead.raw_text and lead.raw_text != lead.title %}
       <details class="lead-more"><summary>Tam mətni göstər</summary><div class="raw">{{ lead.raw_text[lead.title|length:]|trim|truncate(1500) }}</div></details>
       {% endif %}
-      {% if can_review and show_restore %}
+      {% if rejected_by == 'human' and lead.reviewed_at %}<p class="lead-dup">Rədd etdi: {{ reviewers.get(lead.reviewed_by_id, '—') }} · {{ lead.reviewed_at|baku_time }}</p>{% endif %}
+      {% if can_review and show_restore and lead.status == 'rejected' %}
       <div class="lr-act">
         <form method="post" action="/leads/{{ lead.dedupe_key }}/restore">
-          {{ csrf_field(request) }}
+          {{ csrf_field(request) }}<input type="hidden" name="next" value="{{ back_to or '/leads/rejected' }}">
           <button class="mc-btn mc-btn-sm" type="submit" title="Bu lead-i təsdiq növbəsinə geri qaytar">Validasiyaya qaytar</button>
         </form>
       </div>
