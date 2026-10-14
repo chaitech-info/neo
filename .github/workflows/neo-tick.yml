@@ -1,0 +1,29 @@
+# Neo scraping cədvəli: hər 10 dəqiqədən bir Modal-dakı trigger endpoint-inə {"tick": true}.
+# Modal workspace-in 5 cron limiti dolu olduğu üçün (2026-10-14) cron burada işləyir; tick özü son
+# çağırışdan bəri buraxılan vaxtları da tutur (modal_app.py::catchup_window), GitHub-un gecikməsi problem deyil.
+# Secrets: NEO_TRIGGER_URL (Modal trigger ünvanı), NEO_TRIGGER_TOKEN (neo-secrets-dəki TRIGGER_TOKEN).
+# Qeyd: GitHub 60 gün commit olmayan repoda planlı workflow-ları dayandırır — e-poçtla xəbər verir.
+name: neo-tick
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: neo-tick
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Trigger Modal tick
+        env:
+          URL: ${{ secrets.NEO_TRIGGER_URL }}
+          TOKEN: ${{ secrets.NEO_TRIGGER_TOKEN }}
+        run: |
+          curl -fsS --retry 3 --retry-delay 5 -m 30 -X POST "$URL" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            -d '{"tick": true}'
