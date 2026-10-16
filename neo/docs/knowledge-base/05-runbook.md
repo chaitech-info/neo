@@ -141,3 +141,24 @@ Hər şey `app/sources.py`-dadır — scheduler, panel, Modal/Mac bölgüsü, `s
 5. `app/scheduler.py::SOURCE_TASKS` + `beat_schedule`-ə əlavə et (production cədvəli)
 6. Əl ilə test et (yuxarıdakı bölmə), sonra admin paneldən "Scrape indi" ilə yoxla
 7. `docs/lead-scraping-spec.md` §2 cədvəlinə və `03-site-research.md`-ə qeyd əlavə et
+
+## Ünsiyyət kanalları: Gmail və LinkedIn şərhi (2026-10-14)
+Dəyişənlər `.env.example`-dadır. Hər üç yerdə eyni olmalıdır: lokal `.env`, Vercel env (panel — məktub və təsdiqdəki şərh buradan gedir), Modal secret `neo-secrets` (yalnız `CONTACT_CRAWL` lazımdır, defolt `on`).
+
+**Gmail (Google Workspace):**
+1. Satış poçt qutusunda 2 addımlı doğrulamanı aç → Google hesabı → Security → **App passwords** → yeni açar.
+2. `SMTP_USER=<satış poçtu>`, `SMTP_PASSWORD=<app password>`, `MAIL_FROM_NAME`, `COMPANY_NAME`, `COMPANY_PHONE`, `COMPANY_SIGNATURE`.
+3. Yoxla: hər hansı fürsətdə "AI ilə məktub yaz" → öz ünvanına göndər. Xəta mətni fürsətin "Ünsiyyət" kartında görünür.
+
+**LinkedIn şərhi (Unipile):**
+1. Unipile hesabı → satış LinkedIn hesabını qoş → `UNIPILE_DSN` (məs. `api1.unipile.com:13111`), `UNIPILE_API_KEY`, `UNIPILE_ACCOUNT_ID`.
+2. `LINKEDIN_AUTOCOMMENT=on` (söndürmək: `off`), `LINKEDIN_COMMENT_DAILY_CAP=10`.
+3. Yoxla: test postunda LinkedIn lead-ini təsdiqlə → flash "LinkedIn şərhi yazıldı"; fürsət səhifəsində şərhin mətni.
+4. Problem: "Unipile xətası 401" → açar/hesab; "post nömrəsi tapılmadı" → lead-in `origin_url`-u LinkedIn post linki deyil.
+
+## Modal köçürülməsi və GitHub Actions tick-i (2026-10-14)
+- Scraper indi **`emilabdurahmanli05`** Modal workspace-indədir (köhnə `emil-abdurahmanli-project` app-ı 2026-10-14 10:00 Bakı vaxtından bəri işləmir). Trigger: `https://emilabdurahmanli05--neo-scraper-trigger.us-east.modal.run` (Vercel `MODAL_TRIGGER_URL`).
+- Bu workspace-də 5 cron limiti doludur (flutter-study-bot, panelflo-bot) — deploy **cron-suz**: `NEO_MODAL_CRON=off .venv/bin/modal deploy modal_app.py` (default profil; `MODAL_PROFILE=neo` lazım deyil).
+- Cədvəli `.github/workflows/neo-tick.yml` işlədir: hər 10 dəq `{"tick": true}` → `tick` son çağırışdan bəri bütün vaxtları tutur (`modal.Dict` `neo-tick-state`, ən çox 2 saat). GitHub secrets: `NEO_TRIGGER_URL`, `NEO_TRIGGER_TOKEN`. Əl ilə: Actions → neo-tick → Run workflow. GitHub 60 gün commit olmayan repoda planlı workflow-u dayandırır.
+- Vercel layihəsinin Root Directory-si `neo`-dur: deploy repo kökündən (`~/Documents/neo`) — `neo/neo`-dan "Root Directory does not exist" xətası verir.
+- Mac worker (LOCAL_ONLY mənbələr): `.env`-də `MODAL_PROFILE` yeni workspace-in profilinə (bu Mac-də `emilabdurahmanli05`) uyğun olmalıdır, yoxsa paneldən "Scrape indi" etender/fed/oxu/report sorğuları köhnə növbəyə gedər.

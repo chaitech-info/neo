@@ -94,6 +94,34 @@ def test_modal_trigger_checks_token_and_sources(monkeypatch):
     assert spawned == [("report", "scrape_all"), ("oxu", "scrape_all")]
 
 
+def test_modal_trigger_tick_requires_token(monkeypatch):
+    """GitHub Actions cron-u (Modal cron limiti dolu workspace) → {"tick": true}."""
+    from app import triggers
+
+    monkeypatch.setenv("TRIGGER_TOKEN", "t0k")
+    ticks = []
+    assert triggers.handle({"tick": True}, "Bearer wrong", set(), print, on_tick=lambda: ticks.append(1))[0] == 401
+    assert triggers.handle({"tick": True}, "Bearer t0k", set(), print, on_tick=lambda: ticks.append(1)) == (200, {"tick": True})
+    assert triggers.handle({"tick": True}, "Bearer t0k", set(), print)[0] == 400
+    assert ticks == [1]
+
+
+def test_tick_catchup_window_covers_missed_runs():
+    import pytest
+
+    pytest.importorskip("modal")
+    from datetime import datetime
+
+    import modal_app
+
+    now = datetime(2026, 10, 14, 12, 31)
+    assert modal_app.catchup_window(now, None) == 10
+    assert modal_app.catchup_window(now, "2026-10-14T12:21:00") == 10
+    assert modal_app.catchup_window(now, "2026-10-14T12:01:00") == 30   # GitHub bir çağırışı buraxdı
+    assert modal_app.catchup_window(now, "2026-10-14T12:31:00") == 0    # bu dəqiqə artıq işlənib
+    assert modal_app.catchup_window(now, "2026-10-13T12:31:00") == 120  # uzun fasilə — limit
+
+
 def test_modal_trigger_refuses_everything_without_token(monkeypatch):
     from app import triggers
 

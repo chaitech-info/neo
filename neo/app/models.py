@@ -47,6 +47,14 @@ class ContactInfo(BaseModel):
     website: str | None = None
 
 
+class Author(BaseModel):
+    """Postun müəllifi (LinkedIn) — kontakt şəxs kimi də saxlanılır."""
+
+    name: str | None = None
+    title: str | None = None  # LinkedIn headline
+    url: str | None = None  # profil linki
+
+
 class RawLead(BaseModel):
     """Bir scraper-in qaytardığı vahid format. Bax: sənəd §4 Data Model."""
 
@@ -57,6 +65,9 @@ class RawLead(BaseModel):
 
     entity_name: str | None = None
     contact_info: ContactInfo | None = None
+    # Əsl post/elan linki, source_url-dan fərqlidirsə (məs. işəgötürən lead-i: source_url = şirkət saytı).
+    origin_url: str | None = None
+    author: Author | None = None
     category: LeadCategory = LeadCategory.other
     location: str | None = None
 
@@ -68,6 +79,9 @@ class RawLead(BaseModel):
     ai_reason: str | None = None
     tier: str | None = None  # A | B | C (v2), rədd edilənlərdə None
     status: LeadStatus = LeadStatus.new
+    # AI-nin mətndən çıxardığı kontakt şəxslər [{name, role, email, phone}] — bazada `contacts`
+    # cədvəlinə yazılır (app/contacts.py), leads sütunu deyil.
+    people: list[dict] = Field(default_factory=list)
 
     def dedupe_key(self) -> str:
         """source + source_url üzrə hash. Sənəd §4-dəki deduplication qaydası."""

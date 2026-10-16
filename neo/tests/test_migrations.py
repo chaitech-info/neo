@@ -11,7 +11,7 @@ from app.scrapers.base import NEWS_KEYWORDS, TENDER_KEYWORDS
 
 CRM_TABLES = {
     "roles", "users", "sources", "scrape_runs", "interest_areas", "keywords",
-    "organizations", "tenders", "opportunities", "tasks",
+    "organizations", "tenders", "opportunities", "tasks", "lead_events", "contacts", "outreach",
 }
 NEW_LEAD_COLUMNS = {
     "deadline_at", "organization_id", "tender_id", "duplicate_of", "ai_model", "reviewed_by_id", "reviewed_at",
@@ -45,7 +45,7 @@ def test_fresh_database_gets_full_schema_and_seed(engine):
 
     tables = set(inspect(engine).get_table_names())
     assert CRM_TABLES | {"leads", "alembic_version"} <= tables
-    assert _version(engine) == "0008"
+    assert _version(engine) == "0009"
     assert "items_fetched" in {c["name"] for c in inspect(engine).get_columns("scrape_runs")}
     with engine.connect() as c:
         assert c.execute(text("SELECT code FROM roles ORDER BY code")).scalars().all() == [
@@ -66,7 +66,7 @@ def test_legacy_database_is_upgraded_without_data_loss(engine):
     upgrade_to_head(engine)
     upgrade_to_head(engine)  # ikinci dəfə — heç nə etməməlidir
 
-    assert _version(engine) == "0008"
+    assert _version(engine) == "0009"
     cols = {c["name"] for c in inspect(engine).get_columns("leads")}
     assert NEW_LEAD_COLUMNS <= cols
     with engine.connect() as c:
@@ -119,3 +119,23 @@ def test_tier_backfilled_from_reason_prefix(engine):
     upgrade_to_head(engine)
     with engine.connect() as c:
         assert c.execute(text("SELECT tier, ai_reason FROM leads")).one() == ("B", "Zavod nahar verir")
+
+
+def test_0008_backfills_rejected_by_and_linkedin_post_link(engine):
+    with engine.begin() as c:
+        command.upgrade(alembic_config(c), "0007")
+        c.execute(text(
+            "INSERT INTO users (id, email, full_name, password_hash, role_code, is_active, created_at) "
+            "VALUES (1, 'a@x.az', 'A', 'h', 'admin', 1, '2026-10-01 00:00:00')"))
+        c.execute(text(
+            "INSERT INTO leads (dedupe_key, source, source_url, title, raw_text, category, scraped_at, status, reviewed_by_id) "
+            "VALUES ('ai','oxu','https://o/1','T','x','event','2026-10-05 10:00:00','rejected',NULL),"
+            "('hu','oxu','https://o/2','T','x','event','2026-10-05 10:00:00','rejected',1),"
+            "('li','linkedin','https://vumes.az','T','[SİQNAL: nahar]\nElan: https://www.linkedin.com/posts/x-123\n\nmətn',"
+            "'corporate','2026-10-05 10:00:00','pending_review',NULL)"))
+    upgrade_to_head(engine)
+    with engine.connect() as c:
+        rows = dict(c.execute(text("SELECT dedupe_key, rejected_by FROM leads")).all())
+        origin = c.execute(text("SELECT origin_url FROM leads WHERE dedupe_key='li'")).scalar()
+    assert rows == {"ai": "ai", "hu": "human", "li": None}
+    assert origin == "https://www.linkedin.com/posts/x-123"

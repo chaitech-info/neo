@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 import structlog
 from sqlalchemy.orm import Session
 
+from app import contacts
 from app.ai_filter import AIFilter
 from app.ai_scoring import StructuredAIFilter
 from app.db.models import ScrapeRun
@@ -23,6 +24,8 @@ log = structlog.get_logger()
 INTERRUPTED_AFTER = timedelta(hours=2)
 # Bu müddətdən köhnə `new` lead = əvvəlki run AI mərhələsində qırılıb.
 UNSCORED_AFTER = timedelta(minutes=30)
+# Bir run-da ən çox neçə şirkət saytı kontakt üçün oxunsun (hər biri ~1-4 sorğu, 10 san limit).
+MAX_SITE_CRAWLS = 15
 
 
 @dataclass
@@ -39,6 +42,7 @@ class PipelineResult:
     fetched: int = 0          # filtrdən ƏVVƏL saytdan gələn elan (0 = sayt/selector sınıb ola bilər)
     recovered: int = 0        # əvvəlki qırılmış run-dan skorsuz qalan lead-lər, indi skorlandı
     story_duplicates: int = 0  # eyni şirkət/hekayə artıq validasiyadadır — `duplicate` (app/story_dedup.py)
+    contacts: int = 0         # validasiyaya düşən lead-lər üçün yazılan yeni kontaktlar (app/contacts.py)
 
     def summary(self) -> str:
         """Məs. "3 yeni lead — 1 validasiyaya, 2 AI rədd etdi" (+ dublikatlar)."""
@@ -164,6 +168,8 @@ def _run(scraper_cls: type[BaseScraper], session: Session) -> PipelineResult:
         log.info("pipeline_no_new_leads", source=scraper_cls.source_name)
         return result
 
+    crawler = contacts.WebsiteContacts() if os.environ.get("CONTACT_CRAWL", "on") != "off" else None
+    crawls = 0
     for lead in ai_filter.score_batch(to_score):
         repo.update_after_scoring(lead.dedupe_key(), lead, ai_model=scorer_label(ai_filter))
         if lead.status.value != "pending_review":
@@ -172,8 +178,19 @@ def _run(scraper_cls: type[BaseScraper], session: Session) -> PipelineResult:
         record = repo.get(lead.dedupe_key())
         if record is not None and mark_story_duplicate(session, record):
             result.story_duplicates += 1
-        else:
-            result.pending += 1
+            continue
+        result.pending += 1
+        if record is not None:
+            # Kontaktlar yalnız validasiyaya düşənlər üçün; sayt oxuması run başına məhdud (vaxt).
+            use_crawler = crawler if crawls < MAX_SITE_CRAWLS else None
+            crawls += bool(use_crawler and contacts.crawlable(record.contact_website))
+            try:
+                result.contacts += contacts.save_contacts(
+                    session, record, contacts.collect(record, lead.people, use_crawler))
+                session.commit()
+            except Exception:
+                session.rollback()
+                log.warning("contacts_failed", source=scraper_cls.source_name, url=record.source_url, exc_info=True)
 
     log.info(
         "pipeline_completed",

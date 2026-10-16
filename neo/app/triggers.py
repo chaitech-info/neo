@@ -45,11 +45,18 @@ def request(keys: list[str], trigger: str) -> int:
 
 
 def handle(payload: dict, authorization: str | None, known: set[str],
-           spawn: Callable[[str, str], None]) -> tuple[int, dict]:
-    """Modal tərəfi (endpoint-in məntiqi, test üçün ayrıca). (status, cavab)."""
+           spawn: Callable[[str, str], None], on_tick: Callable[[], object] | None = None) -> tuple[int, dict]:
+    """Modal tərəfi (endpoint-in məntiqi, test üçün ayrıca). (status, cavab).
+    `{"tick": true}` — planlı scrape-in dispatcher-i (Modal cron-u əvəzinə GitHub Actions çağırır)."""
     token = os.environ.get("TRIGGER_TOKEN") or ""
     if not token or not hmac.compare_digest(authorization or "", f"Bearer {token}"):
         return 401, {"error": "unauthorized"}
+    if payload.get("tick") is True:
+        if on_tick is None:
+            return 400, {"error": "tick not supported"}
+        on_tick()
+        log.info("trigger_tick")
+        return 200, {"tick": True}
     trigger = payload.get("trigger")
     sources = payload.get("sources")
     if trigger not in TRIGGERS or not isinstance(sources, list):

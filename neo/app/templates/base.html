@@ -46,7 +46,7 @@
     <div class="nav-group">
       <h4>Toplama</h4>
       <a href="/" class="{{ 'active' if active == 'dashboard' else '' }}">Mənbələr</a>
-      <a href="/leads/ai_rejected" class="{{ 'active' if active == 'ai_rejected' else '' }}">AI rədd etdi</a>
+      <a href="/leads/rejected" class="{{ 'active' if active == 'rejected' else '' }}">Rədd edilənlər</a>
       <a href="/leads" class="{{ 'active' if active == 'all' else '' }}">Bütün lead-lər</a>
       <a href="/logs" class="{{ 'active' if active == 'logs' else '' }}">Loglar</a>
     </div>
@@ -78,7 +78,15 @@
     <main class="{{ 'main' if current else 'auth-wrap' }}{% if current %} {% block main_class %}{% endblock %}{% endif %}">
       {% if request.query_params.get('msg') %}
         {% set opp_link = request.query_params.get('opp') %}
-        <div class="flash" role="status">{{ request.query_params.get('msg') }}{% if opp_link and opp_link.isdigit() %} · <a href="/opportunities/{{ opp_link }}">Fürsəti aç</a>{% endif %}</div>
+        {% set undo = request.query_params.get('undo', '') %}
+        <div class="flash" role="status">{{ request.query_params.get('msg') }}{% if opp_link and opp_link.isdigit() %} · <a href="/opportunities/{{ opp_link }}">Fürsəti aç</a>{% endif %}
+          {% if undo|length == 64 and undo.isalnum() and current and has_role(current, 'sales') %}
+          <form class="flash-undo" style="display:inline;margin-left:.5rem" method="post" action="/leads/{{ undo }}/restore">
+            {{ csrf_field(request) }}<input type="hidden" name="next" value="/leads/pending_review">
+            <button class="btn btn-sm" type="submit">Geri al</button>
+          </form>
+          {% endif %}
+        </div>
       {% endif %}
       {% if request.query_params.get('err') %}
         <div class="flash error" role="alert">{{ request.query_params.get('err') }}</div>

@@ -13,10 +13,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.db.models import LOST_REASONS, LeadRecord, Opportunity, Task
+from app.db.models import LOST_REASONS, Contact, LeadRecord, Opportunity, Outreach, Task
+from app.db.repository import record_event
 from app.tenders import extract_voen, organization_for
 
 STAGE_NAMES = {
@@ -144,6 +145,11 @@ def convert_lead(session: Session, dedupe_key: str, user_id: int | None) -> Conv
     )
     session.add(task)
 
+    if lead.organization_id:
+        # Validasiyada toplanmış kontaktlar təşkilata bağlanır — eyni şirkətin növbəti fürsətində də görünsün.
+        session.execute(update(Contact).where(Contact.lead_key == lead.dedupe_key, Contact.organization_id.is_(None))
+                        .values(organization_id=lead.organization_id))
+    record_event(session, lead, "approve", "converted", user_id, note=f"Fürsət #{opp.id}")
     lead.status = "converted"
     lead.crm_opportunity_id = str(opp.id)
     lead.reviewed_by_id = user_id
@@ -180,6 +186,31 @@ def change_stage(session: Session, opp: Opportunity, stage: str,
     opp.stage = stage
     opp.updated_at = _now()
     session.commit()
+
+
+EMAIL_FOLLOW_UP = timedelta(days=3)
+
+
+def email_sent(session: Session, opp: Opportunity, *, to: str, subject: str, body: str, language: str | None,
+               contact_id: int | None, user_id: int | None, message_id: str | None) -> Outreach:
+    """Göndərilmiş məktubun izi: outreach + lead tarixçəsi, 3 gün sonra "cavabı yoxla" tapşırığı,
+    fürsət hələ "Yeni"-dirsə → "Əlaqə saxlanılıb" (tender fürsətində bu mərhələ yoxdur)."""
+    now = _now()
+    row = Outreach(kind="email", lead_key=opp.lead_key, opportunity_id=opp.id, contact_id=contact_id,
+                   to_address=to, subject=subject, body=body, language=language, status="sent",
+                   external_id=message_id, user_id=user_id, created_at=now, sent_at=now)
+    session.add(row)
+    lead = session.get(LeadRecord, opp.lead_key) if opp.lead_key else None
+    if lead is not None:
+        record_event(session, lead, "email", lead.status, user_id, note=f"{to}: {subject}"[:500])
+    session.add(Task(opportunity_id=opp.id, title=f"Məktuba cavabı yoxla: {to}", description=subject,
+                     due_at=now + EMAIL_FOLLOW_UP, assignee_id=opp.owner_id or user_id, created_by_id=None,
+                     priority="normal", status="open", created_at=now))
+    if opp.stage == "new" and "contacted" in pipeline_for(opp):
+        opp.stage = "contacted"
+    opp.updated_at = now
+    session.commit()
+    return row
 
 
 def add_task(session: Session, opp: Opportunity, title: str, due_at: datetime | None,

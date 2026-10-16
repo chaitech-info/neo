@@ -62,6 +62,11 @@ OPPORTUNITY_STAGES = ("new", "contacted", "qualified", "proposal", "negotiation"
 LOST_REASONS = ("price", "competitor", "no_response", "not_eligible", "deadline_missed", "other")
 TASK_STATUSES = ("open", "in_progress", "done", "cancelled")
 TASK_PRIORITIES = ("low", "normal", "high")
+# 0008 — miqrasiya öz nüsxəsini saxlayır.
+LEAD_ACTIONS = ("approve", "reject", "restore", "comment", "email")
+CONTACT_SOURCES = ("text", "ai", "author", "website", "enrichment", "manual")
+OUTREACH_KINDS = ("linkedin_comment", "email")
+OUTREACH_STATUSES = ("sent", "failed", "skipped")
 
 
 # --- Toplama qatı -----------------------------------------------------------
@@ -215,6 +220,14 @@ class LeadRecord(Base):
     reviewed_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
+    # 0008: əsl elan/post linki (LinkedIn işəgötürən lead-ində source_url şirkət saytıdır),
+    # LinkedIn müəllifi və kim rədd edib (ai/human — "Rədd edilənlər" səhifəsinin tabları).
+    origin_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    author_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    author_title: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    author_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    rejected_by: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+
     # Dublikatın ilk lead-i (admin paneldə "ilk dəfə: <mənbə>"). joined — şablon
     # sessiya bağlandıqdan sonra render olunur, lazy yükləmə orada işləməzdi.
     original: Mapped[Optional["LeadRecord"]] = relationship(
@@ -283,7 +296,7 @@ class Task(Base):
 
 
 class OfferRecord(Base):
-    """Xarici AI agentin yaratdığı qiymət təklifinin metadata-sı (0008). PDF saxlanmır —
+    """Xarici AI agentin yaratdığı qiymət təklifinin metadata-sı (0009). PDF saxlanmır —
     agent `/v1/offers/{id}/pdf` ilə yenidən yaradır."""
 
     __tablename__ = "offers"
@@ -298,3 +311,60 @@ class OfferRecord(Base):
     created_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), index=True, nullable=True)
     lead_id: Mapped[Optional[str]] = mapped_column(ForeignKey("leads.dedupe_key"), index=True, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+# --- Tarixçə, kontaktlar, ünsiyyət (0008) -------------------------------------
+
+
+class LeadEvent(Base):
+    """Lead üzərində insan/sistem hərəkəti — kim təsdiqlədi, rədd etdi, geri qaytardı."""
+
+    __tablename__ = "lead_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    lead_key: Mapped[str] = mapped_column(ForeignKey("leads.dedupe_key"), index=True)
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)  # boş = sistem
+    action: Mapped[str] = mapped_column(_enum("lead_action", *LEAD_ACTIONS))
+    from_status: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    to_status: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class Contact(Base):
+    """Əlaqə saxlanılacaq şəxs və ya ümumi kanal (HR, direktor, post müəllifi, şirkət telefonu)."""
+
+    __tablename__ = "contacts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    organization_id: Mapped[Optional[int]] = mapped_column(ForeignKey("organizations.id"), index=True, nullable=True)
+    lead_key: Mapped[Optional[str]] = mapped_column(ForeignKey("leads.dedupe_key"), index=True, nullable=True)
+    name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    title: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    phone: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    linkedin_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    source: Mapped[str] = mapped_column(_enum("contact_source", *CONTACT_SOURCES))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class Outreach(Base):
+    """Göndərilmiş (və ya alınmamış) LinkedIn şərhi / email."""
+
+    __tablename__ = "outreach"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[str] = mapped_column(_enum("outreach_kind", *OUTREACH_KINDS))
+    lead_key: Mapped[Optional[str]] = mapped_column(ForeignKey("leads.dedupe_key"), index=True, nullable=True)
+    opportunity_id: Mapped[Optional[int]] = mapped_column(ForeignKey("opportunities.id"), index=True, nullable=True)
+    contact_id: Mapped[Optional[int]] = mapped_column(ForeignKey("contacts.id"), nullable=True)
+    to_address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # email və ya post URL
+    subject: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    body: Mapped[str] = mapped_column(Text)
+    language: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
+    status: Mapped[str] = mapped_column(_enum("outreach_status", *OUTREACH_STATUSES))
+    external_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)  # boş = sistem
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

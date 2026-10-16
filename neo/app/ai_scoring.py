@@ -69,8 +69,19 @@ SCHEMA = {
     "type": "object",
     "additionalProperties": False,
     "required": ["signal", "organization", "in_azerbaijan", "food_business", "workforce",
-                 "food_mentioned", "evidence", "reason"],
+                 "food_mentioned", "evidence", "reason", "contacts"],
     "properties": {
+        # Satış üçün kontakt şəxslər — yalnız mətndə yazılanlar (app/contacts.py saxlayır).
+        "contacts": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["name", "role", "email", "phone"],
+                "properties": {"name": {"type": "string"}, "role": {"type": "string"},
+                               "email": {"type": "string"}, "phone": {"type": "string"}},
+            },
+        },
         "signal": {"type": "string", "enum": SIGNALS},
         "organization": {"type": "string"},
         "in_azerbaijan": {"type": "boolean"},
@@ -149,6 +160,11 @@ lunch, coffee break or similar.
 evidence — short exact quote from the text supporting the signal ("" if none).
 reason — one sentence in AZERBAIJANI for the sales team: who, what, why it
 matters (or why not).
+contacts — people or channels to reach the organization, ONLY as written in the
+text: contact person, HR, director/CEO, procurement officer, post author. name and
+role as written (role e.g. "HR menecer", "Satınalma şöbəsi"), email and phone if
+given for that person or the organization; "" for unknown fields. Never invent a
+person, email or phone. [] if the text names nobody and gives no email/phone.
 """
 
 
@@ -203,7 +219,7 @@ def chat_json(client: OpenAI, model: str, system: str, user: str, schema: dict, 
         kwargs["reasoning_effort"] = os.environ.get("AI_REASONING_EFFORT", "minimal")
     else:
         kwargs["temperature"] = 0
-        kwargs["max_tokens"] = 400
+        kwargs["max_tokens"] = 700  # + kontakt siyahısı
     resp = client.chat.completions.create(**kwargs)
     return json.loads(resp.choices[0].message.content), resp.usage
 
@@ -267,6 +283,7 @@ class StructuredAIFilter:
             lead.tier = tier if tier != "none" and score >= SCORE_THRESHOLD else None
             if org and not lead.entity_name:
                 lead.entity_name = org[:200]
+            lead.people = facts.get("contacts") or []
             lead.status = LeadStatus.pending_review if score >= SCORE_THRESHOLD else LeadStatus.rejected
             log.info("ai_scored", source=lead.source, score=score, tier=tier, signal=facts.get("signal"),
                      status=lead.status.value, title=lead.title[:90], scorer="v2", model=self.model)

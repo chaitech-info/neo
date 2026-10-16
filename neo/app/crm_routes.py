@@ -16,7 +16,10 @@ from sqlalchemy import func, select
 from app import crm
 from app.auth import security
 from app.auth.security import REQUIRE, verify_csrf
-from app.db.models import LeadRecord, Opportunity, Organization, Task, Tender, User
+from app.contacts import EMAIL_RE, contacts_for, normalize_phone
+from app.outreach import LANGUAGES, OutreachError, detect_language
+from app.outreach import linkedin_comment, mail
+from app.db.models import Contact, LeadRecord, Opportunity, Organization, Outreach, Task, Tender, User
 
 router = APIRouter()
 
@@ -86,24 +89,95 @@ def opportunities_page(request: Request, owner: str = "all", me: User = Depends(
     })
 
 
+def _opp_context(db, opp: Opportunity) -> dict:
+    lead = db.get(LeadRecord, opp.lead_key) if opp.lead_key else None
+    users = _active_users(db)
+    contacts = contacts_for(db, opp.lead_key, opp.organization_id)
+    return {
+        "active": "opportunities", "opp": opp, "lead": lead,
+        "org": db.get(Organization, opp.organization_id) if opp.organization_id else None,
+        "tender": db.get(Tender, opp.tender_id) if opp.tender_id else None,
+        "contacts": contacts, "contact_sources": CONTACT_SOURCE_NAMES,
+        "email_contacts": [c for c in contacts if c.email],
+        "outreach": list(db.scalars(select(Outreach).where(Outreach.opportunity_id == opp.id)
+                                    .order_by(Outreach.created_at.desc()))),
+        "outreach_kinds": OUTREACH_KIND_NAMES, "languages": LANGUAGES,
+        "default_language": detect_language(lead.raw_text if lead else opp.title),
+        "smtp_ready": mail.smtp_configured(),
+        "tasks": crm.opp_tasks(db, opp.id), "users": {u.id: u for u in users}, "user_list": users,
+        "stages": crm.pipeline_for(opp), "stage_names": crm.STAGE_NAMES,
+        "lost_reasons": crm.LOST_REASON_NAMES, "task_status_names": crm.TASK_STATUS_NAMES,
+        "priority_names": crm.PRIORITY_NAMES,
+    }
+
+
 @router.get("/opportunities/{opp_id}")
 def opportunity_page(request: Request, opp_id: int, me: User = Depends(REQUIRE["viewer"])):
     with security.SessionLocal() as db:
         opp = db.get(Opportunity, opp_id)
         if opp is None:
             return _go("/opportunities", err="Fürsət tapılmadı")
-        lead = db.get(LeadRecord, opp.lead_key) if opp.lead_key else None
-        org = db.get(Organization, opp.organization_id) if opp.organization_id else None
-        tender = db.get(Tender, opp.tender_id) if opp.tender_id else None
-        tasks = crm.opp_tasks(db, opp.id)
-        users = _active_users(db)
-    return _render(request, "opportunity.html", {
-        "active": "opportunities", "opp": opp, "lead": lead, "org": org, "tender": tender,
-        "tasks": tasks, "users": {u.id: u for u in users}, "user_list": users,
-        "stages": crm.pipeline_for(opp), "stage_names": crm.STAGE_NAMES,
-        "lost_reasons": crm.LOST_REASON_NAMES, "task_status_names": crm.TASK_STATUS_NAMES,
-        "priority_names": crm.PRIORITY_NAMES,
-    })
+        context = _opp_context(db, opp)
+    return _render(request, "opportunity.html", context)
+
+
+# --- Email (AI qaralama → insan yoxlayır → Gmail SMTP) -------------------------------
+
+OUTREACH_KIND_NAMES = {"email": "Email", "linkedin_comment": "LinkedIn şərhi"}
+
+
+@router.post("/opportunities/{opp_id}/email/draft", dependencies=[Depends(verify_csrf)])
+def opportunity_email_draft(request: Request, opp_id: int, contact_id: str = Form(""), language: str = Form("az"),
+                            me: User = Depends(REQUIRE["sales"])):
+    path = f"/opportunities/{opp_id}"
+    language = language if language in LANGUAGES else "az"
+    with security.SessionLocal() as db:
+        opp = db.get(Opportunity, opp_id)
+        if opp is None:
+            return _go("/opportunities", err="Fürsət tapılmadı")
+        context = _opp_context(db, opp)
+        contact = db.get(Contact, int(contact_id)) if contact_id.isdigit() else None
+        lead, org = context["lead"], context["org"]
+        try:
+            draft = mail.draft_email(
+                lead_title=lead.title if lead else opp.title, lead_text=lead.raw_text if lead else "",
+                org_name=org.name if org else (lead.entity_name if lead else None),
+                contact_name=contact.name if contact else None, contact_title=contact.title if contact else None,
+                sender_name=me.full_name, language=language)
+        except OutreachError as exc:
+            return _go(path,err=str(exc))
+    draft.update(body=mail.with_signature(draft["body"], me.full_name), language=language,
+                 to=contact.email if contact and contact.email else "", contact_id=contact.id if contact else "")
+    return _render(request, "opportunity.html", {**context, "draft": draft})
+
+
+@router.post("/opportunities/{opp_id}/email/send", dependencies=[Depends(verify_csrf)])
+def opportunity_email_send(opp_id: int, to: str = Form(...), subject: str = Form(...), body: str = Form(...),
+                           language: str = Form(""), contact_id: str = Form(""),
+                           me: User = Depends(REQUIRE["sales"])):
+    path = f"/opportunities/{opp_id}"
+    to, subject, body = to.strip().lower(), subject.strip(), body.strip()
+    if not EMAIL_RE.fullmatch(to):
+        return _go(path,err="Alıcının email ünvanı yanlışdır")
+    if not subject or len(body) < 20:
+        return _go(path,err="Mövzu və məktub mətni boş ola bilməz")
+    with security.SessionLocal() as db:
+        opp = db.get(Opportunity, opp_id)
+        if opp is None:
+            return _go("/opportunities", err="Fürsət tapılmadı")
+        contact = db.get(Contact, int(contact_id)) if contact_id.isdigit() else None
+        try:
+            message_id = mail.send_email(to=to, subject=subject[:200], body=body, reply_to=me.email)
+        except OutreachError as exc:
+            db.add(Outreach(kind="email", lead_key=opp.lead_key, opportunity_id=opp.id,
+                            contact_id=contact.id if contact else None, to_address=to, subject=subject[:200],
+                            body=body, language=language[:2] or None, status="failed", error=str(exc)[:500],
+                            user_id=me.id, created_at=datetime.utcnow()))
+            db.commit()
+            return _go(path,err=str(exc))
+        crm.email_sent(db, opp, to=to, subject=subject[:200], body=body, language=language[:2] or None,
+                       contact_id=contact.id if contact else None, user_id=me.id, message_id=message_id)
+    return _go(path,msg=f"Məktub göndərildi: {to}. 3 gün sonra cavabı yoxlamaq üçün tapşırıq açıldı")
 
 
 @router.post("/opportunities/{opp_id}/stage", dependencies=[Depends(verify_csrf)])
@@ -166,6 +240,67 @@ def opportunity_add_task(opp_id: int, title: str = Form(...), due_at: str = Form
         except crm.CrmError as exc:
             return _go(path, err=str(exc))
     return _go(path, msg="Tapşırıq əlavə olundu")
+
+
+@router.post("/opportunities/{opp_id}/linkedin-comment", dependencies=[Depends(verify_csrf)])
+def opportunity_linkedin_comment(opp_id: int, me: User = Depends(REQUIRE["sales"])):
+    """Alınmamış avtomatik şərhi təkrarlamaq ("Yenidən cəhd et")."""
+    path = f"/opportunities/{opp_id}"
+    with security.SessionLocal() as db:
+        opp = db.get(Opportunity, opp_id)
+        if opp is None:
+            return _go("/opportunities", err="Fürsət tapılmadı")
+        if not linkedin_comment.enabled():
+            return _go(path, err="Avtomatik LinkedIn şərhi söndürülüb (LINKEDIN_AUTOCOMMENT)")
+        row = linkedin_comment.auto_comment(db, opp, user_id=me.id, retry=True)
+    if row is None:
+        return _go(path, err="Bu posta artıq şərh yazılıb və ya bu fürsət LinkedIn postundan deyil")
+    if row.status != "sent":
+        return _go(path, err=f"Şərh yazılmadı: {row.error}")
+    return _go(path, msg="LinkedIn şərhi yazıldı")
+
+
+# --- Kontaktlar ------------------------------------------------------------------
+
+CONTACT_SOURCE_NAMES = {"text": "elan mətni", "ai": "AI (mətndən)", "author": "post müəllifi",
+                        "website": "şirkət saytı", "enrichment": "axtarış", "manual": "əl ilə"}
+
+
+@router.post("/opportunities/{opp_id}/contacts", dependencies=[Depends(verify_csrf)])
+def opportunity_add_contact(opp_id: int, name: str = Form(""), title: str = Form(""), email: str = Form(""),
+                            phone: str = Form(""), linkedin_url: str = Form(""), me: User = Depends(REQUIRE["sales"])):
+    path = f"/opportunities/{opp_id}"
+    email, linkedin_url = email.strip().lower(), linkedin_url.strip()
+    if not (name.strip() or email or phone.strip() or linkedin_url):
+        return _go(path, err="Ad, email, telefon və ya LinkedIn — ən azı biri lazımdır")
+    if email and not EMAIL_RE.fullmatch(email):
+        return _go(path, err="Email formatı yanlışdır")
+    if linkedin_url and not linkedin_url.startswith("https://"):
+        return _go(path, err="LinkedIn linki https:// ilə başlamalıdır")
+    with security.SessionLocal() as db:
+        opp = db.get(Opportunity, opp_id)
+        if opp is None:
+            return _go("/opportunities", err="Fürsət tapılmadı")
+        db.add(Contact(organization_id=opp.organization_id, lead_key=opp.lead_key, name=name.strip()[:200] or None,
+                       title=title.strip()[:200] or None, email=email or None,
+                       phone=normalize_phone(phone) or phone.strip()[:32] or None,
+                       linkedin_url=linkedin_url or None, source="manual"))
+        db.commit()
+    return _go(path, msg="Kontakt əlavə olundu")
+
+
+@router.post("/contacts/{contact_id}/delete", dependencies=[Depends(verify_csrf)])
+def contact_delete(contact_id: int, back: str = Form("/opportunities"), me: User = Depends(REQUIRE["sales"])):
+    back = back if back.startswith("/opportunities/") and not back.startswith("//") else "/opportunities"
+    with security.SessionLocal() as db:
+        contact = db.get(Contact, contact_id)
+        if contact is None:
+            return _go(back, err="Kontakt tapılmadı")
+        if db.scalar(select(func.count()).select_from(Outreach).where(Outreach.contact_id == contact_id)):
+            return _go(back, err="Bu kontakta məktub göndərilib — tarixçə üçün silinmir")
+        db.delete(contact)
+        db.commit()
+    return _go(back, msg="Kontakt silindi")
 
 
 # --- Tapşırıqlar -----------------------------------------------------------------

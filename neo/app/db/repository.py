@@ -5,8 +5,19 @@ from datetime import datetime
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.db.models import LeadRecord, ScrapeRun
-from app.models import ContactInfo, RawLead
+from app.db.models import Contact, LeadEvent, LeadRecord, ScrapeRun
+from app.models import Author, ContactInfo, RawLead
+
+# Status keçidi → lead_events.action
+_ACTIONS = {"rejected": "reject", "pending_review": "restore", "converted": "approve"}
+
+
+def record_event(session: Session, record: LeadRecord, action: str, to_status: str | None,
+                 user_id: int | None, note: str | None = None) -> None:
+    """lead_events sətri (commit çağıranın işidir)."""
+    session.add(LeadEvent(lead_key=record.dedupe_key, user_id=user_id, action=action,
+                          from_status=record.status, to_status=to_status, note=note,
+                          created_at=datetime.utcnow()))
 
 
 class LeadRepository:
@@ -31,6 +42,10 @@ class LeadRepository:
             title=lead.title,
             raw_text=lead.raw_text,
             entity_name=lead.entity_name,
+            origin_url=lead.origin_url,
+            author_name=lead.author.name if lead.author else None,
+            author_title=lead.author.title if lead.author else None,
+            author_url=lead.author.url if lead.author else None,
             contact_phone=lead.contact_info.phone if lead.contact_info else None,
             contact_email=lead.contact_info.email if lead.contact_info else None,
             contact_website=lead.contact_info.website if lead.contact_info else None,
@@ -55,6 +70,7 @@ class LeadRepository:
         record.ai_score = lead.ai_score
         record.ai_reason = lead.ai_reason
         record.status = lead.status.value
+        record.rejected_by = "ai" if record.status == "rejected" else None
         record.tier = lead.tier
         if lead.entity_name and not record.entity_name:
             record.entity_name = lead.entity_name  # v2 təşkilat adını çıxarır — dublikat yoxlaması üçün
@@ -66,10 +82,14 @@ class LeadRepository:
         return self.session.get(LeadRecord, dedupe_key)
 
     def set_status(self, dedupe_key: str, status: str, reviewer_id: int | None = None) -> None:
+        """İnsan qərarı: status + kim/nə vaxt + lead_events tarixçəsi."""
         record = self.session.get(LeadRecord, dedupe_key)
         if record is None:
             return
+        if status in _ACTIONS:
+            record_event(self.session, record, _ACTIONS[status], status, reviewer_id)
         record.status = status
+        record.rejected_by = "human" if status == "rejected" else None
         if reviewer_id is not None:
             record.reviewed_by_id, record.reviewed_at = reviewer_id, datetime.utcnow()
         self.session.commit()
@@ -88,20 +108,33 @@ class LeadRepository:
         )
         return list(self.session.execute(stmt).scalars().all())
 
-    def list_ai_rejected(self, threshold: float) -> list[LeadRecord]:
-        """AI-nin eşikdən aşağı skorla rədd etdikləri (insanın rədd etdikləri yox —
-        insan yalnız pending_review-u, yəni skoru eşikdən yuxarı və ya boş olanı rədd edir).
-        Eşiyə ən yaxın olanlar əvvəldə — səhv rədd ehtimalı ən yüksək olanlar."""
-        stmt = (
-            select(LeadRecord)
-            .where(
-                LeadRecord.status == "rejected",
-                LeadRecord.ai_score.is_not(None),
-                LeadRecord.ai_score < threshold,
-            )
-            .order_by(LeadRecord.ai_score.desc(), LeadRecord.scraped_at.desc())
-        )
+    def list_rejected(self, by: str) -> list[LeadRecord]:
+        """Rədd edilənlər: `human` — son rədd edən insandır (ən təzə qərar əvvəldə, səhvən
+        basılanı tez tapmaq üçün); `ai` — eşiyə ən yaxın skor əvvəldə (səhv rədd ehtimalı
+        ən yüksək olanlar)."""
+        who = LeadRecord.rejected_by == "human"
+        stmt = select(LeadRecord).where(LeadRecord.status == "rejected", who if by == "human" else ~who | LeadRecord.rejected_by.is_(None))
+        if by == "human":
+            stmt = stmt.order_by(LeadRecord.reviewed_at.desc().nullslast())
+        else:
+            stmt = stmt.order_by(LeadRecord.ai_score.desc().nullslast(), LeadRecord.scraped_at.desc())
         return list(self.session.execute(stmt).scalars().all())
+
+    def contact_counts(self, keys: list[str]) -> dict[str, int]:
+        if not keys:
+            return {}
+        rows = self.session.execute(select(Contact.lead_key, func.count()).where(Contact.lead_key.in_(keys))
+                                    .group_by(Contact.lead_key)).all()
+        return dict(rows)
+
+    def count_rejected(self) -> dict[str, int]:
+        rows = self.session.execute(
+            select(LeadRecord.rejected_by, func.count()).where(LeadRecord.status == "rejected")
+            .group_by(LeadRecord.rejected_by)).all()
+        counts = {"ai": 0, "human": 0}
+        for by, n in rows:
+            counts["human" if by == "human" else "ai"] += n
+        return counts
 
     def latest_runs(self) -> dict[str, ScrapeRun]:
         """Hər mənbənin ən son `scrape_runs` sətri."""
@@ -159,6 +192,9 @@ class LeadRepository:
             raw_text=record.raw_text,
             entity_name=record.entity_name,
             contact_info=contact,
+            origin_url=record.origin_url,
+            author=Author(name=record.author_name, title=record.author_title, url=record.author_url)
+            if record.author_name or record.author_url else None,
             category=record.category,
             location=record.location,
             posted_at=record.posted_at,

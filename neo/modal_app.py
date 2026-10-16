@@ -15,6 +15,7 @@ APIFY_TOKEN, TRIGGER_TOKEN. Deploy: `modal deploy modal_app.py` (bax 05-runbook.
 """
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -22,6 +23,12 @@ import modal
 from fastapi import Header
 
 TICK_MINUTES = 10
+# Modal cron-u deploy vaxtı seçilir. Workspace-in 5 cron limiti dolubsa (2026-10-14: emilabdurahmanli05
+# workspace-i — flutter-study-bot, panelflo-bot) `NEO_MODAL_CRON=off modal deploy modal_app.py`:
+# tick-i GitHub Actions çağırır (.github/workflows/neo-tick.yml → trigger {"tick": true}).
+MODAL_CRON = os.environ.get("NEO_MODAL_CRON", "on") != "off"
+TICK_STATE = "neo-tick-state"   # modal.Dict: son tick vaxtı — gecikən/buraxılan çağırışları tutmaq üçün
+MAX_CATCHUP_MIN = 120
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
@@ -40,17 +47,29 @@ def scrape_source(source_key: str, trigger: str = "schedule") -> int | None:
     return task.run(source_key, trigger)  # Celery tapşırığının gövdəsi, broker-siz
 
 
-@app.function(schedule=modal.Cron(f"*/{TICK_MINUTES} * * * *"), timeout=120)
+def catchup_window(now: datetime, last: str | None) -> int:
+    """Son tick-dən bəri keçən dəqiqələr (ilk dəfə TICK_MINUTES, ən çox MAX_CATCHUP_MIN). 0 = bu dəqiqə
+    artıq işlənib. GitHub Actions cron-u gecikir və bəzən buraxır — pəncərə üst-üstə düşmür, boşluq qalmır."""
+    if not last:
+        return TICK_MINUTES
+    gap = int((now - datetime.fromisoformat(last)).total_seconds() // 60)
+    return 0 if gap <= 0 else min(gap, MAX_CATCHUP_MIN)
+
+
+@app.function(schedule=modal.Cron(f"*/{TICK_MINUTES} * * * *") if MODAL_CRON else None, timeout=120)
 def tick() -> list[str]:
     from app.scheduler import due_sources
 
     now = datetime.now(ZoneInfo("Asia/Baku")).replace(second=0, microsecond=0)
-    # Cron bir az gec başlaya bilər — pəncərəni 10 dəqiqəlik sərhədə yuvarlaqlaşdır.
-    now = now.replace(minute=now.minute - now.minute % TICK_MINUTES)
-    keys = due_sources(now, TICK_MINUTES)
+    state = modal.Dict.from_name(TICK_STATE, create_if_missing=True)
+    window = catchup_window(now, state.get("last"))
+    if not window:
+        return []
+    keys = due_sources(now, window)
+    state["last"] = now.isoformat()
     for key in keys:
         scrape_source.spawn(key, "schedule")
-    print(f"tick {now:%H:%M} → {keys or 'heç nə'}")
+    print(f"tick {now:%H:%M} (son {window} dəq) → {keys or 'heç nə'}")
     return keys
 
 
@@ -71,5 +90,5 @@ def trigger(payload: dict, authorization: str | None = Header(default=None)):
         else:
             scrape_source.spawn(key, trig)
 
-    status, body = triggers.handle(payload, authorization, set(SOURCE_TASKS), spawn)
+    status, body = triggers.handle(payload, authorization, set(SOURCE_TASKS), spawn, on_tick=tick.spawn)
     return JSONResponse(body, status_code=status)
