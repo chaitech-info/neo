@@ -1,0 +1,269 @@
+{% extends "base.html" %}
+{% block title %}Qiymət təklifi — Neo{% endblock %}
+{% block main_class %}mc mc-kw mc-offers{% endblock %}
+{% block content %}
+  <header class="ld-head">
+    <h1 class="mc-title">Qiymət təklifi</h1>
+    <p class="ld-sub">Müştərinin sorğusunu yapışdır. Agent hazır paketlərdən seçir və PDF təklif hazırlayır.</p>
+  </header>
+
+  <div class="of-grid">
+    <section class="of-card" aria-labelledby="of-form-h">
+      <h2 id="of-form-h" class="sr">Sorğu</h2>
+      {% if prefill %}<p class="flash info" role="status">Lead-dən doldurulub. Göndərməzdən əvvəl mətni yoxla.</p>{% endif %}
+      <form id="of-form" novalidate>
+        <label class="kw-f">Brend
+          <select id="of-brand" name="brand">
+            {% for code, name in brands.items() %}<option value="{{ code }}" {% if code == brand %}selected{% endif %}>{{ name }}</option>{% endfor %}
+          </select>
+        </label>
+        <label class="kw-f" for="of-message">Müştəri sorğusu</label>
+        <textarea id="of-message" name="message" rows="9" maxlength="4000" required
+          placeholder="Müştərinin yazdığı mətni bura yapışdırın. Məsələn: &quot;Azersun MMC bizdən qiymət istəyir, 3 paket, gündə 120 nəfər, 22 gün&quot;"></textarea>
+        <div class="of-count" id="of-count" aria-live="off">0 / 4000</div>
+        <div class="kw-row">
+          <label class="kw-f">Müştəri şirkəti (ixtiyari)<input id="of-customer" name="customer_name" maxlength="200" autocomplete="off"></label>
+          <label class="kw-f">Əlaqədar şəxs (ixtiyari)<input id="of-contact" name="contact_person" maxlength="200" autocomplete="off"></label>
+        </div>
+        <button class="mc-btn mc-btn-hero" id="of-submit" type="submit">PDF yarat</button>
+      </form>
+    </section>
+
+    <section class="of-card of-result" aria-labelledby="of-res-h" aria-live="polite">
+      <h2 id="of-res-h" class="sr">Nəticə</h2>
+      <div id="of-empty" class="empty"><b>Hələ təklif yoxdur</b>Sorğunu göndərəndə PDF və xülasə burada görünəcək.</div>
+      <div id="of-loading" class="of-loading" hidden>
+        <span class="of-spin" aria-hidden="true"></span><span>Təklif hazırlanır…</span>
+        <div class="of-skel" aria-hidden="true"><i></i><i></i><i></i></div>
+      </div>
+      <div id="of-error" class="flash error" role="alert" hidden></div>
+
+      <div id="of-chat" hidden>
+        <h3 class="of-h">Agentin sualı</h3>
+        <div id="of-bubbles" class="of-bubbles"></div>
+        <form id="of-reply-form" class="of-reply" novalidate>
+          <label class="kw-f" for="of-reply">Cavabın</label>
+          <textarea id="of-reply" rows="3" maxlength="4000" required></textarea>
+          <button class="mc-btn mc-btn-hero" id="of-reply-submit" type="submit">Cavabı göndər</button>
+        </form>
+      </div>
+
+      <div id="of-ok" hidden>
+        <div class="of-ok-top">
+          <div>
+            <h3 class="of-h" id="of-ok-title"></h3>
+            <p class="of-sub" id="of-ok-sub"></p>
+          </div>
+          <span class="of-badge warn" id="of-sample" hidden>Nümunə paketlərdir, müştəriyə göndərmə</span>
+        </div>
+        <div class="of-pdf"><iframe id="of-frame" title="PDF önizləmə"></iframe></div>
+        <div class="of-actions">
+          <a class="mc-btn mc-btn-hero" id="of-download" href="#" download>PDF yüklə</a>
+          <a class="mc-btn" id="of-open" href="#" target="_blank" rel="noopener">Yeni pəncərədə aç</a>
+        </div>
+        <div class="table-wrap">
+          <table class="of-lines">
+            <thead><tr><th>Paket</th><th class="num">Vahid qiymət</th><th class="num">Miqdar × gün</th><th class="num">Cəmi</th></tr></thead>
+            <tbody id="of-lines"></tbody>
+          </table>
+        </div>
+        <dl class="of-totals" id="of-totals"></dl>
+        <p class="of-note" id="of-noqty" hidden>Miqdar göstərilməyib, buna görə yalnız vahid qiymətlər var.</p>
+        <div class="of-assume flash info" id="of-assume" hidden>
+          <b>Agentin fərziyyələri</b>
+          <ul id="of-assume-list"></ul>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <section class="kw-sec" aria-labelledby="of-hist-h">
+    <h2 id="of-hist-h">Tarixçə <em id="of-hist-n">{{ history|length }}</em></h2>
+    <div id="of-hist-empty" class="empty" {% if history %}hidden{% endif %}><b>Hələ təklif yaradılmayıb</b>Yaradılan təkliflər burada siyahılanacaq.</div>
+    <div class="table-wrap" id="of-hist-wrap" {% if not history %}hidden{% endif %}>
+      <table class="of-hist">
+        <thead><tr><th>Şirkət</th><th>Brend</th><th class="num">Məbləğ</th><th>Yaradan</th><th>Tarix</th><th></th></tr></thead>
+        <tbody id="of-hist">
+          {% for h in history %}
+          <tr>
+            <td>{{ h.customer_name or '—' }}{% if h.sample %} <span class="of-badge warn">Nümunə</span>{% endif %}{% if h.lead_id %} <a class="of-lead" href="/leads?q={{ h.lead_id|urlencode }}" title="Lead-dən yaradılıb">lead</a>{% endif %}</td>
+            <td>{{ brands.get(h.brand, h.brand) }}</td>
+            <td class="num" data-money="{{ h.total if h.total is not none else '' }}" data-cur="{{ h.currency }}">{{ h.total if h.total is not none else '—' }}</td>
+            <td>{{ h.created_by }}</td>
+            <td>{{ h.created_at|baku_time }}</td>
+            <td><a href="/api/offers/{{ h.offer_id }}/pdf" target="_blank" rel="noopener">PDF-i aç</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <script>
+  (function () {
+    var CSRF = {{ csrf|tojson }};
+    var PREFILL = {{ prefill|tojson }};
+    var BRANDS = {{ brands|tojson }};
+    var $ = function (id) { return document.getElementById(id); };
+    var conv = [];            // agentlə söhbət (user/assistant), aydınlaşdırma zamanı
+    var leadId = PREFILL ? PREFILL.lead_id : null;
+    var blobUrl = null;
+    var busy = false;
+
+    function fmt(v, cur) {
+      if (v === null || v === undefined || v === '') return '—';
+      var s = String(v), m = /^(-?)(\d+)(?:\.(\d+))?$/.exec(s);
+      if (!m) return s;
+      var intp = m[2].replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+      var frac = (m[3] || '').padEnd(2, '0').slice(0, 2);
+      return m[1] + intp + ',' + frac + ' ' + (cur || 'AZN');
+    }
+    function show(id, on) { $(id).hidden = !on; }
+    function view(name) {
+      ['of-empty', 'of-loading', 'of-error', 'of-chat', 'of-ok'].forEach(function (id) { show(id, id === name); });
+    }
+    function setBusy(on) {
+      busy = on;
+      $('of-submit').disabled = on; $('of-reply-submit').disabled = on;
+      $('of-submit').textContent = on ? 'Təklif hazırlanır…' : 'PDF yarat';
+      if (on) { ['of-empty', 'of-error', 'of-chat', 'of-ok'].forEach(function (id) { show(id, false); }); show('of-loading', true); }
+    }
+    function fail(msg) { setBusy(false); show('of-loading', false); var e = $('of-error'); e.textContent = msg; view('of-error'); }
+
+    function el(tag, cls, text) { var n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+
+    function call(body) {
+      setBusy(true);
+      var ctl = new AbortController(), t = setTimeout(function () { ctl.abort(); }, 75000);
+      return fetch('/api/offers', {
+        method: 'POST', credentials: 'same-origin', signal: ctl.signal,
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF }, body: JSON.stringify(body)
+      }).then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, status: r.status, data: j }; });
+      }).then(function (res) {
+        clearTimeout(t);
+        if (!res.ok) { fail(res.data.error || res.data.detail || 'Xəta baş verdi. Yenidən cəhd edin.'); return; }
+        setBusy(false);
+        if (res.data.status === 'needs_clarification') renderChat(res.data.question); else renderOk(res.data);
+      }).catch(function (err) {
+        clearTimeout(t);
+        fail(err && err.name === 'AbortError' ? 'Cavab gecikdi. Yenidən cəhd edin.' : 'Serverə qoşulmaq alınmadı. Yenidən cəhd edin.');
+      });
+    }
+
+    function baseBody() {
+      var b = { brand: $('of-brand').value, customer_name: $('of-customer').value, contact_person: $('of-contact').value };
+      if (leadId) b.lead_id = leadId;
+      return b;
+    }
+
+    function renderChat(question) {
+      conv.push({ role: 'assistant', content: question });
+      var box = $('of-bubbles'); box.textContent = '';
+      conv.forEach(function (m) { box.appendChild(el('div', 'of-bub ' + (m.role === 'assistant' ? 'bot' : 'me'), m.content)); });
+      $('of-reply').value = '';
+      view('of-chat');
+      $('of-reply').focus();
+    }
+
+    function renderOk(d) {
+      conv = [];
+      $('of-ok-title').textContent = d.customer_name ? d.customer_name : 'Qiymət təklifi';
+      $('of-ok-sub').textContent = d.offer_id + ' · ' + (BRANDS[$('of-brand').value] || '');
+      show('of-sample', !!d.sample);
+
+      var url;
+      if (blobUrl) { URL.revokeObjectURL(blobUrl); blobUrl = null; }
+      if (d.pdf_base64) {
+        var bin = atob(d.pdf_base64), arr = new Uint8Array(bin.length);
+        for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+        blobUrl = URL.createObjectURL(new Blob([arr], { type: 'application/pdf' }));
+        url = blobUrl;
+      } else { url = '/api/offers/' + encodeURIComponent(d.offer_id) + '/pdf'; }
+      $('of-frame').src = url;
+      var dl = $('of-download'); dl.href = url; dl.setAttribute('download', d.offer_id + '.pdf');
+      $('of-open').href = url;
+
+      var body = $('of-lines'); body.textContent = '';
+      var anyQty = false;
+      (d.lines || []).forEach(function (l) {
+        var tr = document.createElement('tr');
+        var hasQty = l.quantity != null && l.days != null;
+        anyQty = anyQty || hasQty;
+        tr.appendChild(el('td', '', l.name || l.package_id));
+        tr.appendChild(el('td', 'num', fmt(l.unit_price)));
+        tr.appendChild(el('td', 'num', hasQty ? l.quantity + ' × ' + l.days : '—'));
+        tr.appendChild(el('td', 'num', l.line_total != null ? fmt(l.line_total) : '—'));
+        body.appendChild(tr);
+      });
+      show('of-noqty', !anyQty);
+
+      var t = d.totals || {}, cur = t.currency || 'AZN', dl2 = $('of-totals'); dl2.textContent = '';
+      function row(k, v, strong) { var w = el('div', strong ? 'strong' : ''); w.appendChild(el('dt', '', k)); w.appendChild(el('dd', '', v)); dl2.appendChild(w); }
+      if (t.total != null) {
+        if (t.vat_included === false || t.subtotal != null) {
+          row('ƏDV xaric', fmt(t.subtotal, cur)); row('ƏDV 18%', fmt(t.vat, cur));
+        }
+        row('ƏDV daxil', fmt(t.total, cur), true);
+      }
+
+      var list = $('of-assume-list'); list.textContent = '';
+      (d.assumptions || []).forEach(function (a) { list.appendChild(el('li', '', a)); });
+      show('of-assume', (d.assumptions || []).length > 0);
+      view('of-ok');
+      addHistory(d, t);
+      leadId = null;
+    }
+
+    function addHistory(d, t) {
+      var tr = document.createElement('tr');
+      var c1 = el('td', '', d.customer_name || '—');
+      if (d.sample) { c1.appendChild(document.createTextNode(' ')); c1.appendChild(el('span', 'of-badge warn', 'Nümunə')); }
+      tr.appendChild(c1);
+      tr.appendChild(el('td', '', BRANDS[$('of-brand').value] || ''));
+      tr.appendChild(el('td', 'num', t.total != null ? fmt(t.total, t.currency) : '—'));
+      tr.appendChild(el('td', '', 'Sən'));
+      tr.appendChild(el('td', '', new Date().toLocaleString('az-AZ', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })));
+      var a = el('a', '', 'PDF-i aç'); a.href = '/api/offers/' + encodeURIComponent(d.offer_id) + '/pdf'; a.target = '_blank'; a.rel = 'noopener';
+      var c6 = document.createElement('td'); c6.appendChild(a); tr.appendChild(c6);
+      var tb = $('of-hist'); tb.insertBefore(tr, tb.firstChild);
+      show('of-hist-empty', false); show('of-hist-wrap', true);
+      $('of-hist-n').textContent = tb.children.length;
+    }
+
+    $('of-form').addEventListener('submit', function (e) {
+      e.preventDefault();
+      if (busy) return;
+      var msg = $('of-message').value.trim();
+      if (!msg) { fail('Müştəri sorğusunu yazın.'); $('of-message').focus(); return; }
+      conv = [{ role: 'user', content: msg }];
+      var b = baseBody(); b.message = msg;
+      call(b);
+    });
+
+    $('of-reply-form').addEventListener('submit', function (e) {
+      e.preventDefault();
+      if (busy) return;
+      var r = $('of-reply').value.trim();
+      if (!r) { $('of-reply').focus(); return; }
+      conv.push({ role: 'user', content: r });
+      var b = baseBody(); b.messages = conv.slice();
+      call(b);
+    });
+
+    $('of-message').addEventListener('input', function () { $('of-count').textContent = this.value.length + ' / 4000'; });
+    // Mətn dəyişəndə köhnə aydınlaşdırma söhbəti etibarsızdır.
+    $('of-message').addEventListener('change', function () { conv = []; });
+
+    if (PREFILL) {
+      $('of-message').value = PREFILL.message || '';
+      $('of-customer').value = PREFILL.customer_name || '';
+      $('of-count').textContent = $('of-message').value.length + ' / 4000';
+    }
+    document.querySelectorAll('#of-hist [data-money]').forEach(function (td) {
+      td.textContent = fmt(td.getAttribute('data-money'), td.getAttribute('data-cur'));
+    });
+    view('of-empty');
+  })();
+  </script>
+{% endblock %}

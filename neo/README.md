@@ -84,6 +84,20 @@ DB defolt olaraq layihə qovluğunda `neo_leads.db` (SQLite) faylıdır — Post
 - Scraper xəta versə (sayt cavab verməsə, struktur dəyişsə və s.) pipeline uğursuz olmur — o mənbə üçün sadəcə 0 nəticə qeyd olunur və log-a yazılır.
 - Approve/Reject yalnız `pending_review` statusundakı lead üzərində işləyir; artıq CRM-ə göndərilmiş və ya mövcud olmayan lead ID üçün aydın xəta mesajı göstərilir.
 
+## Alətlər → Qiymət təklifi
+
+Yan menyuda **Alətlər** bölməsi: **Qiymət təklifi** (satış və yuxarı rollar) və **Paketlər** (yalnız admin). Alət xarici AI agentə qoşulur: müştəri sorğusunu oxuyur, hazır paketlərdən seçir və PDF təklif qaytarır. Brauzer yalnız bu serverə müraciət edir, server agentə proxy edir — agent açarları brauzerə getmir.
+
+Quraşdırma (`.env`):
+
+```bash
+OFFER_AGENT_URL=https://askarhuseynli96--offer-agent-api.us-east.modal.run
+OFFER_AGENT_KEY=...         # təklif yaratmaq və oxumaq
+OFFER_AGENT_ADMIN_KEY=...   # yalnız paketləri dəyişmək
+```
+
+Cədvəl `offers` (miqrasiya 0008) təklifin metadata-sını saxlayır (PDF saxlanmır, agent yenidən yaradır). Lead siyahısındakı **Qiymət təklifi yarat** linki formanı lead-in başlığı, mətni və qurum adı ilə doldurur. Kod: `app/offer_client.py` (agent client, giriş yoxlaması, xəta xəritəsi), `app/offer_routes.py` (route-lar). İlk istifadədən əvvəl admin **Paketlər** səhifəsindən hər brend üçün paketləri yükləməlidir, yoxsa agent 409 qaytarır.
+
 ## İşə salma (production — avtomatik 24/7 scraping)
 
 ```bash

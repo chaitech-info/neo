@@ -36,6 +36,13 @@
       <a href="/opportunities" class="{{ 'active' if active == 'opportunities' else '' }}">Fürsətlər</a>
       <a href="/tasks" class="{{ 'active' if active == 'tasks' else '' }}">Tapşırıqlarım{% if navc.late %}<span class="count late" title="{{ navc.late }} tapşırığın vaxtı keçib">{{ navc.tasks }}</span>{% elif navc.tasks %}<span class="count">{{ navc.tasks }}</span>{% endif %}</a>
     </div>
+    {% if has_role(current, 'sales') %}
+    <div class="nav-group">
+      <h4>Alətlər</h4>
+      <a href="/tools/offers" class="{{ 'active' if active == 'offers' else '' }}">Qiymət təklifi</a>
+      {% if has_role(current, 'admin') %}<a href="/tools/packages" class="{{ 'active' if active == 'packages' else '' }}">Paketlər</a>{% endif %}
+    </div>
+    {% endif %}
     <div class="nav-group">
       <h4>Toplama</h4>
       <a href="/" class="{{ 'active' if active == 'dashboard' else '' }}">Mənbələr</a>
