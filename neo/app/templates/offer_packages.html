@@ -1,0 +1,234 @@
+{% extends "base.html" %}
+{% block title %}Paketlər — Neo{% endblock %}
+{% block main_class %}mc mc-kw mc-offers{% endblock %}
+{% block content %}
+  <header class="ld-head">
+    <h1 class="mc-title">Paketlər</h1>
+    <p class="ld-sub">Qiymət təklifi agentinin seçdiyi hazır paketlər. Qiymətlər AZN, ƏDV xaric.</p>
+  </header>
+
+  <div class="kw-filter">
+    <label class="sr" for="pk-brand">Brend</label>
+    <select id="pk-brand">{% for code, name in brands.items() %}<option value="{{ code }}">{{ name }}</option>{% endfor %}</select>
+    <button class="mc-btn" id="pk-new" type="button">+ Yeni paket</button>
+    <label class="mc-btn" for="pk-file">JSON ilə yüklə</label>
+    <input id="pk-file" type="file" accept="application/json,.json" class="sr">
+  </div>
+
+  <div id="pk-msg" class="flash" role="status" hidden></div>
+  <div id="pk-sample" class="flash info" hidden>Cədvəldə «Nümunə» işarəli paketlər var. Onlar real deyil, təkliflərə «NÜMUNƏ» möhürü vurulur.</div>
+  <div id="pk-loading" class="of-loading"><span class="of-spin" aria-hidden="true"></span><span>Paketlər yüklənir…</span></div>
+  <div id="pk-empty" class="empty" hidden><b>Bu brend üçün paket yoxdur</b>«+ Yeni paket» ilə əlavə edin və ya JSON yükləyin.</div>
+
+  <div class="table-wrap" id="pk-wrap" hidden>
+    <table class="of-hist">
+      <thead><tr><th>Ad</th><th class="num">Qiymət</th><th>Vəziyyət</th><th class="num">Sıra</th><th></th></tr></thead>
+      <tbody id="pk-rows"></tbody>
+    </table>
+  </div>
+
+  <section class="of-card pk-editor" id="pk-editor" hidden aria-labelledby="pk-ed-h">
+    <h2 id="pk-ed-h" class="of-h">Paket</h2>
+    <form id="pk-form" novalidate></form>
+  </section>
+
+  <dialog id="pk-dialog" class="pk-dialog" aria-labelledby="pk-dlg-t">
+    <form method="dialog">
+      <h3 id="pk-dlg-t"></h3>
+      <p id="pk-dlg-p"></p>
+      <div class="pk-dlg-act">
+        <button class="mc-btn" value="cancel">Ləğv et</button>
+        <button class="mc-btn mc-btn-hero" id="pk-dlg-ok" value="ok">Təsdiqlə</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script>
+  (function () {
+    var CSRF = {{ csrf|tojson }};
+    var $ = function (id) { return document.getElementById(id); };
+    var packages = [], cur = null, isNew = false;
+    var ID_RE = /^[a-z0-9][a-z0-9_-]{1,40}$/;
+
+    function h(tag, attrs, kids) {
+      var n = document.createElement(tag);
+      Object.keys(attrs || {}).forEach(function (k) {
+        if (k === 'text') n.textContent = attrs[k]; else if (k === 'class') n.className = attrs[k];
+        else if (k.slice(0, 2) === 'on') n.addEventListener(k.slice(2), attrs[k]); else n.setAttribute(k, attrs[k]);
+      });
+      (kids || []).forEach(function (c) { if (c) n.appendChild(c); });
+      return n;
+    }
+    function api(method, url, body) {
+      return fetch(url, { method: method, credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF },
+        body: body === undefined ? undefined : JSON.stringify(body) })
+        .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) {
+          if (!r.ok) throw new Error(j.error || j.detail || 'Xəta baş verdi. Yenidən cəhd edin.');
+          return j; }); });
+    }
+    function brand() { return $('pk-brand').value; }
+    function say(text, err) { var m = $('pk-msg'); m.textContent = text; m.className = 'flash' + (err ? ' error' : ''); m.hidden = !text; if (err) m.setAttribute('role', 'alert'); else m.setAttribute('role', 'status'); }
+    function money(v) { var p = Number(v).toFixed(2).split('.'); return p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ') + ',' + p[1] + ' AZN'; }
+    function confirmDialog(title, text, okLabel) {
+      return new Promise(function (resolve) {
+        var d = $('pk-dialog'); $('pk-dlg-t').textContent = title; $('pk-dlg-p').textContent = text; $('pk-dlg-ok').textContent = okLabel || 'Təsdiqlə';
+        d.addEventListener('close', function once() { d.removeEventListener('close', once); resolve(d.returnValue === 'ok'); });
+        d.showModal();
+      });
+    }
+
+    function load(note) {
+      $('pk-editor').hidden = true; $('pk-wrap').hidden = true; $('pk-empty').hidden = true; $('pk-loading').hidden = false; say(note || '');
+      api('GET', '/api/offer-packages/' + brand()).then(function (j) {
+        packages = (Array.isArray(j) ? j : (j.packages || [])).slice().sort(function (a, b) { return (a.sort_order || 0) - (b.sort_order || 0); });
+        $('pk-loading').hidden = true; renderTable();
+      }).catch(function (e) { $('pk-loading').hidden = true; packages = []; renderTable(); say(e.message, true); });
+    }
+
+    function renderTable() {
+      var tb = $('pk-rows'); tb.textContent = '';
+      packages.forEach(function (p) {
+        var name = (p.name && p.name.az) || p.id;
+        var st = [h('span', { class: 'kw-chip ' + (p.active ? 'on' : ''), text: p.active ? 'Aktiv' : 'Passiv' })];
+        if (p.example) st.push(document.createTextNode(' ')), st.push(h('span', { class: 'of-badge warn', text: 'Nümunə' }));
+        var tr = h('tr', {}, [
+          h('td', {}, [h('b', { text: name }), h('small', { class: 'pk-id', text: p.id })]),
+          h('td', { class: 'num', text: money(p.price) }),
+          h('td', {}, st),
+          h('td', { class: 'num', text: String(p.sort_order == null ? 0 : p.sort_order) }),
+          h('td', { class: 'pk-act' }, [
+            h('button', { class: 'mc-btn mc-btn-sm', type: 'button', text: 'Redaktə', onclick: function () { edit(p, false); } }),
+            h('button', { class: 'mc-btn mc-btn-sm kw-del', type: 'button', text: 'Sil', onclick: function () { remove(p); } })
+          ])
+        ]);
+        tb.appendChild(tr);
+      });
+      $('pk-wrap').hidden = !packages.length; $('pk-empty').hidden = packages.length > 0;
+      $('pk-sample').hidden = !packages.some(function (p) { return p.example; });
+    }
+
+    function blank() {
+      return { id: '', name: { az: '' }, price: '', unit: { az: 'standart porsiya', en: 'portion', ru: 'порция' },
+               menu: [], sort_order: packages.length ? Math.max.apply(null, packages.map(function (p) { return p.sort_order || 0; })) + 10 : 10, active: true };
+    }
+    function edit(p, fresh) {
+      cur = JSON.parse(JSON.stringify(p)); isNew = fresh;
+      cur.name = cur.name || { az: '' }; cur.unit = cur.unit || {}; cur.menu = cur.menu || [];
+      renderForm(); $('pk-editor').hidden = false; $('pk-editor').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function field(label, input, cls) { return h('label', { class: 'kw-f ' + (cls || '') }, [document.createTextNode(label), input]); }
+    function bind(input, obj, key) { input.value = obj[key] == null ? '' : obj[key]; input.addEventListener('input', function () { obj[key] = input.value; }); return input; }
+    function langRow(label, obj, req) {
+      return h('div', { class: 'kw-row' }, ['az', 'en', 'ru'].map(function (l) {
+        var i = bind(h('input', { type: 'text', maxlength: '200' }), obj, l);
+        if (l === 'az' && req) i.required = true;
+        return field(label + ' (' + l + ')' + (l === 'az' && req ? ' *' : ''), i);
+      }));
+    }
+    function move(arr, i, d) { var j = i + d; if (j < 0 || j >= arr.length) return; var t = arr[i]; arr[i] = arr[j]; arr[j] = t; renderForm(); }
+
+    function renderForm() {
+      var f = $('pk-form'); f.textContent = '';
+      $('pk-ed-h').textContent = isNew ? 'Yeni paket' : 'Paket: ' + (cur.name.az || cur.id);
+      var idIn = bind(h('input', { type: 'text', maxlength: '41', autocomplete: 'off', pattern: '[a-z0-9][a-z0-9_-]{1,40}' }), cur, 'id');
+      idIn.disabled = !isNew;
+      var price = bind(h('input', { type: 'number', min: '0.01', step: '0.01', inputmode: 'decimal' }), cur, 'price');
+      var sort = bind(h('input', { type: 'number', step: '1' }), cur, 'sort_order');
+      var active = h('input', { type: 'checkbox' }); active.checked = !!cur.active; active.addEventListener('change', function () { cur.active = active.checked; });
+      f.appendChild(h('div', { class: 'kw-row' }, [field('Id (kiçik latın hərfləri, rəqəm, - və _)', idIn), field('Qiymət, AZN (ƏDV xaric)', price), field('Sıra (kiçik əvvəldə)', sort, 'kw-s')]));
+      f.appendChild(langRow('Ad', cur.name, true));
+      f.appendChild(langRow('Vahid', cur.unit, false));
+      f.appendChild(h('label', { class: 'kw-chk' }, [active, document.createTextNode('Aktiv (agent bu paketi seçə bilər)')]));
+
+      f.appendChild(h('h3', { class: 'of-h', text: 'Menyu' }));
+      cur.menu.forEach(function (sec, si) {
+        sec.title = sec.title || {}; sec.items = sec.items || [];
+        var box = h('fieldset', { class: 'pk-sec' }, [
+          h('legend', { text: 'Bölmə ' + (si + 1) }),
+          langRow('Bölmə adı', sec.title, false)
+        ]);
+        sec.items.forEach(function (it, ii) {
+          box.appendChild(h('div', { class: 'pk-item' }, [
+            langRow('Maddə', it, false),
+            h('div', { class: 'pk-ctl' }, [
+              h('button', { class: 'mc-btn mc-btn-sm', type: 'button', 'aria-label': 'Maddəni yuxarı apar', text: '↑', onclick: function () { move(sec.items, ii, -1); } }),
+              h('button', { class: 'mc-btn mc-btn-sm', type: 'button', 'aria-label': 'Maddəni aşağı apar', text: '↓', onclick: function () { move(sec.items, ii, 1); } }),
+              h('button', { class: 'mc-btn mc-btn-sm kw-del', type: 'button', 'aria-label': 'Maddəni sil', text: 'Sil', onclick: function () { sec.items.splice(ii, 1); renderForm(); } })
+            ])
+          ]));
+        });
+        box.appendChild(h('div', { class: 'pk-ctl' }, [
+          h('button', { class: 'mc-btn mc-btn-sm', type: 'button', text: '+ Maddə', onclick: function () { sec.items.push({ az: '' }); renderForm(); } }),
+          h('button', { class: 'mc-btn mc-btn-sm', type: 'button', 'aria-label': 'Bölməni yuxarı apar', text: '↑ Bölmə', onclick: function () { move(cur.menu, si, -1); } }),
+          h('button', { class: 'mc-btn mc-btn-sm', type: 'button', 'aria-label': 'Bölməni aşağı apar', text: '↓ Bölmə', onclick: function () { move(cur.menu, si, 1); } }),
+          h('button', { class: 'mc-btn mc-btn-sm kw-del', type: 'button', text: 'Bölməni sil', onclick: function () { cur.menu.splice(si, 1); renderForm(); } })
+        ]));
+        f.appendChild(box);
+      });
+      f.appendChild(h('button', { class: 'mc-btn', type: 'button', text: '+ Menyu bölməsi', onclick: function () { cur.menu.push({ title: {}, items: [{ az: '' }] }); renderForm(); } }));
+      f.appendChild(h('div', { class: 'kw-row' }, [
+        h('button', { class: 'mc-btn mc-btn-hero', type: 'submit', text: 'Yadda saxla' }),
+        h('button', { class: 'mc-btn mc-btn-no', type: 'button', text: 'Bağla', onclick: function () { $('pk-editor').hidden = true; } })
+      ]));
+    }
+
+    function clean(o, keepAz) {
+      var out = {}; ['az', 'en', 'ru'].forEach(function (l) { var v = (o && o[l] || '').trim(); if (v) out[l] = v; });
+      return out;
+    }
+    function payload() {
+      var id = (cur.id || '').trim(), price = Number(cur.price);
+      if (!ID_RE.test(id)) throw new Error('Id yanlışdır: kiçik latın hərfləri, rəqəm, - və _ (2–41 simvol).');
+      if (!(cur.name.az || '').trim()) throw new Error('Azərbaycan dilində ad məcburidir.');
+      if (!(price > 0)) throw new Error('Qiymət 0-dan böyük olmalıdır.');
+      var unit = clean(cur.unit); if (!unit.az) throw new Error('Vahid (az) məcburidir.');
+      var menu = [];
+      cur.menu.forEach(function (s) {
+        var items = (s.items || []).map(function (i) { return clean(i); }).filter(function (i) { return i.az; });
+        if (!items.length) return;
+        var sec = { items: items }, t = clean(s.title); if (t.az) sec.title = t; menu.push(sec);
+      });
+      var p = { id: id, name: clean(cur.name), price: price, unit: unit, menu: menu,
+                sort_order: parseInt(cur.sort_order, 10) || 0, active: !!cur.active, example: false };
+      if (cur.description != null) p.description = cur.description;
+      return p;
+    }
+
+    $('pk-form').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var p; try { p = payload(); } catch (err) { say(err.message, true); window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
+      if (isNew && packages.some(function (x) { return x.id === p.id; })) { say('Bu id artıq var.', true); return; }
+      api('PUT', '/api/offer-packages/' + brand() + '/' + encodeURIComponent(p.id), p).then(function () {
+        $('pk-editor').hidden = true; load('Yadda saxlandı: ' + p.name.az);
+      }).catch(function (err) { say(err.message, true); window.scrollTo({ top: 0, behavior: 'smooth' }); });
+    });
+
+    function remove(p) {
+      confirmDialog('Paketi sil', '«' + ((p.name && p.name.az) || p.id) + '» silinəcək. Bu geri qaytarılmır.', 'Sil').then(function (ok) {
+        if (!ok) return;
+        api('DELETE', '/api/offer-packages/' + brand() + '/' + encodeURIComponent(p.id)).then(function () { load('Paket silindi.'); })
+          .catch(function (err) { say(err.message, true); });
+      });
+    }
+
+    $('pk-new').addEventListener('click', function () { edit(blank(), true); });
+    $('pk-brand').addEventListener('change', function () { load(); });
+    $('pk-file').addEventListener('change', function () {
+      var file = this.files[0]; this.value = ''; if (!file) return;
+      file.text().then(function (txt) {
+        var data; try { data = JSON.parse(txt); } catch (e) { throw new Error('Fayl düzgün JSON deyil.'); }
+        var list = Array.isArray(data) ? data : data && data.packages;
+        if (!Array.isArray(list) || !list.length) throw new Error('JSON-da paketlər siyahısı tapılmadı.');
+        return confirmDialog('Kataloqu əvəz et', 'Mövcud ' + packages.length + ' paket əvəz olunacaq, yeni paket sayı: ' + list.length + '. Davam edək?', 'Əvəz et').then(function (ok) {
+          if (!ok) return;
+          return api('PUT', '/api/offer-packages/' + brand(), { packages: list }).then(function () { load(list.length + ' paket yükləndi.'); });
+        });
+      }).catch(function (err) { say(err.message, true); });
+    });
+
+    load();
+  })();
+  </script>
+{% endblock %}

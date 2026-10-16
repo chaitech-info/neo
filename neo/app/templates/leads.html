@@ -105,6 +105,7 @@
           {{ csrf_field(request) }}
           <button class="mc-btn mc-btn-no" type="submit"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg>Uyğun deyil</button>
         </form>
+        <a class="mc-btn mc-btn-sm" href="/tools/offers?lead={{ lead.dedupe_key|urlencode }}">Qiymət təklifi yarat</a>
       </div>
       {% endif %}
     </article>
@@ -141,6 +142,7 @@
       {% if lead.raw_text and lead.raw_text != lead.title %}
       <details class="lead-more"><summary>Tam mətni göstər</summary><div class="raw">{{ lead.raw_text[lead.title|length:]|trim|truncate(1500) }}</div></details>
       {% endif %}
+      {% if has_role(request.state.user, 'sales') %}<p class="lead-dup"><a href="/tools/offers?lead={{ lead.dedupe_key|urlencode }}">Qiymət təklifi yarat →</a></p>{% endif %}
       {% if rejected_by == 'human' and lead.reviewed_at %}<p class="lead-dup">Rədd etdi: {{ reviewers.get(lead.reviewed_by_id, '—') }} · {{ lead.reviewed_at|baku_time }}</p>{% endif %}
       {% if can_review and show_restore and lead.status == 'rejected' %}
       <div class="lr-act">

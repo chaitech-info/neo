@@ -295,6 +295,24 @@ class Task(Base):
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
+class OfferRecord(Base):
+    """Xarici AI agentin yaratdığı qiymət təklifinin metadata-sı (0009). PDF saxlanmır —
+    agent `/v1/offers/{id}/pdf` ilə yenidən yaradır."""
+
+    __tablename__ = "offers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    offer_id: Mapped[str] = mapped_column(String(64), unique=True)
+    brand: Mapped[str] = mapped_column(String(16))
+    customer_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    total: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)  # ƏDV daxil; miqdar bilinmirsə boş
+    currency: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+    sample: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), index=True, nullable=True)
+    lead_id: Mapped[Optional[str]] = mapped_column(ForeignKey("leads.dedupe_key"), index=True, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
 # --- Tarixçə, kontaktlar, ünsiyyət (0008) -------------------------------------
 
 

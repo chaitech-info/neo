@@ -33,6 +33,7 @@ from app import crm
 from app.crm_routes import router as crm_router
 from app.outreach import linkedin_comment
 from app.keyword_routes import router as keyword_router
+from app.offer_routes import router as offer_router
 from app.locks import source_lock
 from app.pipeline import PipelineResult, reject_lead, restore_lead, run_pipeline
 from app.sources import SOURCES as SOURCE_SPECS
@@ -99,6 +100,7 @@ app.include_router(auth_router)
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 app.include_router(crm_router)
 app.include_router(keyword_router)
+app.include_router(offer_router)
 templates.env.globals.update(
     csrf_field=security.csrf_field, has_role=security.has_role, role_names=ROLE_NAMES,
 )
@@ -149,6 +151,8 @@ def _login_required(request: Request, exc: LoginRequired):
 @app.exception_handler(PermissionDenied)
 def _permission_denied(request: Request, exc: PermissionDenied):
     user = request.state.user
+    if request.url.path.startswith("/api/"):
+        return JSONResponse({"error": "Bu əməliyyat üçün icazən yoxdur"}, status_code=403)
     return templates.TemplateResponse(request, "forbidden.html", {
         "request": request, "required_name": ROLE_NAMES[exc.required],
         "current_name": ROLE_NAMES[user.role_code] if user else "—",
