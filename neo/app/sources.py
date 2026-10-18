@@ -7,6 +7,7 @@ bölgüsü (LOCAL_ONLY), panel siyahısı və növü (app/web.py), `sources` cə
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Callable
 
@@ -183,6 +184,18 @@ SOURCES += [
 
 BY_KEY: dict[str, SourceSpec] = {s.key: s for s in SOURCES}
 LOCAL_ONLY = frozenset(s.key for s in SOURCES if s.local_only)
+
+
+def az_proxy() -> str | None:
+    """AZ_PROXY_URL (Modal secret) — Azərbaycan çıxışlı proxy, məs. http://user:pass@host:port.
+    Təyin olunubsa LOCAL_ONLY mənbələr Modal-da bu proxy ilə işləyir, Mac worker lazım deyil
+    (2026-10-18 ölçüsü: etender, oxu, portofbaku Modal-ın heç bir regionundan açılmır)."""
+    return os.environ.get("AZ_PROXY_URL", "").strip() or None
+
+
+def proxy_for(source_key: str) -> str | None:
+    """Bu mənbə üçün proxy (yalnız LOCAL_ONLY; digərləri birbaşa — proxy trafiki pullu)."""
+    return az_proxy() if source_key in LOCAL_ONLY else None
 
 
 def sync_sources(connection) -> int:

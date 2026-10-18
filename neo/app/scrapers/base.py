@@ -5,6 +5,8 @@ import json
 import random
 import re
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -18,6 +20,20 @@ from app.scrapers.robots import check_allowed
 log = structlog.get_logger()
 
 DEFAULT_USER_AGENT = "NeoLeadBot/1.0 (+contact: dev@company.az)"
+
+# Azərbaycan IP-si tələb edən mənbələr (sources.LOCAL_ONLY) Modal-da AZ çıxışlı proxy ilə işləyir —
+# pipeline run müddətində təyin edir (app/pipeline.py). Scraper-lərin bəziləri lambda ilə yaradılır,
+# ona görə proxy konstruktorla yox, bu kontekstlə ötürülür; client verilməyibsə BaseScraper götürür.
+_PROXY: ContextVar[str | None] = ContextVar("scraper_proxy", default=None)
+
+
+@contextmanager
+def use_proxy(url: str | None):
+    token = _PROXY.set(url)
+    try:
+        yield
+    finally:
+        _PROXY.reset(token)
 
 _AZ_UPPER_I = str.maketrans({"I": "ı", "İ": "i"})
 
@@ -232,10 +248,13 @@ class BaseScraper(abc.ABC):
         # Filtrdən əvvəl saytdan gələn elan sayı (select_relevant sayır). None = scraper
         # select_relevant çağırmır — pipeline qaytarılan sayı götürür.
         self.fetched: int | None = None
+        proxy = _PROXY.get()
+        self.via_proxy = client is None and bool(proxy)
         self._client = client or httpx.Client(
             headers={"User-Agent": DEFAULT_USER_AGENT},
-            timeout=20.0,
+            timeout=30.0 if proxy else 20.0,  # residential proxy daha yavaşdır
             follow_redirects=True,
+            proxy=proxy or None,
         )
 
     def polite_sleep(self) -> None:

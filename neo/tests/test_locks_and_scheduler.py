@@ -227,3 +227,65 @@ def test_local_bridge_survives_idle_timeouts(monkeypatch):
     except SystemExit:
         pass
     assert got == [("oxu", "manual")]
+
+
+def test_az_proxy_moves_local_only_sources_to_modal(monkeypatch):
+    """AZ_PROXY_URL varsa etender/oxu və s. Modal-da işləyir (proxy ilə), Mac worker lazım deyil."""
+    monkeypatch.setenv("NEO_SCRAPE_ROLE", "modal")
+    monkeypatch.delenv("AZ_PROXY_URL", raising=False)
+    assert not scheduler.runs_here("etender") and scheduler.runs_here("marja")
+    monkeypatch.setenv("AZ_PROXY_URL", "http://u:p@proxy.example:8000")
+    assert scheduler.runs_here("etender") and scheduler.runs_here("marja")
+
+    from app.sources import proxy_for
+    assert proxy_for("etender") == "http://u:p@proxy.example:8000"
+    assert proxy_for("marja") is None  # pullu proxy yalnız AZ mənbələri üçün
+
+
+def test_scraper_client_uses_proxy_only_inside_context(monkeypatch):
+    import httpx
+
+    from app.scrapers.base import BaseScraper, use_proxy
+
+    seen = []
+    real = httpx.Client
+    monkeypatch.setattr(httpx, "Client", lambda **kw: seen.append(kw.get("proxy")) or real())
+
+    class S(BaseScraper):
+        def fetch_leads(self):
+            return []
+
+    S()
+    with use_proxy("http://u:p@proxy.example:8000"):
+        s = S()
+        with use_proxy(None):
+            S()
+    S()
+    assert seen == [None, "http://u:p@proxy.example:8000", None, None]
+    assert s.via_proxy
+
+
+def test_pipeline_runs_local_only_source_through_proxy(monkeypatch, tmp_path):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from app import pipeline
+    from app.db.migrate import upgrade_to_head
+    from app.scrapers.base import _PROXY, BaseScraper
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'p.db'}")
+    upgrade_to_head(engine)
+    seen = {}
+
+    class Etender(BaseScraper):
+        source_name = "etender"
+
+        def fetch_leads(self):
+            seen["proxy"] = _PROXY.get()
+            return []
+
+    monkeypatch.setenv("AZ_PROXY_URL", "http://u:p@proxy.example:8000")
+    with sessionmaker(bind=engine)() as s:
+        pipeline.run_pipeline(Etender, s, source_key="etender")
+    assert seen["proxy"] == "http://u:p@proxy.example:8000"
+    assert _PROXY.get() is None  # run bitəndən sonra kontekst təmizlənir

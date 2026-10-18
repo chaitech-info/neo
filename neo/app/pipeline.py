@@ -14,7 +14,8 @@ from app.db.models import ScrapeRun
 from app.db.repository import LeadRepository
 from app.deadlines import extract_deadline
 from app.normalizer import Normalizer
-from app.scrapers.base import BaseScraper
+from app.scrapers.base import BaseScraper, use_proxy
+from app.sources import proxy_for
 from app.story_dedup import mark_story_duplicate
 from app.tenders import link_tender
 
@@ -100,7 +101,9 @@ def run_pipeline(
     session.commit()
 
     try:
-        result = _run(scraper_cls, session)
+        # Azərbaycan IP-si tələb edən mənbə (LOCAL_ONLY) — AZ_PROXY_URL varsa scraper bu proxy ilə gedir.
+        with use_proxy(proxy_for(source_key)):
+            result = _run(scraper_cls, session)
     except Exception as exc:
         session.rollback()
         run.status, run.finished_at, run.error = "failed", datetime.utcnow(), f"{type(exc).__name__}: {exc}"[:500]
@@ -168,7 +171,8 @@ def _run(scraper_cls: type[BaseScraper], session: Session) -> PipelineResult:
         log.info("pipeline_no_new_leads", source=scraper_cls.source_name)
         return result
 
-    crawler = contacts.WebsiteContacts() if os.environ.get("CONTACT_CRAWL", "on") != "off" else None
+    with use_proxy(None):  # şirkət saytları birbaşa — pullu proxy trafiki yalnız AZ mənbələri üçün
+        crawler = contacts.WebsiteContacts() if os.environ.get("CONTACT_CRAWL", "on") != "off" else None
     crawls = 0
     for lead in ai_filter.score_batch(to_score):
         repo.update_after_scoring(lead.dedupe_key(), lead, ai_model=scorer_label(ai_filter))

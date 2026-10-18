@@ -162,3 +162,8 @@ Dəyişənlər `.env.example`-dadır. Hər üç yerdə eyni olmalıdır: lokal `
 - Cədvəli `.github/workflows/neo-tick.yml` işlədir: hər 10 dəq `{"tick": true}` → `tick` son çağırışdan bəri bütün vaxtları tutur (`modal.Dict` `neo-tick-state`, ən çox 2 saat). GitHub secrets: `NEO_TRIGGER_URL`, `NEO_TRIGGER_TOKEN`. Əl ilə: Actions → neo-tick → Run workflow. GitHub 60 gün commit olmayan repoda planlı workflow-u dayandırır.
 - Vercel layihəsinin Root Directory-si `neo`-dur: deploy repo kökündən (`~/Documents/neo`) — `neo/neo`-dan "Root Directory does not exist" xətası verir.
 - Mac worker (LOCAL_ONLY mənbələr): `.env`-də `MODAL_PROFILE` yeni workspace-in profilinə (bu Mac-də `emilabdurahmanli05`) uyğun olmalıdır, yoxsa paneldən "Scrape indi" etender/fed/oxu/report sorğuları köhnə növbəyə gedər.
+
+## Mac worker əvəzinə AZ proxy (2026-10-18)
+- Ölçü (Modal us-east, eu-west, eu-north, ap-south): etender.gov.az hər yerdən timeout, oxu.az və portofbaku.com hər yerdən 403; fed/report/caliber regiondan və IP-dən asılı olaraq gah açılır, gah yox. Yəni cloud regionu seçmək kifayət deyil — Azərbaycan IP-si lazımdır.
+- Həll: `AZ_PROXY_URL` (Azərbaycan çıxışlı residential proxy) Modal secret `neo-secrets`-ə. Varsa `runs_here` LOCAL_ONLY mənbələri Modal-da işlədir, pipeline yalnız onların scraper-ini proxy ilə yaradır (`app/sources.py::proxy_for`, `app/scrapers/base.py::use_proxy`); kontakt crawler-i və digər mənbələr birbaşa gedir (proxy trafiki pulludur). Yoxdursa köhnə qayda: Mac worker.
+- Secret-ə əlavə: `modal secret create neo-secrets --force --from-dotenv <fayl>` (bütün açarlar faylda olmalıdır — `--force` secret-i tam əvəz edir).

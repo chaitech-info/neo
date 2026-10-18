@@ -15,7 +15,7 @@ from app.celery_app import celery_app
 from app.locks import source_lock
 from app.db.engine import engine
 from app.pipeline import run_pipeline
-from app.sources import LOCAL_ONLY, SOURCES
+from app.sources import LOCAL_ONLY, SOURCES, az_proxy
 
 SessionLocal = sessionmaker(bind=engine)
 DB_ATTEMPTS = 2
@@ -33,11 +33,11 @@ SOURCE_TASKS = {spec.key: spec.scraper for spec in SOURCES}  # reyestrdən (app/
 
 
 def runs_here(source_key: str) -> bool:
-    """NEO_SCRAPE_ROLE: "modal" — LOCAL_ONLY-dən başqa hamısı; "local" — yalnız
-    LOCAL_ONLY; boş (lokal inkişaf) — hamısı."""
+    """NEO_SCRAPE_ROLE: "modal" — LOCAL_ONLY-dən başqa hamısı (AZ_PROXY_URL varsa hamısı, LOCAL_ONLY
+    proxy ilə); "local" — yalnız LOCAL_ONLY; boş (lokal inkişaf) — hamısı."""
     role = os.environ.get("NEO_SCRAPE_ROLE", "")
     if role == "modal":
-        return source_key not in LOCAL_ONLY
+        return source_key not in LOCAL_ONLY or az_proxy() is not None
     if role == "local":
         return source_key in LOCAL_ONLY
     return True

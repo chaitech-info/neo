@@ -80,13 +80,12 @@ def trigger(payload: dict, authorization: str | None = Header(default=None)):
 
     from app import triggers
     from app.scheduler import LOCAL_ONLY, SOURCE_TASKS
-
-    local = triggers.local_queue()
+    from app.sources import az_proxy
 
     def spawn(key: str, trig: str) -> None:
-        # Modal-ı bloklayan mənbələr Mac worker-ə gedir (Queue), qalanı burada fonda.
-        if key in LOCAL_ONLY:
-            local.put((key, trig))
+        # Modal-ı bloklayan mənbələr: AZ proxy varsa burada (proxy ilə), yoxdursa Mac worker-ə (Queue).
+        if key in LOCAL_ONLY and not az_proxy():
+            triggers.local_queue().put((key, trig))
         else:
             scrape_source.spawn(key, trig)
 
