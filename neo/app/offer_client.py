@@ -20,7 +20,9 @@ BRANDS = ("seaport", "nafa")
 BRAND_NAMES = {"seaport": "Seaport", "nafa": "NAFA"}
 MAX_MESSAGE_LENGTH = 4000
 MAX_CONVERSATION_TURNS = 20
-TIMEOUT_SECONDS = 60.0
+# Vercel funksiyası 60 s-də kəsilir (vercel.json maxDuration) — agent ondan əvvəl dayandırılır ki,
+# istifadəçi ümumi "Xəta" yox, aydın "gecikdi" mesajı görsün.
+TIMEOUT_SECONDS = 50.0
 
 OFFER_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$")
 PACKAGE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{1,40}$")

@@ -192,14 +192,17 @@ EMAIL_FOLLOW_UP = timedelta(days=3)
 
 
 def email_sent(session: Session, opp: Opportunity, *, to: str, subject: str, body: str, language: str | None,
-               contact_id: int | None, user_id: int | None, message_id: str | None) -> Outreach:
+               contact_id: int | None, user_id: int | None, message_id: str | None,
+               row: Outreach | None = None) -> Outreach:
     """Göndərilmiş məktubun izi: outreach + lead tarixçəsi, 3 gün sonra "cavabı yoxla" tapşırığı,
-    fürsət hələ "Yeni"-dirsə → "Əlaqə saxlanılıb" (tender fürsətində bu mərhələ yoxdur)."""
+    fürsət hələ "Yeni"-dirsə → "Əlaqə saxlanılıb" (tender fürsətində bu mərhələ yoxdur).
+    `row` — göndərməzdən əvvəl rezerv edilmiş sətir (send_key ilə), o "sent" olur."""
     now = _now()
-    row = Outreach(kind="email", lead_key=opp.lead_key, opportunity_id=opp.id, contact_id=contact_id,
-                   to_address=to, subject=subject, body=body, language=language, status="sent",
-                   external_id=message_id, user_id=user_id, created_at=now, sent_at=now)
-    session.add(row)
+    if row is None:
+        row = Outreach(kind="email", lead_key=opp.lead_key, opportunity_id=opp.id, contact_id=contact_id,
+                       to_address=to, subject=subject, body=body, language=language, user_id=user_id, created_at=now)
+        session.add(row)
+    row.status, row.error, row.external_id, row.sent_at = "sent", None, message_id, now
     lead = session.get(LeadRecord, opp.lead_key) if opp.lead_key else None
     if lead is not None:
         record_event(session, lead, "email", lead.status, user_id, note=f"{to}: {subject}"[:500])

@@ -77,6 +77,32 @@ def test_wrong_password_and_lockout(db):
     assert r.status_code == 429 and "15 dəqiqə" in r.text
 
 
+def test_lockout_is_shared_in_db_and_per_ip(db):
+    # Sayğac bazadadır: yaddaş təmizlənsə də (yeni serverless instansiya) blok qalır.
+    for _ in range(5):
+        security.record_failure("a@neo.az", "1.1.1.1")
+    security._failures.clear()
+    assert security.is_locked("a@neo.az", "1.1.1.1")
+    # Başqa IP-dən 5 cəhd admin-i bloklamır, amma bir email-ə 20 cəhd hamı üçün bloklayır.
+    assert not security.is_locked("a@neo.az", "2.2.2.2")
+    for i in range(15):
+        security.record_failure("a@neo.az", f"3.3.3.{i}")
+    assert security.is_locked("a@neo.az", "2.2.2.2")
+    security.clear_failures("a@neo.az", "1.1.1.1")
+    assert not security._locked_by([], 5, 0)
+
+
+def test_lock_lasts_15_minutes_after_last_failure():
+    from datetime import datetime, timedelta
+
+    now = datetime(2026, 10, 18, 12, 0)
+    # 4 köhnə + 1 təzə cəhd 15 dəqiqə içində → blok sonuncudan 15 dəqiqə sürür (əvvəl ~1 dəqiqə idi).
+    times = [now - timedelta(minutes=14)] * 4 + [now - timedelta(seconds=10)]
+    assert security._locked_by(times, 5, now)
+    assert security._locked_by(times, 5, now + timedelta(minutes=14))
+    assert not security._locked_by(times, 5, now + timedelta(minutes=16))
+
+
 def test_login_redirects_only_inside_site_and_updates_last_login(db):
     _user(db, "a@neo.az", "admin")
     assert _login(_client(), "a@neo.az", next_="//evil.com").headers["location"] == "/"

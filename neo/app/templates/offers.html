@@ -86,7 +86,7 @@
         <tbody id="of-hist">
           {% for h in history %}
           <tr>
-            <td>{{ h.customer_name or '—' }}{% if h.sample %} <span class="of-badge warn">Nümunə</span>{% endif %}{% if h.lead_id %} <a class="of-lead" href="/leads?q={{ h.lead_id|urlencode }}" title="Lead-dən yaradılıb">lead</a>{% endif %}</td>
+            <td>{{ h.customer_name or '—' }}{% if h.sample %} <span class="of-badge warn">Nümunə</span>{% endif %}{% if h.lead_id %} <a class="of-lead" href="/leads?lead={{ h.lead_id|urlencode }}" title="Lead-dən yaradılıb">lead</a>{% endif %}</td>
             <td>{{ brands.get(h.brand, h.brand) }}</td>
             <td class="num" data-money="{{ h.total if h.total is not none else '' }}" data-cur="{{ h.currency }}">{{ h.total if h.total is not none else '—' }}</td>
             <td>{{ h.created_by }}</td>
@@ -129,12 +129,26 @@
       if (on) { ['of-empty', 'of-error', 'of-chat', 'of-ok'].forEach(function (id) { show(id, false); }); show('of-loading', true); }
     }
     function fail(msg) { setBusy(false); show('of-loading', false); var e = $('of-error'); e.textContent = msg; view('of-error'); }
+    // Söhbət zamanı xəta: söhbət itmir, son cavab yenidən göndərilə bilər.
+    function failInChat(msg, reply) {
+      setBusy(false); show('of-loading', false);
+      if (conv.length && conv[conv.length - 1].role === 'user') conv.pop();
+      $('of-error').textContent = msg; show('of-error', true); show('of-chat', true);
+      $('of-reply').value = reply || '';
+    }
+    function errorText(res) {
+      if (res.status === 401) return 'Sessiyanın vaxtı bitib. Səhifəni yeniləyib yenidən daxil olun.';
+      return res.data.error || res.data.detail || 'Xəta baş verdi. Yenidən cəhd edin.';
+    }
 
     function el(tag, cls, text) { var n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
 
-    function call(body) {
+    function call(body, reply) {
+      var inChat = reply !== undefined;
+      var onFail = inChat ? function (m) { failInChat(m, reply); } : fail;
       setBusy(true);
-      var ctl = new AbortController(), t = setTimeout(function () { ctl.abort(); }, 75000);
+      // Server agenti 50 s gözləyir (Vercel limiti 60 s) — brauzer bir az çox gözləyir ki, serverin aydın xətası çatsın.
+      var ctl = new AbortController(), t = setTimeout(function () { ctl.abort(); }, 58000);
       return fetch('/api/offers', {
         method: 'POST', credentials: 'same-origin', signal: ctl.signal,
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF }, body: JSON.stringify(body)
@@ -142,12 +156,12 @@
         return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, status: r.status, data: j }; });
       }).then(function (res) {
         clearTimeout(t);
-        if (!res.ok) { fail(res.data.error || res.data.detail || 'Xəta baş verdi. Yenidən cəhd edin.'); return; }
+        if (!res.ok) { onFail(errorText(res)); return; }
         setBusy(false);
         if (res.data.status === 'needs_clarification') renderChat(res.data.question); else renderOk(res.data);
       }).catch(function (err) {
         clearTimeout(t);
-        fail(err && err.name === 'AbortError' ? 'Cavab gecikdi. Yenidən cəhd edin.' : 'Serverə qoşulmaq alınmadı. Yenidən cəhd edin.');
+        onFail(err && err.name === 'AbortError' ? 'Cavab gecikdi. Yenidən cəhd edin.' : 'Serverə qoşulmaq alınmadı. Yenidən cəhd edin.');
       });
     }
 
@@ -248,12 +262,16 @@
       if (!r) { $('of-reply').focus(); return; }
       conv.push({ role: 'user', content: r });
       var b = baseBody(); b.messages = conv.slice();
-      call(b);
+      call(b, r);
     });
 
     $('of-message').addEventListener('input', function () { $('of-count').textContent = this.value.length + ' / 4000'; });
-    // Mətn dəyişəndə köhnə aydınlaşdırma söhbəti etibarsızdır.
-    $('of-message').addEventListener('change', function () { conv = []; });
+    // Mətn dəyişəndə köhnə aydınlaşdırma söhbəti etibarsızdır — söhbət də gizlənir ki, cavab kontekstsiz getməsin.
+    $('of-message').addEventListener('change', function () {
+      if (!conv.length) return;
+      conv = [];
+      if (!$('of-chat').hidden) view('of-empty');
+    });
 
     if (PREFILL) {
       $('of-message').value = PREFILL.message || '';

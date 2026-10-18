@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
@@ -11,10 +12,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 from fastapi import Depends, FastAPI, Form, Request
+from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from app import logbuffer
@@ -92,9 +97,11 @@ app = FastAPI(title="Lead Scraping Admin")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 app.state.templates = templates
 # Giriş sessiyası imzalı cookie-də; SameSite=Lax + formlarda CSRF token.
+# Production (Vercel, HTTPS) cookie yalnız HTTPS ilə gedir; lokal http://localhost-da bu bayraq girişi sındırardı.
 app.add_middleware(
     SessionMiddleware, secret_key=security.session_secret(), session_cookie="neo_session",
     max_age=security.SESSION_MAX_AGE, same_site="lax",
+    https_only=SERVERLESS or os.environ.get("SESSION_HTTPS_ONLY", "").lower() in ("1", "true"),
 )
 app.include_router(auth_router)
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
@@ -157,6 +164,30 @@ def _permission_denied(request: Request, exc: PermissionDenied):
         "request": request, "required_name": ROLE_NAMES[exc.required],
         "current_name": ROLE_NAMES[user.role_code] if user else "—",
     }, status_code=403)
+
+
+def _error_page(request: Request, status: int, heading: str, text: str):
+    try:
+        security.load_user(request)  # menyu daxil olmuş istifadəçi üçün görünsün
+    except Exception:
+        request.state.user = None
+    return templates.TemplateResponse(request, "error.html", {
+        "request": request, "heading": heading, "text": text}, status_code=status)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_error(request: Request, exc: StarletteHTTPException):
+    # API-lər JSON qaytarmağa davam edir; səhifələrdə xam {"detail": ...} əvəzinə panel səhifəsi.
+    if request.url.path.startswith("/api/") or exc.status_code not in (404, 405):
+        return await http_exception_handler(request, exc)
+    return _error_page(request, exc.status_code, "Səhifə tapılmadı", "Bu ünvanda səhifə yoxdur və ya köçürülüb.")
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error(request: Request, exc: RequestValidationError):
+    if request.url.path.startswith("/api/"):
+        return await request_validation_exception_handler(request, exc)
+    return _error_page(request, 422, "Yanlış sorğu", "Ünvan və ya formadakı məlumat yanlışdır. Səhifəni yeniləyib yenidən cəhd et.")
 
 
 @app.exception_handler(CsrfFailed)
@@ -268,8 +299,9 @@ def dashboard(request: Request, user: User = Depends(REQUIRE["viewer"])):
 
     session = SessionLocal()
     try:
-        repo = LeadRepository(session)
-        stats = {status: len(repo.list_by_status(status))
+        # Yalnız say lazımdır — bütün sətirləri yükləmək minlərlə lead-də yavaş idi.
+        counted = dict(session.execute(select(LeadRecord.status, func.count()).group_by(LeadRecord.status)).all())
+        stats = {status: counted.get(status, 0)
                  for status in ["new", "pending_review", "converted", "rejected", "duplicate"]}
         tier_counts = dict(session.execute(
             select(LeadRecord.tier, func.count()).where(LeadRecord.status == "pending_review",
@@ -321,7 +353,7 @@ def scrape_now(source_key: str, user: User = Depends(REQUIRE["manager"])):
     """'Scrape indi' düyməsi — validation göstərilir: naməlum mənbə istəyi rədd edilir."""
     if source_key not in SOURCES:
         return RedirectResponse(
-            url=f"/?err=Naməlum mənbə: {source_key}", status_code=303
+            url=f"/?err={quote(f'Naməlum mənbə: {source_key}')}", status_code=303
         )
 
     label = SOURCES[source_key][0]
@@ -383,6 +415,7 @@ def logs_api(after: int = 0, source: str | None = None, level: str | None = None
     return JSONResponse({
         "entries": logbuffer.entries(after=after, source=source or None, level=level or None),
         "running": running,
+        "boot": logbuffer.BOOT_ID,
     })
 
 
@@ -481,11 +514,17 @@ def leads_ai_rejected():
 
 
 @app.get("/leads")
-def leads_all(request: Request, user: User = Depends(REQUIRE["viewer"])):
+def leads_all(request: Request, lead: str = "", user: User = Depends(REQUIRE["viewer"])):
     session = SessionLocal()
     try:
-        repo = LeadRepository(session)
-        leads = repo.list_all()
+        if lead:
+            # Tək lead (məs. qiymət təklifi tarixçəsindən) — son 200-dən köhnə olsa da tapılır.
+            from app.db.models import LeadRecord
+
+            found = session.get(LeadRecord, lead[:64])
+            leads = [found] if found else []
+        else:
+            leads = LeadRepository(session).list_all()
     finally:
         session.close()
 
@@ -494,8 +533,9 @@ def leads_all(request: Request, user: User = Depends(REQUIRE["viewer"])):
         {
             "request": request,
             "active": "all",
-            "heading": "Bütün lead-lər",
-            "subtitle": "Son 200 lead, bütün statuslar.",
+            "heading": "Lead" if lead else "Bütün lead-lər",
+            "subtitle": ("Lead tapılmadı." if lead and not leads else "Qiymət təklifinin yaradıldığı lead.") if lead
+                        else "Son 200 lead, bütün statuslar.",
             "leads": leads,
             "show_actions": False,
             "show_restore": True,  # yalnız rədd edilmiş lead-lərdə görünür
@@ -518,6 +558,10 @@ def approve_lead(dedupe_key: str, user: User = Depends(REQUIRE["sales"])):
         comment = linkedin_comment.auto_comment(session, conversion.opportunity, user_id=user.id)
     except crm.CrmError as exc:
         return RedirectResponse(url=f"/leads/pending_review?err={quote(str(exc))}", status_code=303)
+    except IntegrityError:
+        # İkiqat klik: paralel sorğu fürsəti artıq yaradıb (opportunities.lead_key unikaldır).
+        session.rollback()
+        return RedirectResponse(url=f"/leads/pending_review?err={quote('Bu lead artıq təsdiqlənib')}", status_code=303)
     finally:
         session.close()
 

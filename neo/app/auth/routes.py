@@ -40,6 +40,15 @@ def _go(path: str, *, msg: str | None = None, err: str | None = None) -> Redirec
 
 # --- Giriş / çıxış -------------------------------------------------------------
 
+_DUMMY: list[str] = []
+
+
+def _dummy_hash() -> str:
+    if not _DUMMY:
+        _DUMMY.append(hash_password("olmayan-hesab-üçün-şifrə"))
+    return _DUMMY[0]
+
+
 
 @router.get("/login")
 def login_page(request: Request, next: str = "/"):
@@ -53,7 +62,8 @@ def login_page(request: Request, next: str = "/"):
 @router.post("/login", dependencies=[Depends(verify_csrf)])
 def login_submit(request: Request, email: str = Form(...), password: str = Form(...), next: str = Form("/")):
     email = normalize_email(email)
-    if security.is_locked(email):
+    ip = security.client_ip(request)
+    if security.is_locked(email, ip):
         return _render(request, "login.html", {
             "next": _safe_next(next), "email": email, "active": "login",
             "error": "Çox sayda səhv cəhd. 15 dəqiqədən sonra yenidən yoxla.",
@@ -61,19 +71,22 @@ def login_submit(request: Request, email: str = Form(...), password: str = Form(
 
     with security.SessionLocal() as db:
         user = db.execute(select(User).where(User.email == email)).scalar_one_or_none()
+        if user is None:
+            # Olmayan hesabda da hash hesablanır — cavab vaxtından email-in mövcudluğu bilinməsin.
+            verify_password(password, _dummy_hash())
         ok = user is not None and user.is_active and verify_password(password, user.password_hash)
         if ok:
             user.last_login_at = datetime.utcnow()
             db.commit()
 
     if not ok:
-        security.record_failure(email)
+        security.record_failure(email, ip)
         return _render(request, "login.html", {
             "next": _safe_next(next), "email": email, "active": "login",
             "error": "Email və ya şifrə səhvdir.",
         }, status_code=401)
 
-    security.clear_failures(email)
+    security.clear_failures(email, ip)
     security.login(request, user)
     return _go(_safe_next(next))
 

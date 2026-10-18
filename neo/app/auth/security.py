@@ -16,6 +16,7 @@ import os
 import secrets
 import time
 from collections import defaultdict, deque
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -26,7 +27,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import sessionmaker
 
 from app.db.engine import engine
-from app.db.models import User
+from app.db.models import LoginFailure, User
 
 log = structlog.get_logger()
 
@@ -152,29 +153,82 @@ async def verify_csrf(request: Request) -> None:
     form = await request.form()
     sent = str(form.get("csrf_token", ""))
     expected = request.session.get("csrf", "")
-    if not expected or not hmac.compare_digest(sent, expected):
+    # Baytlarla müqayisə: qeyri-ASCII token str ilə compare_digest-də TypeError (500) verirdi.
+    if not expected or not hmac.compare_digest(sent.encode(), expected.encode()):
         raise CsrfFailed()
 
 
 # --- Səhv giriş cəhdlərinin məhdudlaşdırılması ---------------------------------
+#
+# Cəhdlər bazadadır (login_failures) — Vercel-də hər instansiyanın öz yaddaşı var, sayğac orada
+# paylaşılmırdı. Blok iki səviyyədədir: eyni email + IP üçün 5 səhv cəhd; bir email-ə bütün
+# IP-lərdən 20 səhv cəhd (paylanmış təxmin). Beləliklə başqa IP-dən 5 cəhdlə admin-i bloklamaq olmur.
+# Baza əlçatmazdırsa, yaddaşdakı ehtiyat sayğac işləyir.
 
-_failures: dict[str, deque] = defaultdict(deque)
+ACCOUNT_MAX_FAILED_LOGINS = MAX_FAILED_LOGINS * 4
+FAILURE_RETENTION = 24 * 3600
 
-
-def is_locked(email: str, now: Optional[float] = None) -> bool:
-    now = now or time.monotonic()
-    attempts = _failures[email]
-    while attempts and now - attempts[0] > LOCKOUT_SECONDS:
-        attempts.popleft()
-    return len(attempts) >= MAX_FAILED_LOGINS
-
-
-def record_failure(email: str) -> None:
-    _failures[email].append(time.monotonic())
+_failures: dict[tuple, deque] = defaultdict(deque)  # ehtiyat: (email, ip) → monotonic vaxtlar
 
 
-def clear_failures(email: str) -> None:
-    _failures.pop(email, None)
+def client_ip(request: Request) -> Optional[str]:
+    # Vercel X-Forwarded-For-u özü yazır (müştərinin göndərdiyini əvəz edir); lokalda başlığa etibar etmirik.
+    if os.environ.get("VERCEL"):
+        forwarded = request.headers.get("x-forwarded-for", "")
+        if forwarded:
+            return forwarded.split(",")[0].strip()[:64]
+    return request.client.host[:64] if request.client else None
+
+
+def _locked_by(times: list, limit: int, now) -> bool:
+    """Son `limit` cəhd LOCKOUT_SECONDS içində olubsa, blok sonuncu cəhddən 15 dəqiqə sürür."""
+    times = sorted(times, reverse=True)[:limit]
+    if len(times) < limit:
+        return False
+    newest, oldest = times[0], times[-1]
+    span = newest - oldest
+    age = now - newest
+    if hasattr(span, "total_seconds"):
+        span, age = span.total_seconds(), age.total_seconds()
+    return span <= LOCKOUT_SECONDS and age < LOCKOUT_SECONDS
+
+
+def is_locked(email: str, ip: Optional[str] = None) -> bool:
+    now = datetime.utcnow()
+    try:
+        with SessionLocal() as db:
+            rows = db.execute(select(LoginFailure.ip, LoginFailure.created_at).where(
+                LoginFailure.email == email,
+                LoginFailure.created_at >= now - timedelta(seconds=2 * LOCKOUT_SECONDS))).all()
+    except Exception:
+        log.warning("login_failures_unavailable", exc_info=True)
+        return _locked_by(list(_failures[(email, ip)]), MAX_FAILED_LOGINS, time.monotonic())
+    same_ip = [at for row_ip, at in rows if row_ip == ip]
+    return (_locked_by(same_ip, MAX_FAILED_LOGINS, now)
+            or _locked_by([at for _, at in rows], ACCOUNT_MAX_FAILED_LOGINS, now))
+
+
+def record_failure(email: str, ip: Optional[str] = None) -> None:
+    now = datetime.utcnow()
+    try:
+        with SessionLocal() as db:
+            db.add(LoginFailure(email=email[:255], ip=ip, created_at=now))
+            db.query(LoginFailure).filter(
+                LoginFailure.created_at < now - timedelta(seconds=FAILURE_RETENTION)).delete()
+            db.commit()
+    except Exception:
+        log.warning("login_failures_unavailable", exc_info=True)
+        _failures[(email, ip)].append(time.monotonic())
+
+
+def clear_failures(email: str, ip: Optional[str] = None) -> None:
+    _failures.pop((email, ip), None)
+    try:
+        with SessionLocal() as db:
+            db.query(LoginFailure).filter(LoginFailure.email == email, LoginFailure.ip == ip).delete()
+            db.commit()
+    except Exception:
+        log.warning("login_failures_unavailable", exc_info=True)
 
 
 def user_count() -> int:

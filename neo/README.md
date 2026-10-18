@@ -52,7 +52,7 @@ Admin panelin bütün səhifələri giriş tələb edir. **İlk dəfə** açanda
 | Administrator (`admin`) | + istifadəçiləri yaradır, rolunu dəyişir, deaktiv edir, şifrəsini sıfırlayır |
 
 - Sessiya imzalı cookie-dədir (12 saat). Açar: `.env`-dəki `SESSION_SECRET`; yoxdursa bir dəfə yaradılıb `neo/.session_secret`-ə yazılır (gitignore-da). **Production-da `.env`-də təyin et.**
-- Şifrə dəyişəndə və ya istifadəçi deaktiv ediləndə onun açıq sessiyaları avtomatik bağlanır. 5 səhv cəhddən sonra giriş 15 dəqiqə bloklanır. Bütün POST formları CSRF token ilə qorunur.
+- Şifrə dəyişəndə və ya istifadəçi deaktiv ediləndə onun açıq sessiyaları avtomatik bağlanır. Eyni IP-dən 5 səhv cəhddən (və ya bir hesaba bütün IP-lərdən 20 cəhddən) sonra giriş son cəhddən 15 dəqiqə bloklanır; sayğac bazadadır (`login_failures`), Vercel-in bütün instansiyaları onu görür. Vercel-də sessiya cookie-si yalnız HTTPS ilə gedir (`Secure`; başqa HTTPS mühitində `SESSION_HTTPS_ONLY=1`). Bütün POST formları CSRF token ilə qorunur.
 - Sonuncu aktiv admin-i deaktiv etmək və ya rolunu endirmək olmur.
 
 ## Baza sxemi və miqrasiyalar
@@ -96,7 +96,7 @@ OFFER_AGENT_KEY=...         # təklif yaratmaq və oxumaq
 OFFER_AGENT_ADMIN_KEY=...   # yalnız paketləri dəyişmək
 ```
 
-Cədvəl `offers` (miqrasiya 0008) təklifin metadata-sını saxlayır (PDF saxlanmır, agent yenidən yaradır). Lead siyahısındakı **Qiymət təklifi yarat** linki formanı lead-in başlığı, mətni və qurum adı ilə doldurur. Kod: `app/offer_client.py` (agent client, giriş yoxlaması, xəta xəritəsi), `app/offer_routes.py` (route-lar). İlk istifadədən əvvəl admin **Paketlər** səhifəsindən hər brend üçün paketləri yükləməlidir, yoxsa agent 409 qaytarır.
+Cədvəl `offers` (miqrasiya 0009) təklifin metadata-sını saxlayır (PDF saxlanmır, agent yenidən yaradır). Lead siyahısındakı **Qiymət təklifi yarat** linki formanı lead-in başlığı, mətni və qurum adı ilə doldurur. Kod: `app/offer_client.py` (agent client, giriş yoxlaması, xəta xəritəsi), `app/offer_routes.py` (route-lar). İlk istifadədən əvvəl admin **Paketlər** səhifəsindən hər brend üçün paketləri yükləməlidir, yoxsa agent 409 qaytarır.
 
 ## İşə salma (production — avtomatik 24/7 scraping)
 

@@ -74,6 +74,8 @@
       return new Promise(function (resolve) {
         var d = $('pk-dialog'); $('pk-dlg-t').textContent = title; $('pk-dlg-p').textContent = text; $('pk-dlg-ok').textContent = okLabel || 'Təsdiqlə';
         d.addEventListener('close', function once() { d.removeEventListener('close', once); resolve(d.returnValue === 'ok'); });
+        // Esc ilə bağlananda returnValue dəyişmir — əvvəlki "ok" qalmasın.
+        d.returnValue = '';
         d.showModal();
       });
     }
@@ -191,7 +193,7 @@
         var sec = { items: items }, t = clean(s.title); if (t.az) sec.title = t; menu.push(sec);
       });
       var p = { id: id, name: clean(cur.name), price: price, unit: unit, menu: menu,
-                sort_order: parseInt(cur.sort_order, 10) || 0, active: !!cur.active, example: false };
+                sort_order: parseInt(cur.sort_order, 10) || 0, active: !!cur.active, example: !!cur.example };
       if (cur.description != null) p.description = cur.description;
       return p;
     }

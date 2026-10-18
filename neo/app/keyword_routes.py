@@ -11,6 +11,7 @@ from urllib.parse import quote, urlencode
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 
 from app import keywords
 from app.auth import security
@@ -56,7 +57,8 @@ def keywords_page(request: Request, area: str = "", scope: str = "", q: str = ""
         if scope in KEYWORD_SCOPES:
             query = query.where(Keyword.applies_to == scope)
         if q.strip():
-            query = query.where(Keyword.term.ilike(f"%{q.strip()}%"))
+            needle = q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            query = query.where(Keyword.term.ilike(f"%{needle}%", escape="\\"))
         rows = list(db.scalars(query))
     return request.app.state.templates.TemplateResponse(request, "keywords.html", {
         "request": request, "active": "keywords", "areas": areas, "area_by_id": {a.id: a for a in areas},
@@ -82,25 +84,42 @@ def keywords_add(terms: str = Form(...), interest_area_id: int = Form(...), appl
         return _go(err=f"Açar söz çox uzundur (maks. {MAX_TERM_LENGTH} simvol): {too_long[0][:40]}…")
     negative = is_negative == "1"
 
-    added, skipped = 0, 0
+    added, skipped, opposite = 0, 0, []
+    seen: set[str] = set()
     with security.SessionLocal() as db:
         if db.get(InterestArea, interest_area_id) is None:
             return _go(err="Maraq sahəsi tapılmadı")
         for term in wanted:
-            exists = db.scalar(select(func.count()).select_from(Keyword).where(
-                func.lower(Keyword.term) == term.lower(), Keyword.interest_area_id == interest_area_id,
-                Keyword.applies_to == applies_to, Keyword.is_negative.is_(negative)))
-            if exists:
+            if term.lower() in seen:
                 skipped += 1
+                continue
+            seen.add(term.lower())
+            # Bazada unikal açar (sahə, söz, kontekst) polaritetsizdir — eyni söz həm müsbət, həm mənfi ola bilməz.
+            existing = db.scalars(select(Keyword.is_negative).where(
+                func.lower(Keyword.term) == term.lower(), Keyword.interest_area_id == interest_area_id,
+                Keyword.applies_to == applies_to)).all()
+            if existing:
+                if negative in existing:
+                    skipped += 1
+                else:
+                    opposite.append(term)
                 continue
             db.add(Keyword(interest_area_id=interest_area_id, term=term,
                            language=_language(term) if language == "auto" else language,
                            match="phrase" if match == "prefix" and " " in term else match,
                            applies_to=applies_to, is_negative=negative, is_active=True))
             added += 1
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            return _go(err="Açar sözlər əlavə olunmadı: bəziləri artıq mövcuddur", area=str(interest_area_id))
     keywords.invalidate()
     note = f" ({skipped} artıq var idi)" if skipped else ""
+    if opposite:
+        kind = "müsbət" if negative else "mənfi"
+        return _go(err=f"{added} açar söz əlavə olundu{note}. Bu sözlər artıq {kind} kimi var, əvvəlcə onu silin: "
+                       + ", ".join(opposite[:5]), area=str(interest_area_id))
     return _go(msg=f"{added} açar söz əlavə olundu{note}", area=str(interest_area_id))
 
 

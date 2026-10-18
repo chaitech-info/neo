@@ -14,6 +14,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy import select
+from starlette.concurrency import run_in_threadpool
 
 from app import offer_client as agent
 from app.auth import security
@@ -31,7 +32,7 @@ MAX_LEAD_TEXT = agent.MAX_MESSAGE_LENGTH
 async def verify_csrf_header(request: Request) -> None:
     sent = request.headers.get("x-csrf-token", "")
     expected = request.session.get("csrf", "")
-    if not expected or not hmac.compare_digest(sent, expected):
+    if not expected or not hmac.compare_digest(sent.encode(), expected.encode()):
         raise HTTPException(status_code=403, detail="Sessiya vaxtı bitib. Səhifəni yeniləyin.")
 
 
@@ -85,18 +86,27 @@ async def offers_create(request: Request, me: User = Depends(REQUIRE["sales"]),
         return _error(str(exc), 422)
     lead_id = raw.get("lead_id") if isinstance(raw.get("lead_id"), str) else None
 
+    # Agent çağırışı (60 s-ə qədər) və DB sinxrondur — threadpool-da, yoxsa async route bütün paneli dondururdu.
     try:
-        data = agent.create_offer(body)
+        data = await run_in_threadpool(agent.create_offer, body)
     except agent.OfferAgentError as exc:
         return _agent_error(exc)
     if data["status"] != "ok":
         return JSONResponse(data)
 
-    with security.SessionLocal() as db:
-        if lead_id and db.get(LeadRecord, lead_id) is None:
-            lead_id = None
-        if db.scalar(select(OfferRecord.id).where(OfferRecord.offer_id == str(data["offer_id"]))) is None:
-            record_offer(db, data, body, me, lead_id)
+    def save() -> None:
+        nonlocal lead_id
+        with security.SessionLocal() as db:
+            if lead_id and db.get(LeadRecord, lead_id) is None:
+                lead_id = None
+            if db.scalar(select(OfferRecord.id).where(OfferRecord.offer_id == str(data["offer_id"]))) is None:
+                record_offer(db, data, body, me, lead_id)
+
+    try:
+        await run_in_threadpool(save)
+    except Exception:
+        # Təklif agentdə artıq yaranıb — istifadəçi onu görsün, yalnız tarixçəyə düşmədiyi loglansın.
+        log.exception("offer_record_failed", offer_id=data.get("offer_id"))
     log.info("offer_created", offer_id=data["offer_id"], brand=body["brand"], user=me.email,
              total=(data.get("totals") or {}).get("total"), sample=bool(data.get("sample")), lead=lead_id)
     return JSONResponse(data)
@@ -213,7 +223,7 @@ async def packages_replace(brand: str, request: Request, me: User = Depends(REQU
     if len(set(ids)) != len(ids):
         return _error("Paket id-ləri təkrarlanır", 422)
     try:
-        result = agent.replace_packages(brand, packages)
+        result = await run_in_threadpool(agent.replace_packages, brand, packages)
     except agent.OfferAgentError as exc:
         return _agent_error(exc)
     log.info("offer_packages_replaced", brand=brand, count=len(packages), user=me.email)
@@ -233,7 +243,7 @@ async def packages_update(brand: str, package_id: str, request: Request, me: Use
     if not isinstance(raw, dict) or raw.get("id") != package_id:
         return _error("Paketin məlumatı yanlışdır", 422)
     try:
-        result = agent.update_package(brand, package_id, raw)
+        result = await run_in_threadpool(agent.update_package, brand, package_id, raw)
     except agent.OfferAgentError as exc:
         return _agent_error(exc)
     log.info("offer_package_saved", brand=brand, package=package_id, user=me.email)

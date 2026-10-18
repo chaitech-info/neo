@@ -108,7 +108,7 @@ class LeadRepository:
         )
         return list(self.session.execute(stmt).scalars().all())
 
-    def list_rejected(self, by: str) -> list[LeadRecord]:
+    def list_rejected(self, by: str, limit: int = 500) -> list[LeadRecord]:
         """Rədd edilənlər: `human` — son rədd edən insandır (ən təzə qərar əvvəldə, səhvən
         basılanı tez tapmaq üçün); `ai` — eşiyə ən yaxın skor əvvəldə (səhv rədd ehtimalı
         ən yüksək olanlar)."""
@@ -118,7 +118,8 @@ class LeadRepository:
             stmt = stmt.order_by(LeadRecord.reviewed_at.desc().nullslast())
         else:
             stmt = stmt.order_by(LeadRecord.ai_score.desc().nullslast(), LeadRecord.scraped_at.desc())
-        return list(self.session.execute(stmt).scalars().all())
+        # Limitsiz minlərlə AI-rədd sətri HTML-i Vercel-in 4.5 MB cavab limitindən böyük edirdi.
+        return list(self.session.execute(stmt.limit(limit)).scalars().all())
 
     def contact_counts(self, keys: list[str]) -> dict[str, int]:
         if not keys:

@@ -45,6 +45,9 @@ def opp_id(factory):
         return opp.id
 
 
+SEND_KEY = "qaralama-acari-1234567890"
+
+
 class FakeSMTP:
     sent = []
 
@@ -117,10 +120,14 @@ def test_send_writes_history_task_and_moves_stage(factory, opp_id, monkeypatch):
     monkeypatch.setattr(mail.smtplib, "SMTP", FakeSMTP)
     monkeypatch.setattr(mail.send_email, "__kwdefaults__", {"smtp_factory": FakeSMTP})
 
-    r = TestClient(web.app).post(f"/opportunities/{opp_id}/email/send", data={
-        "to": "Rauf@Sahil.az", "subject": "Nahar təklifi", "body": "Hörmətli Rauf bəy, sizə təklifimiz var.",
-        "language": "az"}, follow_redirects=False)
+    form = {"to": "Rauf@Sahil.az", "subject": "Nahar təklifi", "body": "Hörmətli Rauf bəy, sizə təklifimiz var.",
+            "language": "az", "send_key": SEND_KEY}
+    r = TestClient(web.app).post(f"/opportunities/{opp_id}/email/send", data=form, follow_redirects=False)
     assert "msg=" in r.headers["location"]
+    # İkiqat klik (eyni qaralama formu) — ikinci məktub getmir.
+    r = TestClient(web.app).post(f"/opportunities/{opp_id}/email/send", data=form, follow_redirects=False)
+    assert "artıq göndərilib" in __import__("urllib.parse").parse.unquote(r.headers["location"])
+    assert len(FakeSMTP.sent) == 1
 
     msg = FakeSMTP.sent[0]
     assert msg["To"] == "rauf@sahil.az" and msg["Reply-To"] == "test@neo.az"
@@ -137,7 +144,8 @@ def test_send_writes_history_task_and_moves_stage(factory, opp_id, monkeypatch):
 
 def test_send_without_smtp_records_failure(factory, opp_id):
     r = TestClient(web.app).post(f"/opportunities/{opp_id}/email/send", data={
-        "to": "rauf@sahil.az", "subject": "S", "body": "Kifayət qədər uzun məktub mətni."}, follow_redirects=False)
+        "to": "rauf@sahil.az", "subject": "S", "body": "Kifayət qədər uzun məktub mətni.", "send_key": SEND_KEY},
+        follow_redirects=False)
     assert "err=" in r.headers["location"]
     with factory() as s:
         out = s.scalars(select(Outreach)).one()
@@ -145,10 +153,21 @@ def test_send_without_smtp_records_failure(factory, opp_id):
         assert s.get(Opportunity, opp_id).stage == "new"
 
 
-def test_send_rejects_bad_address(factory, opp_id):
+def test_send_rejects_bad_address_and_keeps_draft(factory, opp_id):
     r = TestClient(web.app).post(f"/opportunities/{opp_id}/email/send", data={
-        "to": "yox", "subject": "S", "body": "Kifayət qədər uzun məktub mətni."}, follow_redirects=False)
-    assert "err=" in r.headers["location"]
+        "to": "yox", "subject": "S", "body": "Redaktə olunmuş uzun məktub mətni.", "send_key": SEND_KEY},
+        follow_redirects=False)
+    assert r.status_code == 200 and "email ünvanı yanlışdır" in r.text
+    assert "Redaktə olunmuş uzun məktub mətni." in r.text
+
+
+def test_send_subject_newlines_are_flattened(factory, opp_id):
+    r = TestClient(web.app).post(f"/opportunities/{opp_id}/email/send", data={
+        "to": "rauf@sahil.az", "subject": "S\r\nBcc: x@y.az", "body": "Kifayət qədər uzun məktub mətni.",
+        "send_key": SEND_KEY}, follow_redirects=False)
+    assert r.status_code == 303
+    with factory() as s:
+        assert s.scalars(select(Outreach.subject)).one() == "S Bcc: x@y.az"
 
 
 @pytest.mark.real_auth

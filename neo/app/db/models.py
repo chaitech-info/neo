@@ -259,6 +259,17 @@ class User(Base):
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
+class LoginFailure(Base):
+    """Səhv giriş cəhdi — bloklama bazada saxlanılır ki, bütün (serverless) instansiyalar eyni sayğacı görsün."""
+
+    __tablename__ = "login_failures"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), index=True)
+    ip: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+
+
 class Opportunity(Base):
     __tablename__ = "opportunities"
 
@@ -368,3 +379,5 @@ class Outreach(Base):
     user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)  # boş = sistem
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Qaralama formunun birdəfəlik açarı — "Göndər" iki dəfə basılsa, ikinci sorğu unikal açara dəyir.
+    send_key: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, unique=True, index=True)

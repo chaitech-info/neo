@@ -88,8 +88,9 @@
           {% endif %}
         </div>
       {% endif %}
-      {% if request.query_params.get('err') %}
-        <div class="flash error" role="alert">{{ request.query_params.get('err') }}</div>
+      {% set err_text = page_error or request.query_params.get('err') %}
+      {% if err_text %}
+        <div class="flash error" role="alert">{{ err_text }}</div>
       {% endif %}
       {% block content %}{% endblock %}
     </main>

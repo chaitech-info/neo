@@ -5,6 +5,8 @@ manager+ məsul şəxsi dəyişir.
 """
 from __future__ import annotations
 
+import re
+import secrets
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from urllib.parse import quote
@@ -12,6 +14,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 
 from app import crm
 from app.auth import security
@@ -57,6 +60,7 @@ def _active_users(db) -> list[User]:
 
 
 CLOSED_SHOWN = 15  # lövhədə qazanılan/uduzulan sütunlarda son N fürsət
+MAX_EXPECTED_VALUE = Decimal("1000000000000")  # Numeric(14, 2) → ən çox 12 tam rəqəm
 
 
 @router.get("/opportunities")
@@ -105,6 +109,7 @@ def _opp_context(db, opp: Opportunity) -> dict:
         "default_language": detect_language(lead.raw_text if lead else opp.title),
         "smtp_ready": mail.smtp_configured(),
         "tasks": crm.opp_tasks(db, opp.id), "users": {u.id: u for u in users}, "user_list": users,
+        "owner": db.get(User, opp.owner_id) if opp.owner_id else None,  # deaktiv olsa da göstərilir
         "stages": crm.pipeline_for(opp), "stage_names": crm.STAGE_NAMES,
         "lost_reasons": crm.LOST_REASON_NAMES, "task_status_names": crm.TASK_STATUS_NAMES,
         "priority_names": crm.PRIORITY_NAMES,
@@ -147,37 +152,64 @@ def opportunity_email_draft(request: Request, opp_id: int, contact_id: str = For
         except OutreachError as exc:
             return _go(path,err=str(exc))
     draft.update(body=mail.with_signature(draft["body"], me.full_name), language=language,
-                 to=contact.email if contact and contact.email else "", contact_id=contact.id if contact else "")
+                 to=contact.email if contact and contact.email else "", contact_id=contact.id if contact else "",
+                 send_key=secrets.token_urlsafe(24))
     return _render(request, "opportunity.html", {**context, "draft": draft})
 
 
+SEND_KEY_RE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
+
+
 @router.post("/opportunities/{opp_id}/email/send", dependencies=[Depends(verify_csrf)])
-def opportunity_email_send(opp_id: int, to: str = Form(...), subject: str = Form(...), body: str = Form(...),
-                           language: str = Form(""), contact_id: str = Form(""),
-                           me: User = Depends(REQUIRE["sales"])):
+def opportunity_email_send(request: Request, opp_id: int, to: str = Form(...), subject: str = Form(...),
+                           body: str = Form(...), language: str = Form(""), contact_id: str = Form(""),
+                           send_key: str = Form(""), me: User = Depends(REQUIRE["sales"])):
     path = f"/opportunities/{opp_id}"
-    to, subject, body = to.strip().lower(), subject.strip(), body.strip()
-    if not EMAIL_RE.fullmatch(to):
-        return _go(path,err="Alıcının email ünvanı yanlışdır")
+    # Sətir sonu mövzuda başlıq inyeksiyası / SMTP xətası (500) verirdi.
+    to, subject, body = to.strip().lower(), " ".join(subject.split()), body.strip()
+
+    def back_to_draft(error: str):
+        # Yoxlama xətasında redaktə olunmuş mətn itməsin — qaralama formu doldurulmuş qalır.
+        with security.SessionLocal() as db:
+            opp = db.get(Opportunity, opp_id)
+            if opp is None:
+                return _go("/opportunities", err="Fürsət tapılmadı")
+            context = _opp_context(db, opp)
+        draft = {"to": to, "subject": subject, "body": body, "language": language[:2],
+                 "contact_id": contact_id if contact_id.isdigit() else "", "send_key": send_key}
+        return _render(request, "opportunity.html", {**context, "draft": draft, "page_error": error})
+
+    if not EMAIL_RE.fullmatch(to) or len(to) > 255:
+        return back_to_draft("Alıcının email ünvanı yanlışdır")
     if not subject or len(body) < 20:
-        return _go(path,err="Mövzu və məktub mətni boş ola bilməz")
+        return back_to_draft("Mövzu və məktub mətni boş ola bilməz")
+    if not SEND_KEY_RE.fullmatch(send_key):
+        return _go(path, err="Forma köhnəlib — məktubu yenidən yaradın")
     with security.SessionLocal() as db:
         opp = db.get(Opportunity, opp_id)
         if opp is None:
             return _go("/opportunities", err="Fürsət tapılmadı")
         contact = db.get(Contact, int(contact_id)) if contact_id.isdigit() else None
+        # Göndərməzdən əvvəl sətir rezerv olunur: ikinci klik eyni send_key-ə dəyib dayanır.
+        row = Outreach(kind="email", lead_key=opp.lead_key, opportunity_id=opp.id,
+                       contact_id=contact.id if contact else None, to_address=to, subject=subject[:200],
+                       body=body, language=language[:2] or None, status="failed", error="Göndərilir…",
+                       user_id=me.id, created_at=datetime.utcnow(), send_key=send_key)
+        db.add(row)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            return _go(path, msg="Bu məktub artıq göndərilib")
         try:
             message_id = mail.send_email(to=to, subject=subject[:200], body=body, reply_to=me.email)
         except OutreachError as exc:
-            db.add(Outreach(kind="email", lead_key=opp.lead_key, opportunity_id=opp.id,
-                            contact_id=contact.id if contact else None, to_address=to, subject=subject[:200],
-                            body=body, language=language[:2] or None, status="failed", error=str(exc)[:500],
-                            user_id=me.id, created_at=datetime.utcnow()))
+            row.error = str(exc)[:500]
             db.commit()
-            return _go(path,err=str(exc))
+            return _go(path, err=str(exc))
         crm.email_sent(db, opp, to=to, subject=subject[:200], body=body, language=language[:2] or None,
-                       contact_id=contact.id if contact else None, user_id=me.id, message_id=message_id)
-    return _go(path,msg=f"Məktub göndərildi: {to}. 3 gün sonra cavabı yoxlamaq üçün tapşırıq açıldı")
+                       contact_id=contact.id if contact else None, user_id=me.id, message_id=message_id, row=row)
+    return _go(path, msg=f"Məktub göndərildi: {to}. 3 gün sonra cavabı yoxlamaq üçün tapşırıq açıldı")
 
 
 @router.post("/opportunities/{opp_id}/stage", dependencies=[Depends(verify_csrf)])
@@ -204,9 +236,13 @@ def opportunity_details(opp_id: int, expected_value: str = Form(""), expected_cl
         if opp is None:
             return _go("/opportunities", err="Fürsət tapılmadı")
         try:
-            opp.expected_value = Decimal(expected_value.replace(",", ".")) if expected_value.strip() else None
+            value = Decimal(expected_value.replace(",", ".").replace(" ", "")) if expected_value.strip() else None
         except InvalidOperation:
             return _go(path, err="Gözlənilən dəyər rəqəm olmalıdır")
+        # Numeric(14, 2): NaN/Infinity və 12 rəqəmdən böyük dəyər bazada overflow (500) verirdi.
+        if value is not None and (not value.is_finite() or value < 0 or value >= MAX_EXPECTED_VALUE):
+            return _go(path, err="Gözlənilən dəyər 0 ilə 999 999 999 999 arasında olmalıdır")
+        opp.expected_value = value.quantize(Decimal("0.01")) if value is not None else None
         try:
             opp.expected_close_on = datetime.fromisoformat(expected_close_on).date() if expected_close_on else None
         except ValueError:
@@ -216,7 +252,8 @@ def opportunity_details(opp_id: int, expected_value: str = Form(""), expected_cl
             # Başqasına təhvil vermək menecer işidir; satış yalnız özünə götürə bilər.
             if not security.has_role(me, "manager") and new_owner != me.id:
                 return _go(path, err="Məsul şəxsi yalnız menecer dəyişə bilər")
-            if new_owner is not None and db.get(User, new_owner) is None:
+            target = db.get(User, new_owner) if new_owner is not None else None
+            if new_owner is not None and (target is None or not target.is_active):
                 return _go(path, err="İstifadəçi tapılmadı")
             opp.owner_id = new_owner
         opp.updated_at = datetime.utcnow()
@@ -233,10 +270,12 @@ def opportunity_add_task(opp_id: int, title: str = Form(...), due_at: str = Form
         opp = db.get(Opportunity, opp_id)
         if opp is None:
             return _go("/opportunities", err="Fürsət tapılmadı")
+        assignee = int(assignee_id) if assignee_id.isdigit() else me.id
+        target = db.get(User, assignee)
+        if target is None or not target.is_active:
+            return _go(path, err="Məsul istifadəçi tapılmadı")
         try:
-            crm.add_task(db, opp, title, _parse_local_datetime(due_at),
-                         int(assignee_id) if assignee_id.isdigit() else me.id,
-                         me.id, priority, description)
+            crm.add_task(db, opp, title, _parse_local_datetime(due_at), assignee, me.id, priority, description)
         except crm.CrmError as exc:
             return _go(path, err=str(exc))
     return _go(path, msg="Tapşırıq əlavə olundu")
@@ -273,7 +312,7 @@ def opportunity_add_contact(opp_id: int, name: str = Form(""), title: str = Form
     email, linkedin_url = email.strip().lower(), linkedin_url.strip()
     if not (name.strip() or email or phone.strip() or linkedin_url):
         return _go(path, err="Ad, email, telefon və ya LinkedIn — ən azı biri lazımdır")
-    if email and not EMAIL_RE.fullmatch(email):
+    if email and (len(email) > 255 or not EMAIL_RE.fullmatch(email)):
         return _go(path, err="Email formatı yanlışdır")
     if linkedin_url and not linkedin_url.startswith("https://"):
         return _go(path, err="LinkedIn linki https:// ilə başlamalıdır")
@@ -335,7 +374,7 @@ def tasks_page(request: Request, who: str = "me", status: str = "open", me: User
 @router.post("/tasks/{task_id}/status", dependencies=[Depends(verify_csrf)])
 def task_status(task_id: int, status: str = Form(...), back: str = Form("/tasks"),
                 me: User = Depends(REQUIRE["sales"])):
-    back = back if back.startswith("/") and not back.startswith("//") else "/tasks"
+    back = back if back.startswith("/") and not back.startswith("//") and "\\" not in back else "/tasks"
     with security.SessionLocal() as db:
         task = db.get(Task, task_id)
         if task is None:

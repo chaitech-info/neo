@@ -68,6 +68,7 @@
         follow: document.getElementById("f-follow"),
       };
       let lastId = 0;
+      let boot = null;
       let all = [];
 
       function visible(e) {
@@ -123,8 +124,22 @@
 
       async function poll() {
         try {
-          const res = await fetch("/api/logs?after=" + lastId);
-          const data = await res.json();
+          let res = await fetch("/api/logs?after=" + lastId);
+          if (res.status === 401) {
+            // Sessiya bitib — sonsuz xəta polling-i yox, aydın mesaj.
+            document.getElementById("running-text").textContent = "Sessiyanın vaxtı bitib — səhifəni yeniləyib yenidən daxil olun.";
+            return;
+          }
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          let data = await res.json();
+          if (boot && data.boot !== boot) {
+            // Server yenidən başlayıb: id-lər 1-dən başlayır, köhnə lastId yeni yazıları gizlədərdi.
+            all = []; lastId = 0; render();
+            res = await fetch("/api/logs?after=0");
+            if (!res.ok) throw new Error("HTTP " + res.status);
+            data = await res.json();
+          }
+          boot = data.boot;
           if (data.entries.length) {
             all = all.concat(data.entries).slice(-5000);
             lastId = data.entries[data.entries.length - 1].id;

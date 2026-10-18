@@ -136,3 +136,17 @@ def test_panel_edits_keywords_and_areas(db):
 
     page = client.get("/settings/keywords?q=keytrinq")
     assert page.status_code == 200 and "keytrinq" in page.text
+    assert "keytrinq" not in client.get("/settings/keywords?q=k%25q").text  # % wildcard deyil
+
+
+def test_same_term_positive_and_negative_is_an_error_not_500(db):
+    client = TestClient(web.app)
+    with db() as s:
+        area_id = s.scalars(select(InterestArea.id).where(InterestArea.code == "staff_meals")).one()
+    r = client.post("/settings/keywords", data={"terms": "keytrinq\nyeni söz\nYeni söz", "interest_area_id": area_id,
+                                                 "applies_to": "all", "is_negative": "1"}, follow_redirects=False)
+    assert r.status_code == 303 and "err=" in r.headers["location"]
+    with db() as s:
+        rows = s.scalars(select(Keyword).where(Keyword.interest_area_id == area_id,
+                                               Keyword.term.in_(("keytrinq", "yeni söz", "Yeni söz")))).all()
+    assert {(k.term, k.is_negative) for k in rows} == {("keytrinq", False), ("yeni söz", True)}

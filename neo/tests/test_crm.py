@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from app import crm, web
@@ -158,3 +159,58 @@ def test_web_rejects_bad_input(factory):
     assert client.get("/opportunities/9999", follow_redirects=False).headers["location"].startswith("/opportunities?err=")
     open_redirect = client.post("/tasks/1/status", data={"status": "done", "back": "//evil.com"}, follow_redirects=False)
     assert open_redirect.headers["location"].startswith("/tasks")
+    backslash = client.post("/tasks/1/status", data={"status": "done", "back": "/\\evil.com"}, follow_redirects=False)
+    assert backslash.headers["location"].startswith("/tasks?")
+
+    # Numeric(14, 2) overflow, NaN, Infinity və mənfi dəyər — 500 yox, xəta mesajı.
+    for value in ("100000000000000", "NaN", "Infinity", "-5"):
+        r = client.post(f"/opportunities/{opp_id}/details", data={"expected_value": value, "owner_id": "1"},
+                        follow_redirects=False)
+        assert "err=" in r.headers["location"], value
+    ok = client.post(f"/opportunities/{opp_id}/details", data={"expected_value": "1500,50", "owner_id": "1"},
+                     follow_redirects=False)
+    assert "msg=" in ok.headers["location"]
+
+    ghost = client.post(f"/opportunities/{opp_id}/tasks", data={"title": "X", "assignee_id": "999"},
+                        follow_redirects=False)
+    assert "err=" in ghost.headers["location"]  # olmayan məsul → FK 500 yox
+    long_email = client.post(f"/opportunities/{opp_id}/contacts", data={"email": "a" * 250 + "@x.az"},
+                             follow_redirects=False)
+    assert "err=" in long_email.headers["location"]
+
+    # Səhifələrdə xam JSON yox, panel səhifəsi; API-lər JSON qalır.
+    bad_id = client.get("/opportunities/abc")
+    assert bad_id.status_code == 422 and "Yanlış sorğu" in bad_id.text
+    missing = client.get("/bele-sehife-yoxdur")
+    assert missing.status_code == 404 and "Səhifə tapılmadı" in missing.text
+    assert client.get("/api/logs?after=x").status_code == 422
+    assert "detail" in client.get("/api/logs?after=x").json()
+
+
+def test_double_approve_is_not_a_server_error(factory, monkeypatch):
+    key = _lead(factory, "https://sahil.az")
+
+    def race(*a, **k):
+        # Paralel ikinci sorğu: lead hələ pending görünürdü, fürsəti isə birinci yaradıb → UNIQUE(lead_key).
+        raise IntegrityError("INSERT INTO opportunities", {}, Exception("UNIQUE constraint failed"))
+
+    monkeypatch.setattr(web.crm, "convert_lead", race)
+    r = TestClient(web.app).post(f"/leads/{key}/approve", follow_redirects=False)
+    assert r.status_code == 303 and "err=" in r.headers["location"]
+
+
+def test_deactivated_owner_is_kept_on_save(factory):
+    key = _lead(factory, "https://sahil.az")
+    with factory() as s:
+        owner = create_user(s, email="old@neo.az", full_name="Köhnə Satış", role_code="sales", password="x" * 12)
+        opp = crm.convert_lead(s, key, owner.id).opportunity
+        owner.is_active = False
+        s.commit()
+    client = TestClient(web.app)
+    page = client.get(f"/opportunities/{opp.id}").text
+    assert f'<option value="{owner.id}" selected>Köhnə Satış (deaktiv)</option>' in page
+    r = client.post(f"/opportunities/{opp.id}/details", data={"expected_value": "", "owner_id": str(owner.id)},
+                    follow_redirects=False)
+    assert "msg=" in r.headers["location"]
+    with factory() as s:
+        assert s.get(Opportunity, opp.id).owner_id == owner.id

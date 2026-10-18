@@ -111,6 +111,7 @@
           <select name="owner_id">
             <option value="">— təyin edilməyib —</option>
             {% for u in user_list %}<option value="{{ u.id }}" {% if u.id == opp.owner_id %}selected{% endif %}>{{ u.full_name }}</option>{% endfor %}
+            {% if owner and not owner.is_active %}<option value="{{ owner.id }}" selected>{{ owner.full_name }} (deaktiv)</option>{% endif %}
           </select>
         </label>
         <button class="mc-btn" style="margin-top:14px" type="submit">Yadda saxla</button>
@@ -119,7 +120,7 @@
       <dl class="od-kv">
         <dt>Gözlənilən dəyər</dt><dd>{{ opp.expected_value or '—' }} {{ opp.currency }}</dd>
         <dt>Bağlanma</dt><dd>{{ opp.expected_close_on or '—' }}</dd>
-        <dt>Məsul</dt><dd>{{ users[opp.owner_id].full_name if opp.owner_id in users else '—' }}</dd>
+        <dt>Məsul</dt><dd>{% if owner %}{{ owner.full_name }}{% if not owner.is_active %} (deaktiv){% endif %}{% else %}—{% endif %}</dd>
       </dl>
       {% endif %}
     </section>
@@ -169,8 +170,9 @@
     <h2>Ünsiyyət <em>{{ outreach|length }}</em></h2>
     {% if can_edit %}
       {% if draft %}
-      <form method="post" action="/opportunities/{{ opp.id }}/email/send" class="em-form">
+      <form method="post" action="/opportunities/{{ opp.id }}/email/send" class="em-form" data-once>
         {{ csrf_field(request) }}
+        <input type="hidden" name="send_key" value="{{ draft.send_key }}">
         <input type="hidden" name="language" value="{{ draft.language }}">
         <input type="hidden" name="contact_id" value="{{ draft.contact_id }}">
         <label class="kw-f">Kimə<input type="email" name="to" required value="{{ draft.to }}" list="em-to" placeholder="ad@sirket.az"></label>
@@ -179,7 +181,7 @@
         <label class="kw-f">Məktub<textarea name="body" required rows="16">{{ draft.body }}</textarea></label>
         {% if not smtp_ready %}<p class="od-hint">Poçt hələ qoşulmayıb (SMTP_USER / SMTP_PASSWORD) — göndərmə xəta verəcək.</p>{% endif %}
         <div class="em-act">
-          <button class="mc-btn mc-btn-hero" type="submit">Göndər</button>
+          <button class="mc-btn mc-btn-hero" type="submit" data-busy="Göndərilir…">Göndər</button>
           <a class="mc-btn" href="/opportunities/{{ opp.id }}">Ləğv et</a>
         </div>
         <p class="od-hint">Məktub şirkət poçtundan gedir; cavab sənin ünvanına ({{ me.email }}) gələcək.</p>
@@ -213,8 +215,8 @@
           <details class="od-more"><summary>Mətni göstər</summary><div class="raw">{{ o.body }}</div></details>
         </div>
         {% if can_edit and o.kind == 'linkedin_comment' and o.status == 'failed' and not comment_sent %}
-        <form method="post" action="/opportunities/{{ opp.id }}/linkedin-comment">
-          {{ csrf_field(request) }}<button class="mc-btn mc-btn-sm" type="submit">Yenidən cəhd et</button>
+        <form method="post" action="/opportunities/{{ opp.id }}/linkedin-comment" data-once>
+          {{ csrf_field(request) }}<button class="mc-btn mc-btn-sm" type="submit" data-busy="Yazılır…">Yenidən cəhd et</button>
         </form>
         {% endif %}
       </li>
@@ -239,7 +241,7 @@
         </div>
         <span class="ct-src">{{ contact_sources.get(c.source, c.source) }}</span>
         {% if can_edit %}
-        <form method="post" action="/contacts/{{ c.id }}/delete">
+        <form method="post" action="/contacts/{{ c.id }}/delete" onsubmit="return confirm('Kontakt silinsin?')">
           {{ csrf_field(request) }}<input type="hidden" name="back" value="/opportunities/{{ opp.id }}">
           <button class="mc-btn mc-btn-sm" type="submit" title="Kontaktı sil" aria-label="Kontaktı sil">×</button>
         </form>
@@ -278,5 +280,14 @@
       function sync() { box.hidden = sel.value !== 'lost'; }
       sel.addEventListener('change', sync); sync();
     })();
+    /* data-once formları ikinci dəfə göndərilməsin (ikiqat klik → iki məktub / iki şərh). */
+    document.querySelectorAll('form[data-once]').forEach(function (f) {
+      f.addEventListener('submit', function (e) {
+        if (f.dataset.sent) { e.preventDefault(); return; }
+        f.dataset.sent = '1';
+        var b = f.querySelector('button[type=submit]');
+        if (b) { b.disabled = true; if (b.dataset.busy) b.textContent = b.dataset.busy; }
+      });
+    });
   </script>
 {% endblock %}

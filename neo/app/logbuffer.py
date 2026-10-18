@@ -11,6 +11,7 @@ from __future__ import annotations
 import itertools
 import logging
 import re
+import secrets
 import sys
 from collections import deque
 from datetime import datetime
@@ -21,6 +22,8 @@ MAX_ENTRIES = 5000
 
 _entries: deque[dict] = deque(maxlen=MAX_ENTRIES)
 _ids = itertools.count(1)
+# Hər proses başlanğıcında yeni — id-lər yenidən 1-dən başlayanda brauzer köhnə `after`-i atsın.
+BOOT_ID = secrets.token_hex(4)
 
 # LinkedIn sorğusunun URL-ində Apify tokeni var (?token=...) — panelə çıxmasın.
 _SECRET_RE = re.compile(r"((?:token|api_key|apikey|key|password)=)[^&\s\"']+", re.IGNORECASE)
