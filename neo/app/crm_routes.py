@@ -179,7 +179,7 @@ def opportunity_email_send(request: Request, opp_id: int, to: str = Form(...), s
                  "contact_id": contact_id if contact_id.isdigit() else "", "send_key": send_key}
         return _render(request, "opportunity.html", {**context, "draft": draft, "page_error": error})
 
-    if not EMAIL_RE.fullmatch(to) or len(to) > 255:
+    if not EMAIL_RE.fullmatch(to) or len(to) > 254:
         return back_to_draft("Alıcının email ünvanı yanlışdır")
     if not subject or len(body) < 20:
         return back_to_draft("Mövzu və məktub mətni boş ola bilməz")
@@ -312,7 +312,7 @@ def opportunity_add_contact(opp_id: int, name: str = Form(""), title: str = Form
     email, linkedin_url = email.strip().lower(), linkedin_url.strip()
     if not (name.strip() or email or phone.strip() or linkedin_url):
         return _go(path, err="Ad, email, telefon və ya LinkedIn — ən azı biri lazımdır")
-    if email and (len(email) > 255 or not EMAIL_RE.fullmatch(email)):
+    if email and (len(email) > 254 or not EMAIL_RE.fullmatch(email)):  # RFC 5321: ən çox 254 simvol
         return _go(path, err="Email formatı yanlışdır")
     if linkedin_url and not linkedin_url.startswith("https://"):
         return _go(path, err="LinkedIn linki https:// ilə başlamalıdır")
