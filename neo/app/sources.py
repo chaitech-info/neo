@@ -34,7 +34,6 @@ from app.scrapers.base import BaseScraper
 from app.scrapers.events import ExpoCenterScraper
 from app.scrapers.intl import IntlTenderScraper
 from app.scrapers.jobboards import HELLOJOB, POSITION, jobboard_scraper
-from app.scrapers.jobsearch import JobSearchScraper
 from app.scrapers.listing import LinkListSite, listing_scraper
 from app.scrapers.media import MediaScraper
 from app.scrapers.rss import RssSite, rss_scraper
@@ -155,9 +154,9 @@ SOURCES += [
           "55", "9,17", kind="corporate"),
 ]
 # --- Phase 2: iş elanı saytları — işçilərinə nahar verən şirkətlər ---------------------------
+# jobsearch.az 2026-10-20-də mənbələrdən çıxarılıb (Askar-ın qərarı). Scraper kodu (app/scrapers/jobsearch.py)
+# qalır; köhnə lead-lər yerində, `sync_sources` cədvəldə mənbəni deaktiv edir. Qaytarmaq: SourceSpec-i geri əlavə et.
 SOURCES += [
-    SourceSpec("jobsearch", "jobsearch.az — işçilərinə nahar verən şirkətlər", JobSearchScraper, "jobs", "5", "8",
-               "https://jobsearch.az", notes="JSON API; son 3 günün elanları, ~100 detal sorğusu"),
     SourceSpec("position", "position.az — işçilərinə nahar verən şirkətlər", jobboard_scraper(POSITION), "jobs",
                "25", "8", "https://position.az", notes="HTML; ilk 3 səhifə, yalnız yeni elanların detalı"),
     SourceSpec("hellojob", "hellojob.az — işçilərinə nahar verən şirkətlər", jobboard_scraper(HELLOJOB), "jobs",
