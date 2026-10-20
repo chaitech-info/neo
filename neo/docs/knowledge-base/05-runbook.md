@@ -159,7 +159,7 @@ Dəyişənlər `.env.example`-dadır. Hər üç yerdə eyni olmalıdır: lokal `
 ## Modal köçürülməsi və GitHub Actions tick-i (2026-10-14)
 - Scraper indi **`emilabdurahmanli05`** Modal workspace-indədir (köhnə `emil-abdurahmanli-project` app-ı 2026-10-14 10:00 Bakı vaxtından bəri işləmir). Trigger: `https://emilabdurahmanli05--neo-scraper-trigger.us-east.modal.run` (Vercel `MODAL_TRIGGER_URL`).
 - Bu workspace-də 5 cron limiti doludur (flutter-study-bot, panelflo-bot) — deploy **cron-suz**: `NEO_MODAL_CRON=off .venv/bin/modal deploy modal_app.py` (default profil; `MODAL_PROFILE=neo` lazım deyil).
-- Cədvəli `.github/workflows/neo-tick.yml` işlədir: hər 10 dəq `{"tick": true}` → `tick` son çağırışdan bəri bütün vaxtları tutur (`modal.Dict` `neo-tick-state`, ən çox 2 saat). GitHub secrets: `NEO_TRIGGER_URL`, `NEO_TRIGGER_TOKEN`. Əl ilə: Actions → neo-tick → Run workflow. GitHub 60 gün commit olmayan repoda planlı workflow-u dayandırır.
+- Cədvəli `.github/workflows/neo-tick.yml` işlədir: hər 10 dəq `{"tick": true}` → `tick` son çağırışdan bəri bütün vaxtları tutur (`modal.Dict` `neo-tick-state`, ən çox 24 saat — GitHub cron-u 4-5 saat gecikə bilir). GitHub secrets: `NEO_TRIGGER_URL`, `NEO_TRIGGER_TOKEN`. Əl ilə: Actions → neo-tick → Run workflow. GitHub 60 gün commit olmayan repoda planlı workflow-u dayandırır.
 - Vercel layihəsinin Root Directory-si `neo`-dur: deploy repo kökündən (`~/Documents/neo`) — `neo/neo`-dan "Root Directory does not exist" xətası verir.
 - Mac worker (LOCAL_ONLY mənbələr): `.env`-də `MODAL_PROFILE` yeni workspace-in profilinə (bu Mac-də `emilabdurahmanli05`) uyğun olmalıdır, yoxsa paneldən "Scrape indi" etender/fed/oxu/report sorğuları köhnə növbəyə gedər.
 

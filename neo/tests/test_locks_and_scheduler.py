@@ -119,7 +119,8 @@ def test_tick_catchup_window_covers_missed_runs():
     assert modal_app.catchup_window(now, "2026-10-14T12:21:00") == 10
     assert modal_app.catchup_window(now, "2026-10-14T12:01:00") == 30   # GitHub bir çağırışı buraxdı
     assert modal_app.catchup_window(now, "2026-10-14T12:31:00") == 0    # bu dəqiqə artıq işlənib
-    assert modal_app.catchup_window(now, "2026-10-13T12:31:00") == 120  # uzun fasilə — limit
+    assert modal_app.catchup_window(now, "2026-10-14T07:51:00") == 280   # GitHub 4-5 saat gecikdi — hamısı tutulur
+    assert modal_app.catchup_window(now, "2026-10-12T12:31:00") == 1440  # 2 gün fasilə — limit 24 saat
 
 
 def test_modal_trigger_refuses_everything_without_token(monkeypatch):

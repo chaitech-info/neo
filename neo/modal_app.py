@@ -28,7 +28,7 @@ TICK_MINUTES = 10
 # tick-i GitHub Actions çağırır (.github/workflows/neo-tick.yml → trigger {"tick": true}).
 MODAL_CRON = os.environ.get("NEO_MODAL_CRON", "on") != "off"
 TICK_STATE = "neo-tick-state"   # modal.Dict: son tick vaxtı — gecikən/buraxılan çağırışları tutmaq üçün
-MAX_CATCHUP_MIN = 120
+MAX_CATCHUP_MIN = 24 * 60  # GitHub cron-u bəzən 4-5 saat gecikir (2026-10-16 ölçüsü) — gün ərzində heç nə buraxılmasın
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
