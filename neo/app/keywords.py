@@ -154,13 +154,22 @@ def user_terms(session: Session, user_id: int) -> list[Term]:
     return [Term(t.strip(), m) for t, m in rows if t.strip()]
 
 
+_ASCII = str.maketrans("əşçöüğ", "escoug")
+
+
+def _loose(text: str) -> str:
+    """fold() + Azərbaycan hərfləri latın qarşılığına: "Xestexana" ↔ "xəstəxana" (insan yazanda çox vaxt belə yazır).
+    Yalnız istifadəçi sözlərinin çipi üçün — scrape seçimi (fold) dəyişmir."""
+    return fold(text).translate(_ASCII)
+
+
 def matched_terms(text: str, terms: list[Term]) -> list[str]:
     """Mətnə uyğun gələn terminlər (Validasiya kartında "sənin sözün" çipi). Mətn bir dəfə fold olunur."""
-    folded = fold(text or "")
+    folded = _loose(text or "")
     out = []
     for term in terms:
         tail = r"(?!\w)" if term.match == "word" else ""
-        if re.search(r"(?<!\w)" + re.escape(fold(term.text)) + tail, folded):
+        if re.search(r"(?<!\w)" + re.escape(_loose(term.text)) + tail, folded):
             out.append(term.text)
     return out
 

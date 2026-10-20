@@ -34,7 +34,7 @@ def test_same_story_by_organization(session):
     first = _lead(session, "marja", "ASELSAN Naxçıvanda zavod açacaq", org="ASELSAN", hours_ago=5)
     second = _lead(session, "fed", "Türkiyənin ASELSAN şirkəti Naxçıvanda - Zavod açacaq", org='"ASELSAN" ASC')
     assert find_story_duplicate(session, second, now=NOW) is first
-    assert mark_story_duplicate(session, second)
+    assert mark_story_duplicate(session, second, now=NOW)  # NOW sabitdir — 14 günlük pəncərə bugünə görə köhnəlməsin
     assert (second.status, second.duplicate_of) == ("duplicate", first.dedupe_key)
 
 

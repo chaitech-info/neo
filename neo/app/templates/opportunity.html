@@ -295,6 +295,7 @@
       function sync() { box.hidden = sel.value !== 'lost'; }
       sel.addEventListener('change', sync); sync();
     })();
+    {% if can_edit and leaders_ready %}
     /* Rəhbərlərin LinkedIn profilləri (app/leaders.py): data-auto — fürsət ilk dəfə açılanda özü axtarır. */
     (function () {
       var f = document.querySelector('form[data-leaders]');
@@ -317,6 +318,7 @@
       f.addEventListener('submit', function (e) { e.preventDefault(); run(true); });
       if (f.hasAttribute('data-auto')) run(false);
     })();
+    {% endif %}
     /* data-once formları ikinci dəfə göndərilməsin (ikiqat klik → iki məktub / iki şərh). */
     document.querySelectorAll('form[data-once]').forEach(function (f) {
       f.addEventListener('submit', function (e) {

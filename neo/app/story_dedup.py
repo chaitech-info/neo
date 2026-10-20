@@ -103,8 +103,8 @@ def find_story_duplicate(session: Session, record: LeadRecord, now: datetime | N
     return None
 
 
-def mark_story_duplicate(session: Session, record: LeadRecord) -> bool:
-    primary = find_story_duplicate(session, record)
+def mark_story_duplicate(session: Session, record: LeadRecord, now: datetime | None = None) -> bool:
+    primary = find_story_duplicate(session, record, now=now)
     if primary is None:
         return False
     record.status, record.duplicate_of = "duplicate", primary.dedupe_key
