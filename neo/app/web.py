@@ -121,8 +121,12 @@ SOURCE_KIND = {spec.key: spec.panel_kind for spec in SOURCE_SPECS}
 KIND_NAMES = {"tender": "Tender", "employer": "İşəgötürən", "news": "Xəbər"}
 
 
+# Reyestrdən çıxarılmış mənbələr — köhnə lead-ləri düzgün növlə göstərilsin ("Xəbər" yox).
+RETIRED_SOURCE_KIND = {"jobsearch": "employer"}
+
+
 def lead_kind(source: str) -> str:
-    return SOURCE_KIND.get(source, "news")
+    return SOURCE_KIND.get(source) or RETIRED_SOURCE_KIND.get(source, "news")
 
 
 def nav_counts(user: User | None) -> dict[str, int]:

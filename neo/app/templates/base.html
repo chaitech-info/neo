@@ -107,6 +107,15 @@
       document.documentElement.setAttribute('data-theme', next);
       try { localStorage.setItem('neo-theme', next); } catch (err) {}
     });
+    /* "Məktub yaz" (form[data-mail]): AI qaralaması bir neçə saniyə çəkir — düymə məşğul görünsün, ikinci klik getməsin. */
+    document.addEventListener('submit', function (e) {
+      var f = e.target.closest && e.target.closest('form[data-mail]');
+      if (!f) return;
+      if (f.dataset.sent) { e.preventDefault(); return; }
+      f.dataset.sent = '1';
+      var b = f.querySelector('button[type=submit]');
+      if (b) { b.disabled = true; if (b.dataset.busy) b.textContent = b.dataset.busy; }
+    });
     /* Səsli izah (_brief.html): ilk basış izahı hazırlayıb oxudur, sonrakılar dayandırır / davam etdirir. */
     document.addEventListener('submit', function (e) {
       var f = e.target.closest && e.target.closest('form[data-brief]');

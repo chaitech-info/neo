@@ -81,8 +81,9 @@ def search(company: str, *, client: httpx.Client | None = None, token: str | Non
         raise LeadersError("APIFY_TOKEN təyin edilməyib — LinkedIn profilləri axtarıla bilmir")
     actor = os.environ.get("LEADERS_APIFY_ACTOR") or DEFAULT_ACTOR
     limit = int(os.environ.get("LEADERS_MAX") or DEFAULT_MAX)
-    payload = {"companies": [company], "jobTitles": SEARCH_TITLES, "maxItems": limit * 3,
-               "locations": ["Azerbaijan"], "profileScraperMode": "Short"}
+    # Yalnız əsas sahələr: opsional sahələrin (profileScraperMode, locations) dəqiq dəyərləri actor-dan asılıdır —
+    # səhv dəyər bütün sorğunu 400 edir. Vəzifə süzgəci onsuz da aşağıda SENIOR_RE ilə edilir.
+    payload = {"companies": [company], "jobTitles": SEARCH_TITLES, "maxItems": limit * 3}
     http = client or _http()
     try:
         resp = http.post(f"https://api.apify.com/v2/acts/{actor}/run-sync-get-dataset-items",
@@ -92,6 +93,18 @@ def search(company: str, *, client: httpx.Client | None = None, token: str | Non
         items = resp.json()
     except httpx.TimeoutException as exc:
         raise LeadersError("LinkedIn axtarışı vaxtında bitmədi — bir az sonra yenidən cəhd et") from exc
+    except httpx.HTTPStatusError as exc:
+        # Apify xətanı JSON-da izah edir ({"error": {"type", "message"}}) — səbəb paneldə görünsün.
+        try:
+            detail = (exc.response.json().get("error") or {}).get("message") or ""
+        except ValueError:
+            detail = ""
+        status = exc.response.status_code
+        log.warning("leaders_search_failed", actor=actor, status=status, detail=detail[:300])
+        hint = {401: "APIFY_TOKEN yanlışdır", 402: "Apify balansı bitib", 403: "Apify-da bu actor-a icazə yoxdur",
+                404: f"Apify actor tapılmadı ({actor})"}.get(status, "")
+        raise LeadersError(f"LinkedIn axtarışı alınmadı (Apify {status}"
+                           + (f": {hint}" if hint else "") + (f" — {detail[:200]}" if detail else "") + ")") from exc
     except (httpx.HTTPError, ValueError) as exc:
         log.warning("leaders_search_failed", actor=actor, error=type(exc).__name__)
         raise LeadersError(f"LinkedIn axtarışı alınmadı: {type(exc).__name__}") from exc

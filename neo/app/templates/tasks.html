@@ -22,7 +22,11 @@
       </div>
       <div class="tk-act">
         {% if can_edit and is_open %}
-        <a class="mc-btn mc-btn-sm" href="/opportunities/{{ opp.id }}#email" title="AI ilə məktub qaralaması yaz, yoxla, fayl əlavə et və göndər">Məktub yaz</a>
+        {# Birbaşa AI qaralaması: kontakt və dil özü seçilir, qaralama fürsət səhifəsində açılır. #}
+        <form method="post" action="/opportunities/{{ opp.id }}/email/draft#email" data-mail>
+          {{ csrf_field(request) }}<input type="hidden" name="auto" value="1">
+          <button class="mc-btn mc-btn-sm" type="submit" data-busy="AI yazır…" title="AI ilə məktub qaralaması yaz, yoxla, fayl əlavə et və göndər">Məktub yaz</button>
+        </form>
         <form method="post" action="/tasks/{{ t.id }}/status">
           {{ csrf_field(request) }}<input type="hidden" name="status" value="done"><input type="hidden" name="back" value="{{ back }}">
           <button class="mc-btn mc-btn-sm tk-done" type="submit" title="Bu tapşırığı bitmiş kimi qeyd et"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 8.6l3 3L12.8 4.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Bitdi</button>
