@@ -2,6 +2,7 @@
 {% block title %}Fürsət #{{ opp.id }} — Neo{% endblock %}
 {% block main_class %}mc mc-kw mc-opp{% endblock %}
 {% block content %}
+  {% from "_brief.html" import brief_button %}
   {% set can_edit = has_role(request.state.user, 'sales') %}
   {% set me = request.state.user %}
 
@@ -34,6 +35,7 @@
         <div class="tk-act">
           {% if can_edit %}
             {% if is_open %}
+            <a class="mc-btn mc-btn-sm" href="#email" title="AI ilə məktub qaralaması yaz, yoxla, fayl əlavə et və göndər">Məktub yaz</a>
             <form method="post" action="/tasks/{{ t.id }}/status">
               {{ csrf_field(request) }}<input type="hidden" name="status" value="done"><input type="hidden" name="back" value="/opportunities/{{ opp.id }}">
               <button class="mc-btn mc-btn-sm tk-done" type="submit"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 8.6l3 3L12.8 4.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Bitdi</button>
@@ -139,6 +141,7 @@
         <dt>Dərc</dt><dd>{{ lead.posted_at|baku_time }}</dd>
         <dt>Son tarix</dt><dd>{{ lead.deadline_at|baku_time if lead.deadline_at else '—' }}</dd>
       </dl>
+      {{ brief_button(request, lead.dedupe_key) }}
       <details class="od-more"><summary>Tam mətni göstər</summary><div class="raw">{{ lead.raw_text|truncate(4000) }}</div></details>
     </section>
     {% endif %}
@@ -170,7 +173,7 @@
     <h2>Ünsiyyət <em>{{ outreach|length }}</em></h2>
     {% if can_edit %}
       {% if draft %}
-      <form method="post" action="/opportunities/{{ opp.id }}/email/send" class="em-form" data-once>
+      <form method="post" action="/opportunities/{{ opp.id }}/email/send" class="em-form" enctype="multipart/form-data" data-once>
         {{ csrf_field(request) }}
         <input type="hidden" name="send_key" value="{{ draft.send_key }}">
         <input type="hidden" name="language" value="{{ draft.language }}">
@@ -178,7 +181,9 @@
         <label class="kw-f">Kimə<input type="email" name="to" required value="{{ draft.to }}" list="em-to" placeholder="ad@sirket.az"></label>
         <datalist id="em-to">{% for c in email_contacts %}<option value="{{ c.email }}">{{ c.name or '' }}{% if c.title %} — {{ c.title }}{% endif %}</option>{% endfor %}</datalist>
         <label class="kw-f">Mövzu<input name="subject" required maxlength="200" value="{{ draft.subject }}"></label>
-        <label class="kw-f">Məktub<textarea name="body" required rows="16">{{ draft.body }}</textarea></label>
+        <label class="kw-f">Məktub — göndərməzdən əvvəl oxu və düzəlt<textarea name="body" required rows="16">{{ draft.body }}</textarea></label>
+        <label class="kw-f">Fayl əlavə et (istəyə görə: təklif, kataloq, menyu — ən çox 5 fayl, cəmi 4 MB)<input type="file" name="files" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.zip,.txt,.csv"></label>
+        {% if page_error %}<p class="od-hint">Fayl seçmişdinsə, yenidən seç — səhv olanda fayllar formada qalmır.</p>{% endif %}
         {% if not smtp_ready %}<p class="od-hint">Poçt hələ qoşulmayıb (SMTP_USER / SMTP_PASSWORD) — göndərmə xəta verəcək.</p>{% endif %}
         <div class="em-act">
           <button class="mc-btn mc-btn-hero" type="submit" data-busy="Göndərilir…">Göndər</button>
@@ -211,6 +216,7 @@
         <div class="ct-main">
           <b>{{ outreach_kinds.get(o.kind, o.kind) }}{% if o.subject %}: {{ o.subject }}{% endif %}</b>
           <span class="ct-role">{% if o.kind == 'email' %}{{ o.to_address }}{% else %}<a href="{{ o.to_address }}" target="_blank" rel="noopener">post ↗</a>{% endif %} · {{ (o.sent_at or o.created_at)|baku_time }}{% if o.user_id in users %} · {{ users[o.user_id].full_name }}{% elif not o.user_id %} · avtomatik{% endif %}</span>
+          {% if o.attachments %}<span class="ct-role">Fayllar: {{ o.attachments.split('\n')|join(', ') }}</span>{% endif %}
           {% if o.status != 'sent' %}<span class="ct-role" style="color:var(--err)">{{ 'Göndərilmədi' if o.status == 'failed' else 'Atlandı' }}{% if o.error %}: {{ o.error }}{% endif %}</span>{% endif %}
           <details class="od-more"><summary>Mətni göstər</summary><div class="raw">{{ o.body }}</div></details>
         </div>
@@ -227,6 +233,15 @@
 
   <section class="od-card" id="contacts">
     <h2>Kontaktlar <em>{{ contacts|length }}</em></h2>
+    {% if can_edit and leaders_ready %}
+    {# Rəhbərlərin LinkedIn profilləri: ilk açılışda avtomatik (bir dəfə, pulludur), sonra düymə ilə. #}
+    <form class="ld-leaders" method="post" action="/opportunities/{{ opp.id }}/leaders" data-leaders
+          {% if opp.leaders_fetched_at is none %}data-auto{% endif %}>
+      {{ csrf_field(request) }}<input type="hidden" name="force" value="1">
+      <button class="mc-btn mc-btn-sm" type="submit">{{ 'Rəhbərləri LinkedIn-də axtar' if opp.leaders_fetched_at is none else 'Rəhbərləri yenidən axtar' }}</button>
+      <span class="od-hint" data-leaders-status>{% if opp.leaders_fetched_at %}Son axtarış: {{ opp.leaders_fetched_at|baku_time }}{% endif %}</span>
+    </form>
+    {% endif %}
     {% if contacts %}
     <ul class="ct-list">
       {% for c in contacts %}
@@ -279,6 +294,28 @@
       if (!sel || !box) return;
       function sync() { box.hidden = sel.value !== 'lost'; }
       sel.addEventListener('change', sync); sync();
+    })();
+    /* Rəhbərlərin LinkedIn profilləri (app/leaders.py): data-auto — fürsət ilk dəfə açılanda özü axtarır. */
+    (function () {
+      var f = document.querySelector('form[data-leaders]');
+      if (!f) return;
+      var b = f.querySelector('button'), st = f.querySelector('[data-leaders-status]');
+      function run(force) {
+        var data = new FormData(f);
+        data.set('force', force ? '1' : '');
+        b.disabled = true; st.textContent = 'Şirkətin rəhbərləri LinkedIn-də axtarılır… (~30 san.)';
+        fetch(f.action, { method: 'POST', body: data, credentials: 'same-origin' })
+          .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+          .then(function (res) {
+            if (!res.ok) throw new Error(res.d.error || 'Axtarış alınmadı');
+            if (res.d.added) { st.textContent = res.d.added + ' rəhbər profili tapıldı'; location.reload(); return; }
+            st.textContent = res.d.skipped ? '' : 'LinkedIn-də yeni rəhbər profili tapılmadı';
+          })
+          .catch(function (err) { st.textContent = (err && err.message) || 'Axtarış alınmadı'; })
+          .then(function () { b.disabled = false; });
+      }
+      f.addEventListener('submit', function (e) { e.preventDefault(); run(true); });
+      if (f.hasAttribute('data-auto')) run(false);
     })();
     /* data-once formları ikinci dəfə göndərilməsin (ikiqat klik → iki məktub / iki şərh). */
     document.querySelectorAll('form[data-once]').forEach(function (f) {

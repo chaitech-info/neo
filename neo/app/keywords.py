@@ -68,7 +68,7 @@ def _session() -> Session:
 
 
 def _load() -> Snapshot | None:
-    from app.db.models import InterestArea, Keyword
+    from app.db.models import InterestArea, Keyword, UserKeyword
 
     try:
         with _session() as s:
@@ -79,6 +79,7 @@ def _load() -> Snapshot | None:
                 .join(InterestArea, InterestArea.id == Keyword.interest_area_id)
                 .where(Keyword.is_active.is_(True), InterestArea.is_active.is_(True))
             ).all()
+            personal = s.execute(select(UserKeyword.term, UserKeyword.match).distinct()).all()
     except Exception:
         log.warning("keywords_db_unavailable", exc_info=True)
         return None
@@ -87,6 +88,11 @@ def _load() -> Snapshot | None:
 
     positive = {k: [] for k in SCOPES}
     negative = {k: [] for k in SCOPES}
+    # İstifadəçilərin öz sözləri bütün növlərdə müsbət sayılır — kiminsə sözünə uyğun xəbər itməsin.
+    for text, match in personal:
+        if text.strip():
+            for kind in SCOPES:
+                positive[kind].append(Term(text.strip(), match))
     by_area: dict[str, list[str]] = {}
     for kw, area_code in rows:
         term = Term(kw.term.strip(), kw.match)
@@ -137,6 +143,26 @@ def matches(text: str, term: Term) -> bool:
 
 def any_match(text: str, terms: list[Term]) -> bool:
     return any(matches(text, term) for term in terms)
+
+
+def user_terms(session: Session, user_id: int) -> list[Term]:
+    """İstifadəçinin öz açar sözləri (keşsiz — kiçik siyahıdır, səhifə açılanda oxunur)."""
+    from app.db.models import UserKeyword
+
+    rows = session.execute(select(UserKeyword.term, UserKeyword.match)
+                           .where(UserKeyword.user_id == user_id).order_by(UserKeyword.term)).all()
+    return [Term(t.strip(), m) for t, m in rows if t.strip()]
+
+
+def matched_terms(text: str, terms: list[Term]) -> list[str]:
+    """Mətnə uyğun gələn terminlər (Validasiya kartında "sənin sözün" çipi). Mətn bir dəfə fold olunur."""
+    folded = fold(text or "")
+    out = []
+    for term in terms:
+        tail = r"(?!\w)" if term.match == "word" else ""
+        if re.search(r"(?<!\w)" + re.escape(fold(term.text)) + tail, folded):
+            out.append(term.text)
+    return out
 
 
 def company_profile() -> str | None:

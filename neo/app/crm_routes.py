@@ -11,12 +11,12 @@ from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
+from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
-from app import crm
+from app import crm, leaders
 from app.auth import security
 from app.auth.security import REQUIRE, verify_csrf
 from app.contacts import EMAIL_RE, contacts_for, normalize_phone
@@ -107,7 +107,7 @@ def _opp_context(db, opp: Opportunity) -> dict:
                                     .order_by(Outreach.created_at.desc()))),
         "outreach_kinds": OUTREACH_KIND_NAMES, "languages": LANGUAGES,
         "default_language": detect_language(lead.raw_text if lead else opp.title),
-        "smtp_ready": mail.smtp_configured(),
+        "smtp_ready": mail.smtp_configured(), "leaders_ready": leaders.enabled(),
         "tasks": crm.opp_tasks(db, opp.id), "users": {u.id: u for u in users}, "user_list": users,
         "owner": db.get(User, opp.owner_id) if opp.owner_id else None,  # deaktiv olsa da göstərilir
         "stages": crm.pipeline_for(opp), "stage_names": crm.STAGE_NAMES,
@@ -158,12 +158,37 @@ def opportunity_email_draft(request: Request, opp_id: int, contact_id: str = For
 
 
 SEND_KEY_RE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
+# Vercel funksiyasına sorğu ən çox 4.5 MB ola bilər — fayllar + forma bunun içinə sığmalıdır.
+MAX_ATTACHMENTS = 5
+MAX_ATTACHMENTS_BYTES = 4 * 1024 * 1024
+BLOCKED_EXTENSIONS = {"exe", "bat", "cmd", "com", "js", "vbs", "scr", "msi", "jar", "ps1", "sh"}  # Gmail da bloklayır
+
+
+def _read_attachments(files: list[UploadFile]) -> list[tuple[str, bytes, str]]:
+    """Formdan gələn fayllar → (ad, məzmun, MIME). Boş fayl sahəsi atlanır; qayda pozulsa CrmError."""
+    out, total = [], 0
+    for f in files or []:
+        name = (f.filename or "").replace("\\", "/").rsplit("/", 1)[-1].strip()[:120]
+        if not name:
+            continue
+        if name.rsplit(".", 1)[-1].lower() in BLOCKED_EXTENSIONS:
+            raise crm.CrmError(f"Bu növ fayl göndərilə bilməz: {name}")
+        data = f.file.read(MAX_ATTACHMENTS_BYTES + 1)
+        total += len(data)
+        if total > MAX_ATTACHMENTS_BYTES:
+            raise crm.CrmError("Fayllar birlikdə 4 MB-dan böyük ola bilməz")
+        if data:
+            out.append((name, data, f.content_type or "application/octet-stream"))
+    if len(out) > MAX_ATTACHMENTS:
+        raise crm.CrmError(f"Ən çox {MAX_ATTACHMENTS} fayl əlavə etmək olar")
+    return out
 
 
 @router.post("/opportunities/{opp_id}/email/send", dependencies=[Depends(verify_csrf)])
 def opportunity_email_send(request: Request, opp_id: int, to: str = Form(...), subject: str = Form(...),
                            body: str = Form(...), language: str = Form(""), contact_id: str = Form(""),
-                           send_key: str = Form(""), me: User = Depends(REQUIRE["sales"])):
+                           send_key: str = Form(""), files: list[UploadFile] = File(default=[]),
+                           me: User = Depends(REQUIRE["sales"])):
     path = f"/opportunities/{opp_id}"
     # Sətir sonu mövzuda başlıq inyeksiyası / SMTP xətası (500) verirdi.
     to, subject, body = to.strip().lower(), " ".join(subject.split()), body.strip()
@@ -185,6 +210,10 @@ def opportunity_email_send(request: Request, opp_id: int, to: str = Form(...), s
         return back_to_draft("Mövzu və məktub mətni boş ola bilməz")
     if not SEND_KEY_RE.fullmatch(send_key):
         return _go(path, err="Forma köhnəlib — məktubu yenidən yaradın")
+    try:
+        attachments = _read_attachments(files)
+    except crm.CrmError as exc:
+        return back_to_draft(str(exc))
     with security.SessionLocal() as db:
         opp = db.get(Opportunity, opp_id)
         if opp is None:
@@ -194,7 +223,8 @@ def opportunity_email_send(request: Request, opp_id: int, to: str = Form(...), s
         row = Outreach(kind="email", lead_key=opp.lead_key, opportunity_id=opp.id,
                        contact_id=contact.id if contact else None, to_address=to, subject=subject[:200],
                        body=body, language=language[:2] or None, status="failed", error="Göndərilir…",
-                       user_id=me.id, created_at=datetime.utcnow(), send_key=send_key)
+                       user_id=me.id, created_at=datetime.utcnow(), send_key=send_key,
+                       attachments="\n".join(name for name, _, _ in attachments) or None)
         db.add(row)
         try:
             db.commit()
@@ -202,7 +232,8 @@ def opportunity_email_send(request: Request, opp_id: int, to: str = Form(...), s
             db.rollback()
             return _go(path, msg="Bu məktub artıq göndərilib")
         try:
-            message_id = mail.send_email(to=to, subject=subject[:200], body=body, reply_to=me.email)
+            message_id = mail.send_email(to=to, subject=subject[:200], body=body, reply_to=me.email,
+                                         attachments=attachments)
         except OutreachError as exc:
             row.error = str(exc)[:500]
             db.commit()
@@ -297,6 +328,25 @@ def opportunity_linkedin_comment(opp_id: int, me: User = Depends(REQUIRE["sales"
     if row.status != "sent":
         return _go(path, err=f"Şərh yazılmadı: {row.error}")
     return _go(path, msg="LinkedIn şərhi yazıldı")
+
+
+# --- Rəhbərlərin LinkedIn profilləri (Apify, app/leaders.py) -------------------------
+
+
+@router.post("/opportunities/{opp_id}/leaders", dependencies=[Depends(verify_csrf)])
+def opportunity_leaders(opp_id: int, force: str = Form(""), me: User = Depends(REQUIRE["sales"])):
+    """JSON: fürsət səhifəsi ilk açılanda JS özü çağırır; "Yenidən axtar" düyməsi force=1 göndərir."""
+    with security.SessionLocal() as db:
+        opp = db.get(Opportunity, opp_id)
+        if opp is None:
+            return JSONResponse({"error": "Fürsət tapılmadı"}, status_code=404)
+        if opp.leaders_fetched_at is not None and force != "1":
+            return {"added": 0, "skipped": True}
+        try:
+            added = leaders.fetch_for(db, opp)
+        except leaders.LeadersError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=502)
+    return {"added": added}
 
 
 # --- Kontaktlar ------------------------------------------------------------------

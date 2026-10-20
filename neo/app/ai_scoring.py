@@ -208,7 +208,8 @@ def compute_score(facts: dict, text: str, is_tender: bool = True, listing: bool 
     return round(min(score, 1.0), 2), tier
 
 
-def chat_json(client: OpenAI, model: str, system: str, user: str, schema: dict, name: str = "out"):
+def chat_json(client: OpenAI, model: str, system: str, user: str, schema: dict, name: str = "out",
+              max_tokens: int = 700):
     """Model ailəsinə görə parametrlər: gpt-5 — reasoning, temperature yox."""
     kwargs = {
         "model": model,
@@ -219,7 +220,7 @@ def chat_json(client: OpenAI, model: str, system: str, user: str, schema: dict, 
         kwargs["reasoning_effort"] = os.environ.get("AI_REASONING_EFFORT", "minimal")
     else:
         kwargs["temperature"] = 0
-        kwargs["max_tokens"] = 700  # + kontakt siyahısı
+        kwargs["max_tokens"] = max_tokens  # defolt 700: + kontakt siyahısı
     resp = client.chat.completions.create(**kwargs)
     return json.loads(resp.choices[0].message.content), resp.usage
 

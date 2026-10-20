@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Şirkət analizi — Neo{% endblock %}
+{% block main_class %}mc mc-kw mc-opp{% endblock %}
+{% block content %}
+  <header class="ld-head">
+    <h1 class="mc-title">Şirkət analizi</h1>
+    <p class="ld-sub">Şirkətin adını (və varsa saytını) yaz — AI onun saytını və bazamızdakı lead/fürsətləri oxuyub potensial müştəri kimi qiymətləndirir: nə iş görür, nə qədər böyükdür, catering ehtiyacı, necə yanaşmaq lazımdır.</p>
+  </header>
+
+  <section class="od-card">
+    <form method="post" action="/tools/company" data-once>
+      {{ csrf_field(request) }}
+      <div class="kw-row" style="margin-top:0">
+        <label class="kw-f kw-g">Şirkətin adı<input name="name" required minlength="2" maxlength="200" value="{{ name }}" placeholder="məs. Sahil MMC"></label>
+        <label class="kw-f kw-g">Sayt (istəyə görə)<input name="website" maxlength="300" value="{{ website }}" placeholder="məs. sahil.az"></label>
+      </div>
+      <button class="mc-btn mc-btn-hero" type="submit" data-busy="Analiz olunur… (~15 san.)">Analiz et</button>
+    </form>
+  </section>
+
+  {% if result %}
+  {% set ai = result.ai %}
+  <section class="od-card">
+    <h2>{{ result.name }}</h2>
+    <p>{{ ai.summary }}</p>
+    <dl class="od-kv">
+      <dt>Sahə</dt><dd>{{ ai.industry }}</dd>
+      <dt>Ölçü</dt><dd>{{ size_names.get(ai.size, ai.size) }}{% if ai.size_note %} — {{ ai.size_note }}{% endif %}</dd>
+      <dt>Catering uyğunluğu</dt><dd><b>{{ fit_names.get(ai.fit, ai.fit) }}</b> — {{ ai.fit_reason }}</dd>
+      <dt>Sayt</dt><dd>{% if result.site %}<a href="{{ result.site }}" target="_blank" rel="noopener">{{ result.site }} ↗</a>{% if not result.site_ok %} (oxunmadı — analiz yalnız bazadakı məlumatla){% endif %}{% else %}verilməyib{% endif %}</dd>
+      {% if result.found %}<dt>Saytdakı əlaqə</dt><dd>{% for f in result.found %}{{ f.email or f.phone }}{% if not loop.last %} · {% endif %}{% endfor %}</dd>{% endif %}
+    </dl>
+  </section>
+
+  <div class="od-grid">
+    {% for title, items in [("Ehtimal olunan ehtiyaclar", ai.needs), ("Necə yanaşmalı", ai.approach), ("İlk söhbətdə deyiləcəklər", ai.talking_points), ("Risklər", ai.risks)] if items %}
+    <section class="od-card">
+      <h2>{{ title }}</h2>
+      <ul>{% for x in items %}<li>{{ x }}</li>{% endfor %}</ul>
+    </section>
+    {% endfor %}
+  </div>
+
+  <section class="od-card">
+    <h2>Bazamızda <em>{{ result.facts.leads|length }}</em></h2>
+    {% if result.facts.orgs %}<p class="od-hint">Təşkilat: {{ result.facts.orgs|map(attribute='name')|join(', ') }} · fürsətlər: {{ result.facts.opportunities }}</p>{% endif %}
+    {% if result.facts.leads %}
+    <ul class="ct-list">
+      {% for lead in result.facts.leads %}
+      <li class="ct"><div class="ct-main">
+        <b>{% if lead.crm_opportunity_id %}<a href="/opportunities/{{ lead.crm_opportunity_id }}">{{ lead.title[:140] }}</a>{% else %}<a href="/leads?lead={{ lead.dedupe_key }}">{{ lead.title[:140] }}</a>{% endif %}</b>
+        <span class="ct-role">{{ lead.source }} · {{ lead.scraped_at|baku_time }}</span>
+      </div></li>
+      {% endfor %}
+    </ul>
+    {% else %}
+      <p class="od-empty">Bu şirkətlə bağlı lead tapılmadı.</p>
+    {% endif %}
+  </section>
+  <p class="od-hint">AI yalnız saytdakı və bazadakı məlumata əsaslanır — rəqəmləri və adları göndərməzdən əvvəl yoxla.</p>
+  {% endif %}
+
+  <script>
+    document.querySelectorAll('form[data-once]').forEach(function (f) {
+      f.addEventListener('submit', function (e) {
+        if (f.dataset.sent) { e.preventDefault(); return; }
+        f.dataset.sent = '1';
+        var b = f.querySelector('button[type=submit]');
+        if (b) { b.disabled = true; if (b.dataset.busy) b.textContent = b.dataset.busy; }
+      });
+    });
+  </script>
+{% endblock %}

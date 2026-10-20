@@ -39,6 +39,8 @@ from app.crm_routes import router as crm_router
 from app.outreach import linkedin_comment
 from app.keyword_routes import router as keyword_router
 from app.offer_routes import router as offer_router
+from app.brief_routes import router as brief_router
+from app.company_routes import router as company_router
 from app.locks import source_lock
 from app.pipeline import PipelineResult, reject_lead, restore_lead, run_pipeline
 from app.sources import SOURCES as SOURCE_SPECS
@@ -108,6 +110,8 @@ app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")
 app.include_router(crm_router)
 app.include_router(keyword_router)
 app.include_router(offer_router)
+app.include_router(brief_router)
+app.include_router(company_router)
 templates.env.globals.update(
     csrf_field=security.csrf_field, has_role=security.has_role, role_names=ROLE_NAMES,
 )
@@ -435,14 +439,23 @@ def tier_sort_key(lead) -> tuple:
 
 
 @app.get("/leads/pending_review")
-def leads_pending(request: Request, tier: str = "", user: User = Depends(REQUIRE["viewer"])):
+def leads_pending(request: Request, tier: str = "", mine: str = "", user: User = Depends(REQUIRE["viewer"])):
+    from app import keywords as kw_store
+
     session = SessionLocal()
     try:
         repo = LeadRepository(session)
         all_leads = sorted(repo.list_by_status("pending_review"), key=tier_sort_key)
         contact_counts = repo.contact_counts([lead.dedupe_key for lead in all_leads])
+        my_terms = kw_store.user_terms(session, user.id)
     finally:
         session.close()
+    # İstifadəçinin öz sözlərindən hansıları lead-ə uyğun gəlir (kartda çip, "Mənim sözlərim" filtri).
+    my_hits = {lead.dedupe_key: hits for lead in all_leads
+               if (hits := kw_store.matched_terms(f"{lead.title}\n{lead.raw_text}", my_terms))} if my_terms else {}
+    mine = "1" if mine == "1" and my_terms else ""
+    if mine:
+        all_leads = [lead for lead in all_leads if lead.dedupe_key in my_hits]
     tier_counts = {t: sum(1 for lead in all_leads if lead.tier == t) for t in TIER_ORDER}
     tier_counts["none"] = len(all_leads) - sum(tier_counts.values())
     tier = tier if tier in tier_counts else ""
@@ -461,6 +474,9 @@ def leads_pending(request: Request, tier: str = "", user: User = Depends(REQUIRE
             "tier": tier,
             "tier_counts": tier_counts,
             "tier_info": TIER_INFO,
+            "mine": mine,
+            "my_hits": my_hits,
+            "has_my_terms": bool(my_terms),
         },
     )
 
@@ -545,10 +561,19 @@ def leads_all(request: Request, lead: str = "", user: User = Depends(REQUIRE["vi
 
 
 @app.post("/leads/{dedupe_key}/approve", dependencies=[Depends(verify_csrf)])
-def approve_lead(dedupe_key: str, user: User = Depends(REQUIRE["sales"])):
+def approve_lead(request: Request, dedupe_key: str, user: User = Depends(REQUIRE["sales"])):
+    # Validasiya kartı JS ilə (fetch, Accept: application/json) göndərir — səhifə yenilənmir,
+    # JSON qayıdır; JS-siz forma əvvəlki kimi yönləndirmə alır.
+    wants_json = "application/json" in request.headers.get("accept", "")
+
+    def fail(error: str):
+        if wants_json:
+            return JSONResponse({"error": error}, status_code=409)
+        return RedirectResponse(url=f"/leads/pending_review?err={quote(error)}", status_code=303)
+
     # Validation: mövcud olmayan və ya artıq emal edilmiş lead üçün aydın xəta.
     if not dedupe_key or len(dedupe_key) != 64:
-        return RedirectResponse(url="/leads/pending_review?err=Yanlış lead ID", status_code=303)
+        return fail("Yanlış lead ID")
 
     session = SessionLocal()
     try:
@@ -557,19 +582,21 @@ def approve_lead(dedupe_key: str, user: User = Depends(REQUIRE["sales"])):
         # LinkedIn alıcı postu → avtomatik qısa şərh (app/outreach/linkedin_comment.py). Xəta fürsəti bloklamır.
         comment = linkedin_comment.auto_comment(session, conversion.opportunity, user_id=user.id)
     except crm.CrmError as exc:
-        return RedirectResponse(url=f"/leads/pending_review?err={quote(str(exc))}", status_code=303)
+        return fail(str(exc))
     except IntegrityError:
         # İkiqat klik: paralel sorğu fürsəti artıq yaradıb (opportunities.lead_key unikaldır).
         session.rollback()
-        return RedirectResponse(url=f"/leads/pending_review?err={quote('Bu lead artıq təsdiqlənib')}", status_code=303)
+        return fail("Bu lead artıq təsdiqlənib")
     finally:
         session.close()
 
     note = ""
     if comment is not None:
         note = ". LinkedIn şərhi yazıldı" if comment.status == "sent" else ". LinkedIn şərhi yazılmadı — fürsət səhifəsinə bax"
-    msg = quote(f"Fürsət #{opp_id} və ilk tapşırıq yaradıldı{note}")
-    return RedirectResponse(url=f"/leads/pending_review?msg={msg}&opp={opp_id}", status_code=303)
+    msg = f"Fürsət #{opp_id} və ilk tapşırıq yaradıldı{note}"
+    if wants_json:
+        return JSONResponse({"opp_id": opp_id, "msg": msg, "url": f"/opportunities/{opp_id}"})
+    return RedirectResponse(url=f"/leads/pending_review?msg={quote(msg)}&opp={opp_id}", status_code=303)
 
 
 def _back(next_url: str) -> str:

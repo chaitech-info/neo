@@ -11,7 +11,7 @@ psycopg2-binary>=2.9
 structlog>=24.1
 python-dotenv>=1.0
 tenacity>=8.3
-openai>=1.40
+openai>=1.70  # audio.speech.create(instructions=...) — səsli izah (app/brief.py)
 eval_type_backport>=0.2  # yalnız Python 3.9-da lazımdır; 3.10+-da çıxarıla bilər
 fastapi>=0.111
 uvicorn[standard]>=0.30

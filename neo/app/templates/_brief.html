@@ -1,0 +1,9 @@
+{# Səsli izah düyməsi — JS base.html-dədir (form[data-brief]). İlk basışda AI izah + səs hazırlayır (~10-20 san.),
+   sonra bazadan dərhal gəlir. #}
+{% macro brief_button(request, lead_key) %}
+<form class="brief" method="post" action="/leads/{{ lead_key }}/brief" data-brief>
+  {{ csrf_field(request) }}
+  <button class="mc-btn mc-btn-sm brief-btn" type="submit" title="AI xəbəri qısa, səsli izah etsin">▶ Səsli izah</button>
+  <p class="brief-text" hidden></p>
+</form>
+{% endmacro %}

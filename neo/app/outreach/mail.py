@@ -96,8 +96,10 @@ def smtp_configured() -> bool:
     return bool(os.environ.get("SMTP_USER") and os.environ.get("SMTP_PASSWORD"))
 
 
-def send_email(*, to: str, subject: str, body: str, reply_to: str | None, smtp_factory=smtplib.SMTP) -> str:
-    """Göndərir, Message-ID qaytarır. Xəta → OutreachError (mətn istifadəçiyə göstərilir)."""
+def send_email(*, to: str, subject: str, body: str, reply_to: str | None,
+               attachments: list[tuple[str, bytes, str]] = (), smtp_factory=smtplib.SMTP) -> str:
+    """Göndərir, Message-ID qaytarır. Xəta → OutreachError (mətn istifadəçiyə göstərilir).
+    `attachments` — (fayl adı, məzmun, MIME tipi); yoxlama (ölçü, növ) çağıranın işidir."""
     user, password = os.environ.get("SMTP_USER"), os.environ.get("SMTP_PASSWORD")
     if not (user and password):
         raise OutreachError("Poçt qoşulmayıb: SMTP_USER və SMTP_PASSWORD təyin edilməyib")
@@ -112,6 +114,11 @@ def send_email(*, to: str, subject: str, body: str, reply_to: str | None, smtp_f
     paragraphs = "".join(f"<p>{escape(p).replace(chr(10), '<br>')}</p>" for p in body.split("\n\n"))
     msg.add_alternative(f"<html><body style=\"font-family:Arial,sans-serif;font-size:14px\">{paragraphs}</body></html>",
                         subtype="html")
+    for name, data, mime in attachments:
+        maintype, _, subtype = (mime or "").partition("/")
+        if not (maintype and subtype):
+            maintype, subtype = "application", "octet-stream"
+        msg.add_attachment(data, maintype=maintype, subtype=subtype, filename=name)
     host, port = os.environ.get("SMTP_HOST", "smtp.gmail.com"), int(os.environ.get("SMTP_PORT", "587"))
     try:
         with smtp_factory(host, port, timeout=20) as smtp:
@@ -125,5 +132,5 @@ def send_email(*, to: str, subject: str, body: str, reply_to: str | None, smtp_f
     except (smtplib.SMTPException, OSError) as exc:
         log.exception("email_send_failed", host=host)
         raise OutreachError(f"Məktub göndərilmədi: {type(exc).__name__}") from exc
-    log.info("email_sent", to_domain=to.rsplit("@", 1)[-1])
+    log.info("email_sent", to_domain=to.rsplit("@", 1)[-1], attachments=len(attachments))
     return msg["Message-ID"]

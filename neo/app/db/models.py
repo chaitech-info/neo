@@ -17,6 +17,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    LargeBinary,
     MetaData,
     Numeric,
     SmallInteger,
@@ -140,6 +141,20 @@ class Keyword(Base):
     applies_to: Mapped[str] = mapped_column(_enum("keyword_scope", *KEYWORD_SCOPES), default="all")
     is_negative: Mapped[bool] = mapped_column(Boolean, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class UserKeyword(Base):
+    """İstifadəçinin öz açar sözü (0011): Validasiyada "Mənim sözlərim" filtri; scrape-də
+    də müsbət söz kimi işləyir (qlobal mənfi sözlər yenə bağlayır)."""
+
+    __tablename__ = "user_keywords"
+    __table_args__ = (UniqueConstraint("user_id", "term"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    term: Mapped[str] = mapped_column(Text)
+    match: Mapped[str] = mapped_column(String(8), default="prefix")  # KEYWORD_MATCHES
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 # --- Lead qatı ---------------------------------------------------------------
@@ -288,6 +303,8 @@ class Opportunity(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # 0011: rəhbərlərin LinkedIn profilləri axtarılıb (Apify pulludur — hər fürsət üçün bir dəfə).
+    leaders_fetched_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
 class Task(Base):
@@ -381,3 +398,17 @@ class Outreach(Base):
     sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     # Qaralama formunun birdəfəlik açarı — "Göndər" iki dəfə basılsa, ikinci sorğu unikal açara dəyir.
     send_key: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, unique=True, index=True)
+    # 0011: əlavə olunmuş faylların adları (sətirlə); faylın özü saxlanmır — yalnız məktubla gedir.
+    attachments: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class LeadBrief(Base):
+    """Xəbərin AI ilə qısa səsli izahı (0011) — mətn və mp3 bir dəfə yaradılır, sonra bazadan verilir."""
+
+    __tablename__ = "lead_briefs"
+
+    lead_key: Mapped[str] = mapped_column(ForeignKey("leads.dedupe_key"), primary_key=True)
+    script: Mapped[str] = mapped_column(Text)
+    audio: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
+    voice: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

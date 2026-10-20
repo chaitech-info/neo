@@ -6,17 +6,25 @@
 {% endblock %}
 {% block main_class %}mc mc-leads{% endblock %}
 {% block content %}
+{% from "_brief.html" import brief_button %}
 {% set status_names = {"pending_review": "Validasiyada", "converted": "Fürsətə çevrilib", "rejected": "Rədd edilib",
                        "duplicate": "Dublikat", "sent_to_crm": "CRM-ə göndərilib", "new": "Yeni"} %}
 {% set status_badge = {"pending_review": "pending", "converted": "sent", "sent_to_crm": "sent", "rejected": "rejected"} %}
 
-{# LinkedIn: post və müəllif profili. İşəgötürən lead-ində başlıq şirkət saytına aparır, post isə ayrıca;
-   LinkedIn postunda başlıq da posta aparır, amma "LinkedIn-də aç" açıq görünsün deyə yenə göstərilir. #}
+{# LinkedIn-dən gələn lead-də başlıq həmişə LinkedIn postuna aparır (işəgötürən lead-ində də);
+   şirkət saytı ayrıca link kimi göstərilir. "LinkedIn-də aç" açıq görünsün deyə yenə də qalır. #}
+{% macro lead_href(lead) -%}
+  {{ lead.origin_url if lead.origin_url and 'linkedin.com' in lead.origin_url else lead.source_url }}
+{%- endmacro %}
+
 {% macro origin_links(lead) %}
-  {% set show_origin = lead.origin_url and (lead.origin_url != lead.source_url or 'linkedin.com' in lead.origin_url) %}
-  {% if show_origin or lead.author_url %}
+  {% set from_li = lead.origin_url and 'linkedin.com' in lead.origin_url %}
+  {% set show_origin = lead.origin_url and (lead.origin_url != lead.source_url or from_li) %}
+  {% set show_site = from_li and lead.source_url and lead.source_url != lead.origin_url %}
+  {% if show_origin or show_site or lead.author_url %}
   <p class="lead-links">
-    {% if show_origin %}<a href="{{ lead.origin_url }}" target="_blank" rel="noopener">{{ 'LinkedIn-də aç' if 'linkedin.com' in lead.origin_url else 'Elanı aç' }}<svg class="ic" aria-hidden="true"><use href="#i-out"/></svg></a>{% endif %}
+    {% if show_origin %}<a href="{{ lead.origin_url }}" target="_blank" rel="noopener">{{ 'LinkedIn-də aç' if from_li else 'Elanı aç' }}<svg class="ic" aria-hidden="true"><use href="#i-out"/></svg></a>{% endif %}
+    {% if show_site %}<a href="{{ lead.source_url }}" target="_blank" rel="noopener">Şirkət saytı<svg class="ic" aria-hidden="true"><use href="#i-out"/></svg></a>{% endif %}
     {% if lead.author_url %}<a href="{{ lead.author_url }}" target="_blank" rel="noopener">{{ lead.author_name or 'Müəllif' }} — profil<svg class="ic" aria-hidden="true"><use href="#i-out"/></svg></a>{% if lead.author_title %}<span>{{ lead.author_title[:90] }}</span>{% endif %}{% endif %}
   </p>
   {% endif %}
@@ -54,13 +62,25 @@
   </div>
   {% endif %}
 
+  {% if tier_counts is defined and tier_counts is not none %}
+  {% set mq = '&mine=1' if mine else '' %}
+  <div class="ld-filter" role="group" aria-label="Kimin sözləri">
+    <a class="{{ 'on' if not mine else '' }}" href="/leads/pending_review{{ '?tier=' ~ tier if tier else '' }}">Bütün lead-lər</a>
+    {% if has_my_terms %}
+    <a class="{{ 'on' if mine else '' }}" href="/leads/pending_review?mine=1{{ '&tier=' ~ tier if tier else '' }}" title="Yalnız sənin açar sözlərinə uyğun gələnlər">Mənim sözlərim <i>{{ my_hits|length }}</i></a>
+    {% else %}
+    <a href="/me/keywords" title="Öz açar sözlərini əlavə et — sənə uyğun xəbərlər ayrıca görünsün">+ Mənim sözlərim</a>
+    {% endif %}
+  </div>
+  {% endif %}
+
   {% if tier_counts %}
   <div class="ld-filter" role="group" aria-label="Kateqoriya">
-    <a class="{{ 'on' if not tier else '' }}" href="/leads/pending_review">Hamısı <i>{{ tier_counts.values()|sum }}</i></a>
+    <a class="{{ 'on' if not tier else '' }}" href="/leads/pending_review?{{ mq[1:] }}">Hamısı <i>{{ tier_counts.values()|sum }}</i></a>
     {% for t in ["A", "B", "C"] %}
-    <a class="{{ 'on' if tier == t else '' }}" href="/leads/pending_review?tier={{ t }}" title="{{ tier_info[t][1] }}"><span class="tier tier-{{ t }}">{{ t }}</span>{{ tier_info[t][0] }} <i>{{ tier_counts[t] }}</i></a>
+    <a class="{{ 'on' if tier == t else '' }}" href="/leads/pending_review?tier={{ t }}{{ mq }}" title="{{ tier_info[t][1] }}"><span class="tier tier-{{ t }}">{{ t }}</span>{{ tier_info[t][0] }} <i>{{ tier_counts[t] }}</i></a>
     {% endfor %}
-    {% if tier_counts.none %}<a class="{{ 'on' if tier == 'none' else '' }}" href="/leads/pending_review?tier=none" title="Köhnə qiymətləndirmə və ya AI skoru yoxdur">Kateqoriyasız <i>{{ tier_counts.none }}</i></a>{% endif %}
+    {% if tier_counts.none %}<a class="{{ 'on' if tier == 'none' else '' }}" href="/leads/pending_review?tier=none{{ mq }}" title="Köhnə qiymətləndirmə və ya AI skoru yoxdur">Kateqoriyasız <i>{{ tier_counts.none }}</i></a>{% endif %}
   </div>
   <details class="ld-help"><summary>A, B, C nə deməkdir?</summary>
     <dl>{% for t in ["A", "B", "C"] %}<dt><span class="tier tier-{{ t }}">{{ t }}</span> {{ tier_info[t][0] }}</dt><dd>{{ tier_info[t][1] }}</dd>{% endfor %}</dl>
@@ -68,10 +88,18 @@
   {% endif %}
 
   {% if leads and show_actions %}
-  <div class="ld-list">
+  <div class="lr-bar">
+    <label class="lr-search"><span class="sr">Validasiyada axtar</span>
+      <svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      <input type="search" id="ld-q" placeholder="Başlıq, şirkət, səbəb və ya mənbə üzrə axtar…" autocomplete="off">
+    </label>
+    <span class="lr-count" id="ld-count" role="status"></span>
+  </div>
+
+  <div class="ld-list" id="ld-list">
     {% for lead in leads %}
     {% set kind = lead_kind(lead.source) %}
-    <article class="lead k-{{ kind }}">
+    <article class="lead k-{{ kind }}" data-q="{{ (lead.title ~ ' ' ~ (lead.entity_name or '') ~ ' ' ~ (lead.ai_reason or '') ~ ' ' ~ lead.source ~ ' ' ~ (lead.author_name or ''))|lower }}">
       <div class="lead-top">
         <span class="lead-kind"><i></i>{{ kind_names[kind] }} · {{ lead.source }}</span>
         <span class="lead-flags">
@@ -79,11 +107,15 @@
           {% if lead.tier %}<span class="tier tier-{{ lead.tier }}" title="{{ tier_info[lead.tier][0] if tier_info else '' }}">{{ lead.tier }}</span>{% endif %}
         </span>
       </div>
-      <h3 class="lead-title"><a href="{{ lead.source_url }}" target="_blank" rel="noopener">{{ lead.title }}<svg class="ic" aria-hidden="true"><use href="#i-out"/></svg></a></h3>
+      <h3 class="lead-title"><a href="{{ lead_href(lead) }}" target="_blank" rel="noopener">{{ lead.title }}<svg class="ic" aria-hidden="true"><use href="#i-out"/></svg></a></h3>
       {{ origin_links(lead) }}
+      {% if my_hits and lead.dedupe_key in my_hits %}
+      <p class="lead-mine">Sənin sözün: {% for t in my_hits[lead.dedupe_key][:5] %}<b>{{ t }}</b>{% endfor %}</p>
+      {% endif %}
       {% if lead.ai_reason %}
       <p class="lead-why"><span>Neo niyə seçdi</span>{{ lead.ai_reason }}{% if lead.ai_score is not none %} <em title="AI skoru (0–100)">· uyğunluq {{ (lead.ai_score * 100)|round|int }}/100</em>{% endif %}</p>
       {% endif %}
+      {{ brief_button(request, lead.dedupe_key) }}
       <p class="lead-meta">
         {% if lead.entity_name and lead.entity_name not in lead.title %}<span>{{ lead.entity_name[:60] }}</span>{% endif %}
         {% if lead.posted_at %}<span>Dərc: {{ lead.posted_at|baku_time }}</span>{% endif %}
@@ -97,7 +129,7 @@
       {% endif %}
       {% if can_review %}
       <div class="lead-act">
-        <form method="post" action="/leads/{{ lead.dedupe_key }}/approve">
+        <form method="post" action="/leads/{{ lead.dedupe_key }}/approve" data-approve>
           {{ csrf_field(request) }}
           <button class="mc-btn mc-btn-yes" type="submit"><svg class="ic" aria-hidden="true"><use href="#i-check"/></svg>Uyğundur — fürsət yarat</button>
         </form>
@@ -111,6 +143,68 @@
     </article>
     {% endfor %}
   </div>
+  <p class="lr-none" id="ld-none" hidden>Heç nə tapılmadı. Axtarışı dəyiş.</p>
+
+  <script>
+    /* Validasiyada axtarış: kartlar səhifədə qalır, uyğun gəlməyənlər gizlədilir. */
+    (function () {
+      var list = document.getElementById('ld-list'), q = document.getElementById('ld-q');
+      var none = document.getElementById('ld-none'), count = document.getElementById('ld-count');
+      if (!list || !q) return;
+      var items = Array.prototype.slice.call(list.children);
+      function render() {
+        var term = q.value.trim().toLowerCase(), matched = 0;
+        items.forEach(function (el) {
+          var ok = !term || el.dataset.q.indexOf(term) > -1;
+          el.hidden = !ok;
+          if (ok) matched++;
+        });
+        none.hidden = matched > 0;
+        count.textContent = term ? matched + ' nəticə' : '';
+      }
+      q.addEventListener('input', render);
+    })();
+
+    /* "Uyğundur — fürsət yarat": səhifə yenilənmir — fürsət fonda yaranır, kart yerində "yaradıldı" olur. */
+    document.querySelectorAll('form[data-approve]').forEach(function (f) {
+      f.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var card = f.closest('.lead'), act = f.closest('.lead-act'), b = f.querySelector('button');
+        if (b.disabled) return;
+        b.disabled = true;
+        var label = b.innerHTML;
+        b.textContent = 'Fürsət yaradılır…';
+        fetch(f.action, { method: 'POST', body: new FormData(f), credentials: 'same-origin',
+                          headers: { 'Accept': 'application/json' } })
+          .then(function (r) {
+            return r.json().catch(function () { throw new Error('Forma köhnəlib — səhifəni yenilə və yenidən cəhd et'); })
+              .then(function (d) { if (!r.ok) throw new Error(d.error || 'Fürsət yaradılmadı'); return d; });
+          })
+          .then(function (d) {
+            card.classList.add('is-approved');
+            var done = document.createElement('p');
+            done.className = 'lead-ok';
+            done.setAttribute('role', 'status');
+            done.textContent = d.msg + ' · ';
+            var open = document.createElement('a'); open.href = d.url; open.textContent = 'Tapşırığa keç';
+            var mail = document.createElement('a'); mail.href = d.url + '#email'; mail.textContent = 'Məktub yaz';
+            done.appendChild(open); done.appendChild(document.createTextNode(' · ')); done.appendChild(mail);
+            act.replaceWith(done);
+            document.querySelectorAll('a[href="/leads/pending_review"] .count').forEach(function (c) {
+              var n = parseInt(c.textContent, 10) - 1;
+              if (n > 0) c.textContent = n; else c.remove();
+            });
+          })
+          .catch(function (err) {
+            b.disabled = false; b.innerHTML = label;
+            var msg = act.querySelector('.lead-err') || document.createElement('p');
+            msg.className = 'lead-err'; msg.setAttribute('role', 'alert');
+            msg.textContent = (err && err.message) || 'Fürsət yaradılmadı';
+            act.appendChild(msg);
+          });
+      });
+    });
+  </script>
 
   {% elif leads %}
   <div class="lr-bar">
@@ -134,7 +228,7 @@
           <span class="lr-st st-{{ status_badge.get(lead.status, 'new') }}">{{ status_names.get(lead.status, lead.status) }}</span>
         </span>
       </div>
-      <h3 class="lr-title"><a href="{{ lead.source_url }}" target="_blank" rel="noopener">{{ lead.title[:160] }}</a></h3>
+      <h3 class="lr-title"><a href="{{ lead_href(lead) }}" target="_blank" rel="noopener">{{ lead.title[:160] }}</a></h3>
       {{ origin_links(lead) }}
       {% if lead.ai_reason %}<p class="lr-why"><span>AI-nin qeydi</span>{{ lead.ai_reason }}</p>{% endif %}
       {% if lead.status == 'converted' and lead.crm_opportunity_id %}<p class="lead-dup"><a href="/opportunities/{{ lead.crm_opportunity_id }}">Fürsət #{{ lead.crm_opportunity_id }} →</a></p>{% endif %}

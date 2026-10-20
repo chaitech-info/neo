@@ -16,7 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from app import keywords
 from app.auth import security
 from app.auth.security import REQUIRE, verify_csrf
-from app.db.models import KEYWORD_LANGUAGES, KEYWORD_MATCHES, KEYWORD_SCOPES, InterestArea, Keyword, User
+from app.db.models import KEYWORD_LANGUAGES, KEYWORD_MATCHES, KEYWORD_SCOPES, InterestArea, Keyword, User, UserKeyword
 
 router = APIRouter()
 
@@ -147,6 +147,74 @@ def keywords_delete(kw_id: int, me: User = Depends(REQUIRE["manager"])):
         db.commit()
     keywords.invalidate()
     return _go(msg=f"«{term}» silindi")
+
+
+# --- Mənim açar sözlərim (hər istifadəçinin özü, viewer da) ---------------------------
+
+MAX_USER_KEYWORDS = 100
+
+
+def _go_mine(msg: str | None = None, err: str | None = None) -> RedirectResponse:
+    query = {"msg": msg} if msg else ({"err": err} if err else {})
+    return RedirectResponse(url="/me/keywords" + (f"?{urlencode(query, quote_via=quote)}" if query else ""),
+                            status_code=303)
+
+
+@router.get("/me/keywords")
+def my_keywords_page(request: Request, me: User = Depends(REQUIRE["viewer"])):
+    with security.SessionLocal() as db:
+        rows = list(db.scalars(select(UserKeyword).where(UserKeyword.user_id == me.id).order_by(UserKeyword.term)))
+    return request.app.state.templates.TemplateResponse(request, "my_keywords.html", {
+        "request": request, "active": "my_keywords", "rows": rows, "match_names": MATCH_NAMES,
+        "limit": MAX_USER_KEYWORDS,
+    })
+
+
+@router.post("/me/keywords", dependencies=[Depends(verify_csrf)])
+def my_keywords_add(terms: str = Form(...), match: str = Form("prefix"), me: User = Depends(REQUIRE["viewer"])):
+    if match not in KEYWORD_MATCHES:
+        return _go_mine(err="Yanlış seçim")
+    wanted = [t.strip() for t in re.split(r"[\n,]", terms) if t.strip()]
+    if not wanted:
+        return _go_mine(err="Açar söz boş ola bilməz")
+    too_long = [t for t in wanted if len(t) > MAX_TERM_LENGTH]
+    if too_long:
+        return _go_mine(err=f"Açar söz çox uzundur (maks. {MAX_TERM_LENGTH} simvol): {too_long[0][:40]}…")
+    with security.SessionLocal() as db:
+        have = {t.lower() for t in db.scalars(select(UserKeyword.term).where(UserKeyword.user_id == me.id))}
+        added = 0
+        for term in wanted:
+            if term.lower() in have:
+                continue
+            if len(have) >= MAX_USER_KEYWORDS:
+                db.commit()
+                keywords.invalidate()
+                return _go_mine(err=f"{added} söz əlavə olundu; ən çox {MAX_USER_KEYWORDS} söz ola bilər")
+            have.add(term.lower())
+            db.add(UserKeyword(user_id=me.id, term=term,
+                               match="phrase" if match == "prefix" and " " in term else match))
+            added += 1
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            return _go_mine(err="Bəzi sözlər artıq var idi — yenidən cəhd et")
+    keywords.invalidate()  # scrape də bu sözləri görsün
+    skipped = len(wanted) - added
+    return _go_mine(msg=f"{added} açar söz əlavə olundu" + (f" ({skipped} artıq var idi)" if skipped else ""))
+
+
+@router.post("/me/keywords/{kw_id}/delete", dependencies=[Depends(verify_csrf)])
+def my_keywords_delete(kw_id: int, me: User = Depends(REQUIRE["viewer"])):
+    with security.SessionLocal() as db:
+        kw = db.get(UserKeyword, kw_id)
+        if kw is None or kw.user_id != me.id:
+            return _go_mine(err="Açar söz tapılmadı")
+        term = kw.term
+        db.delete(kw)
+        db.commit()
+    keywords.invalidate()
+    return _go_mine(msg=f"«{term}» silindi")
 
 
 @router.post("/settings/areas", dependencies=[Depends(verify_csrf)])

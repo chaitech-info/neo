@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Mənim açar sözlərim — Neo{% endblock %}
+{% block main_class %}mc mc-kw{% endblock %}
+{% block content %}
+  <header class="ld-head">
+    <h1 class="mc-title">Mənim açar sözlərim</h1>
+    <p class="ld-sub">Sənə maraqlı olan sözlər. Neo bu sözlərə uyğun xəbərləri də toplayır; Validasiyada <b>“Mənim sözlərim”</b> filtri yalnız onları göstərir və kartda hansı sözün uyğun gəldiyi yazılır. Ümumi <a href="/settings/keywords">açar sözlər</a> və mənfi sözlər hamı üçün qüvvədədir.</p>
+  </header>
+
+  <section class="kw-sec">
+    <h2>Sözlərim <em>{{ rows|length }} / {{ limit }}</em></h2>
+    <form class="kw-add" method="post" action="/me/keywords">
+      {{ csrf_field(request) }}
+      <label class="kw-f">Yeni söz(lər) — hər sətirdə biri
+        <textarea name="terms" rows="3" required placeholder="məs.&#10;xəstəxana&#10;zavod açılışı"></textarea>
+      </label>
+      <details class="kw-more">
+        <summary>Əlavə seçimlər</summary>
+        <div class="kw-row">
+          <label class="kw-f">Uyğunluq növü<select name="match">{% for k, v in match_names.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label>
+        </div>
+      </details>
+      <button class="mc-btn mc-btn-hero" type="submit">Sözləri əlavə et</button>
+    </form>
+
+    {% if rows %}
+    <ul class="kw-list">
+      {% for k in rows %}
+      <li class="kw">
+        <div class="kw-main">
+          <b>{{ k.term }}</b>
+          <small>{{ match_names.get(k.match, k.match) }}</small>
+        </div>
+        <div class="kw-act">
+          <form method="post" action="/me/keywords/{{ k.id }}/delete" onsubmit="return confirm('Açar söz silinsin?')">{{ csrf_field(request) }}<button class="mc-btn mc-btn-sm kw-del" type="submit">Sil</button></form>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+      <div class="empty"><b>Hələ sözün yoxdur</b>Yuxarıdan əlavə et — Validasiyada sənə uyğun xəbərlər ayrıca görünəcək.</div>
+    {% endif %}
+  </section>
+{% endblock %}

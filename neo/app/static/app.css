@@ -464,6 +464,7 @@ details[open] summary { margin-bottom: 6px; }
 .tk-side { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font-size: 13px; color: var(--tx2); text-align: right; }
 .tk-when { font-weight: 500; color: var(--tx); }
 .tk-when.late { color: var(--err); }
+.tk-act { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
 .tk-act form { display: contents; }
 .tk-done { color: var(--go); border-color: color-mix(in srgb, var(--go) 35%, transparent); background: transparent; }
 .mc button.tk-done { color: var(--go); }
@@ -924,6 +925,25 @@ th.num, td.num { text-align: right; white-space: nowrap; font-variant-numeric: t
 .lead-links a { display: inline-flex; align-items: center; gap: 4px; color: var(--run); text-decoration: none; }
 .lead-links a:hover { text-decoration: underline; }
 .lead-links .ic { width: 12px; height: 12px; }
+
+/* Validasiya: istifadəçinin öz açar sözünə uyğun gələn lead ("Sənin sözün") */
+.lead-mine { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: 2px 0 10px; font-size: 12.5px; color: var(--tx2); }
+.lead-mine b { font-weight: 600; border-radius: 100px; padding: 3px 9px; background: var(--go-w); color: var(--go); }
+
+/* Validasiya: fürsət səhifə yenilənmədən yaradılanda kartın vəziyyəti */
+.lead.is-approved { border-color: color-mix(in srgb, var(--go) 45%, var(--line)); }
+.lead-ok { margin: 10px 0 0; padding: 10px 14px; border-radius: 10px; background: var(--go-w); color: var(--go); font-size: 14px; font-weight: 500; }
+.lead-ok a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+.lead-err { flex-basis: 100%; margin: 6px 0 0; color: var(--err); font-size: 13.5px; }
+
+/* Fürsət səhifəsi: rəhbərlərin LinkedIn profillərini axtar */
+.ld-leaders { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0 0 10px; }
+.ld-leaders .od-hint { margin: 0; }
+
+/* Səsli izah düyməsi (lead kartı, fürsət səhifəsi) */
+.brief-btn[aria-busy="true"] { opacity: .6; cursor: progress; }
+.brief-text { margin: 8px 0 0; font-size: 13.5px; line-height: 1.5; color: var(--tx2); }
+.brief-text[hidden] { display: none; }
 
 /* Fürsət səhifəsi: kontaktlar */
 .ct-list { list-style: none; margin: 0; padding: 0; }

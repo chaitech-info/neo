@@ -40,6 +40,7 @@
     <div class="nav-group">
       <h4>Alətlər</h4>
       <a href="/tools/offers" class="{{ 'active' if active == 'offers' else '' }}">Qiymət təklifi</a>
+      <a href="/tools/company" class="{{ 'active' if active == 'company' else '' }}">Şirkət analizi</a>
       {% if has_role(current, 'admin') %}<a href="/tools/packages" class="{{ 'active' if active == 'packages' else '' }}">Paketlər</a>{% endif %}
     </div>
     {% endif %}
@@ -52,6 +53,7 @@
     </div>
     <div class="nav-group">
       <h4>Ayarlar</h4>
+      <a href="/me/keywords" class="{{ 'active' if active == 'my_keywords' else '' }}">Mənim açar sözlərim</a>
       <a href="/settings/keywords" class="{{ 'active' if active == 'keywords' else '' }}">Açar sözlər</a>
       {% if has_role(current, 'admin') %}<a href="/users" class="{{ 'active' if active == 'users' else '' }}">İstifadəçilər</a>{% endif %}
     </div>
@@ -104,6 +106,34 @@
       var next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
       document.documentElement.setAttribute('data-theme', next);
       try { localStorage.setItem('neo-theme', next); } catch (err) {}
+    });
+    /* Səsli izah (_brief.html): ilk basış izahı hazırlayıb oxudur, sonrakılar dayandırır / davam etdirir. */
+    document.addEventListener('submit', function (e) {
+      var f = e.target.closest && e.target.closest('form[data-brief]');
+      if (!f) return;
+      e.preventDefault();
+      var b = f.querySelector('button'), out = f.querySelector('.brief-text'), PLAY = '▶ Səsli izah';
+      if (f._audio) {
+        if (f._audio.paused) { f._audio.play(); b.textContent = '❚❚ Dayandır'; }
+        else { f._audio.pause(); b.textContent = PLAY; }
+        return;
+      }
+      if (b.getAttribute('aria-busy') === 'true') return;
+      b.setAttribute('aria-busy', 'true'); b.textContent = 'Hazırlanır…';
+      fetch(f.action, { method: 'POST', body: new FormData(f), credentials: 'same-origin' })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (res) {
+          if (!res.ok || !res.d.audio_url) throw new Error(res.d.error || 'Səsli izah alınmadı');
+          out.textContent = res.d.script; out.hidden = false;
+          f._audio = new Audio(res.d.audio_url);
+          f._audio.addEventListener('ended', function () { b.textContent = PLAY; });
+          return f._audio.play().then(function () { b.textContent = '❚❚ Dayandır'; });
+        })
+        .catch(function (err) {
+          if (!f._audio) { out.textContent = (err && err.message && err.message.length < 300) ? err.message : 'Səsli izah alınmadı — səhifəni yeniləyib yenidən cəhd et'; out.hidden = false; }
+          b.textContent = PLAY;
+        })
+        .then(function () { b.removeAttribute('aria-busy'); });
     });
   </script>
 </body>
