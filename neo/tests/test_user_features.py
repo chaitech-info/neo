@@ -186,28 +186,8 @@ def test_approve_without_page_reload_returns_json(factory):
     assert r.status_code == 200 and r.json()["opp_id"] == opp.id and r.json()["url"] == f"/opportunities/{opp.id}"
     again = client.post(f"/leads/{key}/approve", headers={"Accept": "application/json"})
     assert again.status_code == 409 and "error" in again.json()  # ikinci dəfə — aydın xəta, yönləndirmə yox
-    mail_form = f'action="/opportunities/{opp.id}/email/draft#email"'
-    assert mail_form in client.get(f"/opportunities/{opp.id}").text
-    assert mail_form in client.get("/tasks?who=all").text
-
-
-def test_mail_button_opens_draft_directly(factory, opp_id, monkeypatch):
-    """Tapşırıqdakı "Məktub yaz": qaralama dərhal açılır, email-i olan ilk kontakt özü seçilir."""
-    with factory() as s:
-        opp = s.get(Opportunity, opp_id)
-        s.add(Contact(lead_key=opp.lead_key, organization_id=opp.organization_id, name="Rauf", email="rauf@sahil.az",
-                      source="ai"))
-        s.commit()
-    seen = {}
-
-    def draft(**kw):
-        seen.update(kw)
-        return {"subject": "Nahar təklifi", "body": "Mətn " * 10}
-
-    monkeypatch.setattr(mail, "draft_email", draft)
-    page = TestClient(web.app).post(f"/opportunities/{opp_id}/email/draft", data={"auto": "1"}).text
-    assert 'value="Nahar təklifi"' in page and 'value="rauf@sahil.az"' in page  # göndərmə formu açıqdır
-    assert seen["contact_name"] == "Rauf" and seen["language"] == "az"
+    assert 'href="#email"' in client.get(f"/opportunities/{opp.id}").text
+    assert f'href="/opportunities/{opp.id}#email"' in client.get("/tasks?who=all").text
 
 
 # --- Alətlər → Şirkət analizi ----------------------------------------------------------

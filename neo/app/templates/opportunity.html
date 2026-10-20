@@ -35,10 +35,7 @@
         <div class="tk-act">
           {% if can_edit %}
             {% if is_open %}
-            <form method="post" action="/opportunities/{{ opp.id }}/email/draft#email" data-mail>
-              {{ csrf_field(request) }}<input type="hidden" name="auto" value="1">
-              <button class="mc-btn mc-btn-sm" type="submit" data-busy="AI yazır…" title="AI ilə məktub qaralaması yaz, yoxla, fayl əlavə et və göndər">Məktub yaz</button>
-            </form>
+            <a class="mc-btn mc-btn-sm" href="#email" title="AI ilə məktub qaralaması yaz, yoxla, fayl əlavə et və göndər">Məktub yaz</a>
             <form method="post" action="/tasks/{{ t.id }}/status">
               {{ csrf_field(request) }}<input type="hidden" name="status" value="done"><input type="hidden" name="back" value="/opportunities/{{ opp.id }}">
               <button class="mc-btn mc-btn-sm tk-done" type="submit"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 8.6l3 3L12.8 4.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Bitdi</button>
@@ -195,7 +192,7 @@
         <p class="od-hint">Məktub şirkət poçtundan gedir; cavab sənin ünvanına ({{ me.email }}) gələcək.</p>
       </form>
       {% else %}
-      <form method="post" action="/opportunities/{{ opp.id }}/email/draft#email" class="kw-row em-start" data-mail>
+      <form method="post" action="/opportunities/{{ opp.id }}/email/draft" class="kw-row em-start">
         {{ csrf_field(request) }}
         <label class="kw-f">Kimə
           <select name="contact_id">
@@ -206,7 +203,7 @@
         <label class="kw-f">Dil
           <select name="language">{% for k, v in languages.items() %}<option value="{{ k }}" {% if k == default_language %}selected{% endif %}>{{ v }}</option>{% endfor %}</select>
         </label>
-        <button class="mc-btn mc-btn-hero" type="submit" data-busy="AI yazır…">AI ilə məktub yaz</button>
+        <button class="mc-btn mc-btn-hero" type="submit">AI ilə məktub yaz</button>
       </form>
       <p class="od-hint">AI ~10 cümləlik qaralama yazır; göndərməzdən əvvəl oxuyub düzəldə bilərsən.</p>
       {% endif %}

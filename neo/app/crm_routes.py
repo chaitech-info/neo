@@ -132,20 +132,16 @@ OUTREACH_KIND_NAMES = {"email": "Email", "linkedin_comment": "LinkedIn şərhi"}
 
 
 @router.post("/opportunities/{opp_id}/email/draft", dependencies=[Depends(verify_csrf)])
-def opportunity_email_draft(request: Request, opp_id: int, contact_id: str = Form(""), language: str = Form(""),
-                            auto: str = Form(""), me: User = Depends(REQUIRE["sales"])):
-    """auto=1 — tapşırıqdakı "Məktub yaz" düyməsi: kontakt və dil özü seçilir, qaralama dərhal açılır."""
+def opportunity_email_draft(request: Request, opp_id: int, contact_id: str = Form(""), language: str = Form("az"),
+                            me: User = Depends(REQUIRE["sales"])):
     path = f"/opportunities/{opp_id}"
+    language = language if language in LANGUAGES else "az"
     with security.SessionLocal() as db:
         opp = db.get(Opportunity, opp_id)
         if opp is None:
             return _go("/opportunities", err="Fürsət tapılmadı")
         context = _opp_context(db, opp)
-        if language not in LANGUAGES:
-            language = context["default_language"] if auto == "1" else "az"
         contact = db.get(Contact, int(contact_id)) if contact_id.isdigit() else None
-        if contact is None and auto == "1" and context["email_contacts"]:
-            contact = context["email_contacts"][0]
         lead, org = context["lead"], context["org"]
         try:
             draft = mail.draft_email(
