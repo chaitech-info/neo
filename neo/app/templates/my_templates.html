@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Məktub şablonlarım — Neo{% endblock %}
+{% block main_class %}mc mc-kw{% endblock %}
+{% block content %}
+  <header class="ld-head">
+    <h1 class="mc-title">Məktub şablonlarım</h1>
+    <p class="ld-sub">Öz məktub şablonunu yüklə (Word .docx, .txt) və ya mətni yapışdır. Fürsətdə “AI ilə məktub yaz” edəndə şablonu seç — AI məktubu onun quruluşu, tonu və sabit ifadələri ilə yazır, <b>[Şirkət adı]</b> kimi boşluqları müştərinin məlumatı ilə doldurur.</p>
+  </header>
+
+  <section class="kw-sec">
+    <details class="kw-new" {% if not rows %}open{% endif %}>
+      <summary>+ Şablon yüklə</summary>
+      <form method="post" action="/me/templates" enctype="multipart/form-data">
+        {{ csrf_field(request) }}
+        <label class="kw-f">Ad<input name="name" maxlength="120" placeholder="məs. Zavodlar üçün ilk məktub"></label>
+        <label class="kw-f">Fayl (.docx, .txt, .md — ən çox 1 MB)<input type="file" name="file" accept=".docx,.txt,.md"></label>
+        <label class="kw-f">və ya mətni bura yapışdır (ən çox {{ max_chars }} simvol)<textarea name="body" rows="10" placeholder="Hörmətli [Ad Soyad],&#10;&#10;[Şirkət adı] olaraq ..."></textarea></label>
+        <label class="kw-chk"><input type="checkbox" name="shared" value="1">Komanda da istifadə edə bilsin</label>
+        <button class="mc-btn mc-btn-hero" type="submit">Yüklə</button>
+      </form>
+    </details>
+
+    {% if rows %}
+    <ul class="kw-list">
+      {% for t, author in rows %}
+      <li class="kw">
+        <div class="kw-main">
+          <b>{{ t.name }}{% if t.is_shared %} <span class="kw-chip on">Komanda</span>{% endif %}</b>
+          <small>{{ author }} · {{ t.created_at|baku_time }} · {{ t.body|length }} simvol</small>
+          <details class="od-more"><summary>Mətni göstər</summary><div class="raw">{{ t.body }}</div></details>
+        </div>
+        {% if t.user_id == me.id or has_role(me, 'admin') %}
+        <div class="kw-act">
+          <form method="post" action="/me/templates/{{ t.id }}/delete" onsubmit="return confirm('Şablon silinsin?')">{{ csrf_field(request) }}<button class="mc-btn mc-btn-sm kw-del" type="submit">Sil</button></form>
+        </div>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+      <div class="empty"><b>Hələ şablon yoxdur</b>Yuxarıdan yüklə — sonra fürsət səhifəsində məktub yazanda seçə bilərsən.</div>
+    {% endif %}
+  </section>
+{% endblock %}

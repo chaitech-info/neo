@@ -16,13 +16,15 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
-from app import crm, leaders
+from app import crm, leaders, mailboxes
 from app.auth import security
 from app.auth.security import REQUIRE, verify_csrf
 from app.contacts import EMAIL_RE, contacts_for, normalize_phone
+from app.notify import notify
 from app.outreach import LANGUAGES, OutreachError, detect_language
 from app.outreach import linkedin_comment, mail
-from app.db.models import Contact, LeadRecord, Opportunity, Organization, Outreach, Task, Tender, User
+from app.db.models import (REPLY_STATUSES, Contact, InboundEmail, LeadRecord, LetterApproval, LetterTemplate,
+                           Opportunity, Organization, Outreach, Task, Tender, User)
 
 router = APIRouter()
 
@@ -64,7 +66,7 @@ MAX_EXPECTED_VALUE = Decimal("1000000000000")  # Numeric(14, 2) → ən çox 12 
 
 
 @router.get("/opportunities")
-def opportunities_page(request: Request, owner: str = "all", me: User = Depends(REQUIRE["viewer"])):
+def opportunities_page(request: Request, owner: str = "all", reply: str = "", me: User = Depends(REQUIRE["viewer"])):
     with security.SessionLocal() as db:
         next_due = (
             select(Task.opportunity_id, func.min(Task.due_at).label("due"))
@@ -80,6 +82,11 @@ def opportunities_page(request: Request, owner: str = "all", me: User = Depends(
         )
         if owner == "me":
             q = q.where(Opportunity.owner_id == me.id)
+        reply_counts = dict(db.execute(select(Opportunity.reply_status, func.count()).where(
+            Opportunity.reply_status.is_not(None)).group_by(Opportunity.reply_status)).all())
+        reply = reply if reply in REPLY_STATUSES else ""
+        if reply:
+            q = q.where(Opportunity.reply_status == reply)
         rows = db.execute(q.order_by(Opportunity.updated_at.desc())).all()
     columns = {stage: [] for stage in crm.PIPELINE}
     for row in rows:
@@ -90,14 +97,31 @@ def opportunities_page(request: Request, owner: str = "all", me: User = Depends(
     return _render(request, "opportunities.html", {
         "active": "opportunities", "columns": columns, "totals": totals, "owner": owner,
         "stage_names": crm.STAGE_NAMES, "open_total": sum(totals[s] for s in crm.PIPELINE if s not in crm.CLOSED_STAGES),
+        "reply": reply, "reply_counts": reply_counts, "reply_status_names": mailboxes.REPLY_STATUS_NAMES,
     })
 
 
-def _opp_context(db, opp: Opportunity) -> dict:
+def _templates_for(db, user: User | None) -> list[LetterTemplate]:
+    """İstifadəçinin öz şablonları + komandaya paylaşılanlar."""
+    if user is None:
+        return []
+    return list(db.scalars(select(LetterTemplate).where(
+        (LetterTemplate.user_id == user.id) | LetterTemplate.is_shared.is_(True)).order_by(LetterTemplate.name)))
+
+
+def _opp_context(db, opp: Opportunity, me: User | None = None) -> dict:
     lead = db.get(LeadRecord, opp.lead_key) if opp.lead_key else None
     users = _active_users(db)
     contacts = contacts_for(db, opp.lead_key, opp.organization_id)
+    default = mailboxes.default_sender()
     return {
+        "mailbox_list": mailboxes.active(db), "default_sender": default, "templates": _templates_for(db, me),
+        "approvals": list(db.scalars(select(LetterApproval).where(LetterApproval.opportunity_id == opp.id)
+                                     .order_by(LetterApproval.created_at.desc()))),
+        "replies": list(db.scalars(select(InboundEmail).where(InboundEmail.opportunity_id == opp.id)
+                                   .order_by(InboundEmail.received_at.desc()))),
+        "reply_status_names": mailboxes.REPLY_STATUS_NAMES, "sentiment_names": mailboxes.SENTIMENT_NAMES,
+        "approval_names": APPROVAL_NAMES,
         "active": "opportunities", "opp": opp, "lead": lead,
         "org": db.get(Organization, opp.organization_id) if opp.organization_id else None,
         "tender": db.get(Tender, opp.tender_id) if opp.tender_id else None,
@@ -116,44 +140,83 @@ def _opp_context(db, opp: Opportunity) -> dict:
     }
 
 
+APPROVAL_NAMES = {"pending": "Təsdiq gözləyir", "approved": "Təsdiqləndi", "rejected": "Rədd edildi"}
+
+
 @router.get("/opportunities/{opp_id}")
-def opportunity_page(request: Request, opp_id: int, me: User = Depends(REQUIRE["viewer"])):
+def opportunity_page(request: Request, opp_id: int, approval: str = "", me: User = Depends(REQUIRE["viewer"])):
     with security.SessionLocal() as db:
         opp = db.get(Opportunity, opp_id)
         if opp is None:
             return _go("/opportunities", err="Fürsət tapılmadı")
-        context = _opp_context(db, opp)
+        context = _opp_context(db, opp, me)
+        # Təsdiqlənmiş məktub → göndərmə formu onunla doldurulur (fayl əlavə edib "Göndər").
+        ok = db.get(LetterApproval, int(approval)) if approval.isdigit() else None
+        if ok is not None and ok.opportunity_id == opp.id and ok.status == "approved" and ok.sent_at is None \
+                and security.has_role(me, "sales"):
+            context["draft"] = {"to": ok.to_address, "subject": ok.subject, "body": ok.body,
+                                "language": ok.language or "az", "contact_id": ok.contact_id or "",
+                                "mailbox_id": ok.mailbox_id or "", "approval_id": ok.id,
+                                "send_key": secrets.token_urlsafe(24)}
     return _render(request, "opportunity.html", context)
 
 
-# --- Email (AI qaralama → insan yoxlayır → Gmail SMTP) -------------------------------
+# --- Email (AI qaralama → insan yoxlayır → şirkət poçtu SMTP) -------------------------
 
 OUTREACH_KIND_NAMES = {"email": "Email", "linkedin_comment": "LinkedIn şərhi"}
 
 
+def _template(db, template_id: str, me: User) -> LetterTemplate | None:
+    tpl = db.get(LetterTemplate, int(template_id)) if template_id.isdigit() else None
+    return tpl if tpl is not None and (tpl.user_id == me.id or tpl.is_shared) else None
+
+
 @router.post("/opportunities/{opp_id}/email/draft", dependencies=[Depends(verify_csrf)])
 def opportunity_email_draft(request: Request, opp_id: int, contact_id: str = Form(""), language: str = Form("az"),
+                            template_id: str = Form(""), mailbox_id: str = Form(""), instructions: str = Form(""),
+                            to: str = Form(""), subject: str = Form(""), body: str = Form(""),
+                            send_key: str = Form(""), approval_id: str = Form(""),
                             me: User = Depends(REQUIRE["sales"])):
+    """AI qaralaması. `instructions` doludursa — "Yenidən yarat": mövcud qaralama istifadəçinin
+    göstərişi ilə yenidən yazılır (mövzu, mətn, alıcı formda qalır)."""
     path = f"/opportunities/{opp_id}"
     language = language if language in LANGUAGES else "az"
+    instructions = instructions.strip()
+    revising = bool(body.strip())
     with security.SessionLocal() as db:
         opp = db.get(Opportunity, opp_id)
         if opp is None:
             return _go("/opportunities", err="Fürsət tapılmadı")
-        context = _opp_context(db, opp)
+        context = _opp_context(db, opp, me)
         contact = db.get(Contact, int(contact_id)) if contact_id.isdigit() else None
+        tpl = _template(db, template_id, me)
+        sender = mailboxes.resolve(db, mailbox_id)
         lead, org = context["lead"], context["org"]
+        current = {"to": to.strip(), "subject": " ".join(subject.split()), "body": body.strip(), "language": language,
+                   "contact_id": contact.id if contact else "", "template_id": tpl.id if tpl else "",
+                   "mailbox_id": mailbox_id if mailbox_id.isdigit() else "",
+                   "approval_id": approval_id if approval_id.isdigit() else "",
+                   "send_key": send_key if SEND_KEY_RE.fullmatch(send_key) else secrets.token_urlsafe(24)}
+        if revising and not instructions:
+            return _render(request, "opportunity.html", {
+                **context, "draft": current, "page_error": "Nəyi dəyişmək lazımdır? Göstərişi yaz, sonra «Yenidən yarat» bas"})
         try:
             draft = mail.draft_email(
                 lead_title=lead.title if lead else opp.title, lead_text=lead.raw_text if lead else "",
                 org_name=org.name if org else (lead.entity_name if lead else None),
                 contact_name=contact.name if contact else None, contact_title=contact.title if contact else None,
-                sender_name=me.full_name, language=language)
+                sender_name=me.full_name, language=language, template=tpl.body if tpl else None,
+                previous={"subject": current["subject"], "body": current["body"]} if revising else None,
+                instructions=instructions or None,
+                company_name=sender.name if sender is not None and sender.mailbox_id else None)
         except OutreachError as exc:
-            return _go(path,err=str(exc))
-    draft.update(body=mail.with_signature(draft["body"], me.full_name), language=language,
-                 to=contact.email if contact and contact.email else "", contact_id=contact.id if contact else "",
-                 send_key=secrets.token_urlsafe(24))
+            if revising:
+                return _render(request, "opportunity.html", {**context, "draft": current, "page_error": str(exc)})
+            return _go(path, err=str(exc))
+    draft = {**current, "subject": draft["subject"], "body": mail.with_signature(draft["body"], me.full_name),
+             "to": current["to"] or (contact.email if contact and contact.email else ""), "revised": revising,
+             # Mətn dəyişdi — əvvəlki təsdiq artıq bu məktuba aid deyil.
+             "approval_id": ""}
     return _render(request, "opportunity.html", {**context, "draft": draft})
 
 
@@ -187,7 +250,8 @@ def _read_attachments(files: list[UploadFile]) -> list[tuple[str, bytes, str]]:
 @router.post("/opportunities/{opp_id}/email/send", dependencies=[Depends(verify_csrf)])
 def opportunity_email_send(request: Request, opp_id: int, to: str = Form(...), subject: str = Form(...),
                            body: str = Form(...), language: str = Form(""), contact_id: str = Form(""),
-                           send_key: str = Form(""), files: list[UploadFile] = File(default=[]),
+                           send_key: str = Form(""), mailbox_id: str = Form(""), approval_id: str = Form(""),
+                           template_id: str = Form(""), files: list[UploadFile] = File(default=[]),
                            me: User = Depends(REQUIRE["sales"])):
     path = f"/opportunities/{opp_id}"
     # Sətir sonu mövzuda başlıq inyeksiyası / SMTP xətası (500) verirdi.
@@ -199,9 +263,12 @@ def opportunity_email_send(request: Request, opp_id: int, to: str = Form(...), s
             opp = db.get(Opportunity, opp_id)
             if opp is None:
                 return _go("/opportunities", err="Fürsət tapılmadı")
-            context = _opp_context(db, opp)
+            context = _opp_context(db, opp, me)
         draft = {"to": to, "subject": subject, "body": body, "language": language[:2],
-                 "contact_id": contact_id if contact_id.isdigit() else "", "send_key": send_key}
+                 "contact_id": contact_id if contact_id.isdigit() else "", "send_key": send_key,
+                 "mailbox_id": mailbox_id if mailbox_id.isdigit() else "",
+                 "approval_id": approval_id if approval_id.isdigit() else "",
+                 "template_id": template_id if template_id.isdigit() else ""}
         return _render(request, "opportunity.html", {**context, "draft": draft, "page_error": error})
 
     if not EMAIL_RE.fullmatch(to) or len(to) > 254:
@@ -218,29 +285,117 @@ def opportunity_email_send(request: Request, opp_id: int, to: str = Form(...), s
         opp = db.get(Opportunity, opp_id)
         if opp is None:
             return _go("/opportunities", err="Fürsət tapılmadı")
+        sender = mailboxes.resolve(db, mailbox_id)
+        if mailbox_id.isdigit() and sender is None:
+            return back_to_draft("Seçilmiş göndərən poçt tapılmadı və ya söndürülüb")
         contact = db.get(Contact, int(contact_id)) if contact_id.isdigit() else None
+        approval = db.get(LetterApproval, int(approval_id)) if approval_id.isdigit() else None
         # Göndərməzdən əvvəl sətir rezerv olunur: ikinci klik eyni send_key-ə dəyib dayanır.
         row = Outreach(kind="email", lead_key=opp.lead_key, opportunity_id=opp.id,
                        contact_id=contact.id if contact else None, to_address=to, subject=subject[:200],
                        body=body, language=language[:2] or None, status="failed", error="Göndərilir…",
                        user_id=me.id, created_at=datetime.utcnow(), send_key=send_key,
-                       attachments="\n".join(name for name, _, _ in attachments) or None)
+                       attachments="\n".join(name for name, _, _ in attachments) or None,
+                       mailbox_id=sender.mailbox_id if sender is not None else None)
         db.add(row)
         try:
             db.commit()
         except IntegrityError:
             db.rollback()
             return _go(path, msg="Bu məktub artıq göndərilib")
+        # Cavab şirkət poçtuna gəlsin ki, panel onu oxuyub fürsətdə göstərsin; poçt oxunmursa — əməkdaşın özünə.
+        reply_to = None if sender is not None and sender.can_receive else me.email
         try:
-            message_id = mail.send_email(to=to, subject=subject[:200], body=body, reply_to=me.email,
-                                         attachments=attachments)
+            message_id = mail.send_email(to=to, subject=subject[:200], body=body, reply_to=reply_to,
+                                         attachments=attachments, sender=sender)
         except OutreachError as exc:
             row.error = str(exc)[:500]
             db.commit()
             return _go(path, err=str(exc))
+        if approval is not None and approval.opportunity_id == opp.id and approval.status == "approved":
+            approval.sent_at = datetime.utcnow()
         crm.email_sent(db, opp, to=to, subject=subject[:200], body=body, language=language[:2] or None,
                        contact_id=contact.id if contact else None, user_id=me.id, message_id=message_id, row=row)
-    return _go(path, msg=f"Məktub göndərildi: {to}. 3 gün sonra cavabı yoxlamaq üçün tapşırıq açıldı")
+    who = f" ({sender.name})" if sender is not None and sender.mailbox_id else ""
+    return _go(path, msg=f"Məktub göndərildi{who}: {to}. Cavab gələnə qədər status — Gözləmədə")
+
+
+# --- Təsdiqə göndər (Təsdiqləyici rolu, app/approval_routes.py) ------------------------
+
+
+def approvers(db) -> list[User]:
+    """Təsdiqləyicilər; heç biri yoxdursa — adminlər (sorğu itməsin)."""
+    rows = list(db.scalars(select(User).where(User.role_code == "approver", User.is_active.is_(True))))
+    return rows or list(db.scalars(select(User).where(User.role_code == "admin", User.is_active.is_(True))))
+
+
+@router.post("/opportunities/{opp_id}/email/approval", dependencies=[Depends(verify_csrf)])
+def opportunity_email_approval(request: Request, opp_id: int, to: str = Form(""), subject: str = Form(""),
+                               body: str = Form(""), language: str = Form(""), contact_id: str = Form(""),
+                               mailbox_id: str = Form(""), send_key: str = Form(""), template_id: str = Form(""),
+                               me: User = Depends(REQUIRE["sales"])):
+    path = f"/opportunities/{opp_id}"
+    to, subject, body = to.strip().lower(), " ".join(subject.split()), body.strip()
+    with security.SessionLocal() as db:
+        opp = db.get(Opportunity, opp_id)
+        if opp is None:
+            return _go("/opportunities", err="Fürsət tapılmadı")
+        error = None
+        if not EMAIL_RE.fullmatch(to) or len(to) > 254:
+            error = "Alıcının email ünvanı yanlışdır"
+        elif not subject or len(body) < 20:
+            error = "Mövzu və məktub mətni boş ola bilməz"
+        if error:
+            draft = {"to": to, "subject": subject, "body": body, "language": language[:2],
+                     "contact_id": contact_id if contact_id.isdigit() else "",
+                     "mailbox_id": mailbox_id if mailbox_id.isdigit() else "",
+                     "template_id": template_id if template_id.isdigit() else "",
+                     "send_key": send_key if SEND_KEY_RE.fullmatch(send_key) else secrets.token_urlsafe(24)}
+            return _render(request, "opportunity.html", {**_opp_context(db, opp, me), "draft": draft, "page_error": error})
+        contact = db.get(Contact, int(contact_id)) if contact_id.isdigit() else None
+        sender = mailboxes.resolve(db, mailbox_id) if mailbox_id.isdigit() else None
+        row = LetterApproval(opportunity_id=opp.id, requested_by_id=me.id, to_address=to, subject=subject[:200],
+                             body=body, language=language[:2] or None, contact_id=contact.id if contact else None,
+                             mailbox_id=sender.mailbox_id if sender is not None else None, status="pending",
+                             created_at=datetime.utcnow())
+        db.add(row)
+        db.flush()
+        for user in approvers(db):
+            if user.id != me.id:
+                notify(db, user.id, f"Təsdiq gözləyir: {me.full_name} — {subject[:120]}", f"/approvals#a{row.id}",
+                       commit=False)
+        db.commit()
+    return _go(path + "#approvals", msg="Məktub təsdiqə göndərildi — cavab bildiriş kimi gələcək")
+
+
+# --- Məktuba cavablar və status ----------------------------------------------------------
+
+
+@router.post("/opportunities/{opp_id}/reply-status", dependencies=[Depends(verify_csrf)])
+def opportunity_reply_status(opp_id: int, status: str = Form(""), me: User = Depends(REQUIRE["sales"])):
+    path = f"/opportunities/{opp_id}"
+    if status and status not in REPLY_STATUSES:
+        return _go(path, err="Yanlış status")
+    with security.SessionLocal() as db:
+        opp = db.get(Opportunity, opp_id)
+        if opp is None:
+            return _go("/opportunities", err="Fürsət tapılmadı")
+        opp.reply_status = status or None
+        opp.updated_at = datetime.utcnow()
+        db.commit()
+    return _go(path, msg=f"Status: {mailboxes.REPLY_STATUS_NAMES.get(status, 'yoxdur')}")
+
+
+@router.post("/mail/check", dependencies=[Depends(verify_csrf)])
+def mail_check(back: str = Form("/opportunities"), me: User = Depends(REQUIRE["sales"])):
+    """"Cavabları yoxla": bütün şirkət poçtlarının INBOX-u oxunur (məktublar oxunmamış qalır)."""
+    back = back if back.startswith("/opportunities") and not back.startswith("//") and "\\" not in back else "/opportunities"
+    with security.SessionLocal() as db:
+        added, errors = mailboxes.poll_all(db)
+    if errors and not added:
+        return _go(back, err="; ".join(errors)[:400])
+    msg = f"{added} yeni cavab" if added else "Yeni cavab yoxdur"
+    return _go(back, msg=msg + (f" (xəta: {'; '.join(errors)[:200]})" if errors else ""))
 
 
 @router.post("/opportunities/{opp_id}/stage", dependencies=[Depends(verify_csrf)])

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Tapşırıqlar — Neo{% endblock %}
+{% block title %}CRM — Neo{% endblock %}
 {% block main_class %}mc mc-tasks{% endblock %}
 {% block content %}
   {% set can_edit = has_role(request.state.user, 'sales') %}
@@ -34,7 +34,7 @@
   {% endmacro %}
 
   <header class="ld-head">
-    <h1 class="mc-title">{{ 'Tapşırıqlarım' if who == 'me' else 'Bütün tapşırıqlar' }}</h1>
+    <h1 class="mc-title">CRM <small>{{ 'mənim tapşırıqlarım' if who == 'me' else 'bütün tapşırıqlar' }}</small></h1>
     <p class="ld-sub">Fürsət yaranan kimi ilk tapşırıq özü açılır. Etdiyini “Bitdi” et — növbəti addım görünsün.</p>
   </header>
 

@@ -195,7 +195,7 @@ def email_sent(session: Session, opp: Opportunity, *, to: str, subject: str, bod
                contact_id: int | None, user_id: int | None, message_id: str | None,
                row: Outreach | None = None) -> Outreach:
     """Göndərilmiş məktubun izi: outreach + lead tarixçəsi, 3 gün sonra "cavabı yoxla" tapşırığı,
-    fürsət hələ "Yeni"-dirsə → "Əlaqə saxlanılıb" (tender fürsətində bu mərhələ yoxdur).
+    fürsət hələ "Yeni"-dirsə → "Əlaqə saxlanılıb" (tender fürsətində bu mərhələ yoxdur), cavab statusu "Gözləmədə".
     `row` — göndərməzdən əvvəl rezerv edilmiş sətir (send_key ilə), o "sent" olur."""
     now = _now()
     if row is None:
@@ -203,6 +203,9 @@ def email_sent(session: Session, opp: Opportunity, *, to: str, subject: str, bod
                        to_address=to, subject=subject, body=body, language=language, user_id=user_id, created_at=now)
         session.add(row)
     row.status, row.error, row.external_id, row.sent_at = "sent", None, message_id, now
+    # Cavab gələnə qədər "Gözləmədə"; artıq potensial müştəridirsə, yeni məktub bunu dəyişmir.
+    if opp.reply_status != "potential":
+        opp.reply_status = "waiting"
     lead = session.get(LeadRecord, opp.lead_key) if opp.lead_key else None
     if lead is not None:
         record_event(session, lead, "email", lead.status, user_id, note=f"{to}: {subject}"[:500])

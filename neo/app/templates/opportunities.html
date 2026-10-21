@@ -18,6 +18,7 @@
         </span>
         <span class="op-side">
           {% if opp.tender_id %}<span class="tag">Tender</span>{% endif %}
+          {% if opp.reply_status %}<span class="rs rs-{{ opp.reply_status }}">{{ reply_status_names[opp.reply_status] }}</span>{% endif %}
           <span class="op-who">{{ owner_user.full_name if owner_user else 'Məsul təyin edilməyib' }}</span>
           {% if next_due %}
             {% if next_due < utcnow() %}<span class="op-due late">Tapşırığın vaxtı keçib · {{ next_due|baku_time }}</span>
@@ -33,12 +34,27 @@
     <p class="ld-sub">Təsdiq etdiyin lead-lər burada izlənir. Birini aç — mərhələsini dəyiş, tapşırıq əlavə et. <b>{{ open_total }} açıq fürsət.</b></p>
   </header>
 
+  {% set rq = '&reply=' ~ reply if reply else '' %}
   <div class="ld-filter" role="group" aria-label="Kimin fürsətləri">
-    <a class="{{ 'on' if owner == 'me' else '' }}" href="/opportunities?owner=me">Mənimkilər</a>
-    <a class="{{ 'on' if owner != 'me' else '' }}" href="/opportunities?owner=all">Hamısı</a>
+    <a class="{{ 'on' if owner == 'me' else '' }}" href="/opportunities?owner=me{{ rq }}">Mənimkilər</a>
+    <a class="{{ 'on' if owner != 'me' else '' }}" href="/opportunities?owner=all{{ rq }}">Hamısı</a>
+  </div>
+  <div class="ld-filter" role="group" aria-label="Məktuba cavab statusu">
+    <a class="{{ 'on' if not reply else '' }}" href="/opportunities?owner={{ owner }}">Bütün statuslar</a>
+    {% for k, v in reply_status_names.items() %}
+    <a class="{{ 'on' if reply == k else '' }}" href="/opportunities?owner={{ owner }}&reply={{ k }}"><span class="rs rs-{{ k }}">{{ v }}</span> <i>{{ reply_counts.get(k, 0) }}</i></a>
+    {% endfor %}
+    {% if has_role(request.state.user, 'sales') %}
+    <form method="post" action="/mail/check" style="display:inline">
+      {{ csrf_field(request) }}<input type="hidden" name="back" value="/opportunities?owner={{ owner }}{{ rq }}">
+      <button class="mc-btn mc-btn-sm" type="submit" title="Şirkət poçtlarını oxu — göndərilmiş məktublara gələn cavablar statusu dəyişir">Cavabları yoxla</button>
+    </form>
+    {% endif %}
   </div>
 
-  {% if totals.values()|sum == 0 %}
+  {% if reply and totals.values()|sum == 0 %}
+    <div class="empty"><b>Bu statusda fürsət yoxdur</b><a href="/opportunities?owner={{ owner }}">Bütün statuslar</a></div>
+  {% elif totals.values()|sum == 0 %}
     <div class="empty"><b>Hələ fürsət yoxdur</b>Validasiyada “Uyğundur” deyəndə fürsət burada görünəcək.<br><a class="mc-btn mc-btn-sm" style="margin-top:14px" href="/leads/pending_review">Validasiyaya keç</a></div>
   {% else %}
 

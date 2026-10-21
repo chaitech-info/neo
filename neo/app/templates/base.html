@@ -30,17 +30,26 @@
   {% if current %}
   {% set navc = nav_counts(current) %}
   {% macro links() %}
+    <a href="/notifications" class="nav-bell {{ 'active' if active == 'notifications' else '' }}" data-bell>
+      <svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.2a3.8 3.8 0 0 0-3.8 3.8v2.6L3 10.8h10l-1.2-2.2V6A3.8 3.8 0 0 0 8 2.2zM6.6 12.6a1.5 1.5 0 0 0 2.8 0" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+      Bildirişlər<span class="count hot" data-bell-count {% if not navc.unread %}hidden{% endif %}>{{ navc.unread or 0 }}</span>
+    </a>
+    {% if can_approve(current) %}
+    <a href="/approvals" class="nav-approve {{ 'active' if active == 'approvals' else '' }}">Təsdiq gözləyənlər{% if navc.approvals %}<span class="count late">{{ navc.approvals }}</span>{% endif %}</a>
+    {% endif %}
     <div class="nav-group">
       <h4>Satış</h4>
       <a href="/leads/pending_review" class="{{ 'active' if active == 'validation' else '' }}">Validasiya{% if navc.pending %}<span class="count hot">{{ navc.pending }}</span>{% endif %}</a>
       <a href="/opportunities" class="{{ 'active' if active == 'opportunities' else '' }}">Fürsətlər</a>
-      <a href="/tasks" class="{{ 'active' if active == 'tasks' else '' }}">Tapşırıqlarım{% if navc.late %}<span class="count late" title="{{ navc.late }} tapşırığın vaxtı keçib">{{ navc.tasks }}</span>{% elif navc.tasks %}<span class="count">{{ navc.tasks }}</span>{% endif %}</a>
+      <a href="/tasks" class="{{ 'active' if active == 'tasks' else '' }}">CRM{% if navc.late %}<span class="count late" title="{{ navc.late }} tapşırığın vaxtı keçib">{{ navc.tasks }}</span>{% elif navc.tasks %}<span class="count">{{ navc.tasks }}</span>{% endif %}</a>
     </div>
     {% if has_role(current, 'sales') %}
     <div class="nav-group">
       <h4>Alətlər</h4>
       <a href="/tools/offers" class="{{ 'active' if active == 'offers' else '' }}">Qiymət təklifi</a>
       <a href="/tools/company" class="{{ 'active' if active == 'company' else '' }}">Şirkət analizi</a>
+      <a href="/tools/employees" class="{{ 'active' if active == 'employees' else '' }}">Şirkətin işçiləri</a>
+      <a href="/tools/contracts" class="{{ 'active' if active == 'contracts' else '' }}">Şirkət əlavə et</a>
       {% if has_role(current, 'admin') %}<a href="/tools/packages" class="{{ 'active' if active == 'packages' else '' }}">Paketlər</a>{% endif %}
     </div>
     {% endif %}
@@ -53,8 +62,12 @@
     </div>
     <div class="nav-group">
       <h4>Ayarlar</h4>
+      <a href="/me/reminders" class="{{ 'active' if active == 'my_reminders' else '' }}">Qeydlər və xatırlatmalar</a>
+      <a href="/me/categories" class="{{ 'active' if active == 'my_categories' else '' }}">Süzgəc və kateqoriyalar</a>
       <a href="/me/keywords" class="{{ 'active' if active == 'my_keywords' else '' }}">Mənim açar sözlərim</a>
+      {% if has_role(current, 'sales') %}<a href="/me/templates" class="{{ 'active' if active == 'my_templates' else '' }}">Məktub şablonlarım</a>{% endif %}
       <a href="/settings/keywords" class="{{ 'active' if active == 'keywords' else '' }}">Açar sözlər</a>
+      {% if has_role(current, 'admin') %}<a href="/settings/mailboxes" class="{{ 'active' if active == 'mailboxes' else '' }}">Poçt qutuları</a>{% endif %}
       {% if has_role(current, 'admin') %}<a href="/users" class="{{ 'active' if active == 'users' else '' }}">İstifadəçilər</a>{% endif %}
     </div>
     <div class="me">
@@ -98,6 +111,45 @@
     </main>
   {% if current %}
   </div>
+  <div class="toasts" id="neo-toasts" aria-live="polite"><span id="neo-csrf" hidden>{{ csrf_field(request) }}</span></div>
+  <script>
+    /* Saytdaxili bildirişlər: hər dəqiqə yoxlanılır (vaxtı çatan xatırlatmalar da burada yaranır).
+       Yeni bildiriş küncdə görünür; klik — oxunmuş olur və linkinə keçir. */
+    (function () {
+      var box = document.getElementById('neo-toasts'), KEY = 'neo-notif-last', last = 0;
+      try { last = parseInt(localStorage.getItem(KEY) || '0', 10) || 0; } catch (e) {}
+      var token = (document.querySelector('#neo-csrf input') || {}).value || '';
+      function setCount(n) {
+        document.querySelectorAll('[data-bell-count]').forEach(function (c) { c.textContent = n; c.hidden = !n; });
+      }
+      function toast(n) {
+        var f = document.createElement('form');
+        f.method = 'post'; f.action = '/notifications/' + n.id + '/read'; f.className = 'toast';
+        var t = document.createElement('input'); t.type = 'hidden'; t.name = 'csrf_token'; t.value = token; f.appendChild(t);
+        var b = document.createElement('button'); b.type = 'submit'; b.className = 'toast-body';
+        var s = document.createElement('b'); s.textContent = n.text; b.appendChild(s);
+        var m = document.createElement('small'); m.textContent = n.at; b.appendChild(m); f.appendChild(b);
+        var x = document.createElement('button'); x.type = 'button'; x.className = 'toast-x'; x.textContent = '×';
+        x.setAttribute('aria-label', 'Bağla'); x.addEventListener('click', function () { f.remove(); }); f.appendChild(x);
+        box.appendChild(f);
+        setTimeout(function () { f.remove(); }, 15000);
+      }
+      function poll() {
+        fetch('/api/notifications?after=' + last, { credentials: 'same-origin' })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (d) {
+            if (!d) return;
+            setCount(d.unread);
+            d.items.slice(0, 3).reverse().forEach(toast);
+            d.items.forEach(function (n) { if (n.id > last) last = n.id; });
+            try { localStorage.setItem(KEY, String(last)); } catch (e) {}
+          })
+          .catch(function () {});
+      }
+      poll();
+      setInterval(poll, 60000);
+    })();
+  </script>
   {% endif %}
   <script>
     document.addEventListener('click', function (e) {

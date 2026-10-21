@@ -101,7 +101,7 @@ def logged_in_admin(request):
     from fastapi import Request
 
     from app import web
-    from app.auth.security import REQUIRE, verify_csrf
+    from app.auth.security import REQUIRE, REQUIRE_APPROVER, verify_csrf
     from app.db.models import User
 
     admin = User(id=1, email="test@neo.az", full_name="Test Admin", role_code="admin",
@@ -111,7 +111,7 @@ def logged_in_admin(request):
         request.state.user = admin
         return admin
 
-    for dependency in REQUIRE.values():
+    for dependency in (*REQUIRE.values(), REQUIRE_APPROVER):
         web.app.dependency_overrides[dependency] = as_admin
     web.app.dependency_overrides[verify_csrf] = lambda: None
     yield

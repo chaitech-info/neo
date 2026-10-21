@@ -41,6 +41,11 @@ from app.keyword_routes import router as keyword_router
 from app.offer_routes import router as offer_router
 from app.brief_routes import router as brief_router
 from app.company_routes import router as company_router
+from app.approval_routes import router as approval_router
+from app.contracts_routes import router as contracts_router
+from app.employee_routes import router as employee_router
+from app.mailbox_routes import router as mailbox_router
+from app.user_routes import router as user_router
 from app.locks import source_lock
 from app.pipeline import PipelineResult, reject_lead, restore_lead, run_pipeline
 from app.sources import SOURCES as SOURCE_SPECS
@@ -112,8 +117,14 @@ app.include_router(keyword_router)
 app.include_router(offer_router)
 app.include_router(brief_router)
 app.include_router(company_router)
+app.include_router(approval_router)
+app.include_router(contracts_router)
+app.include_router(employee_router)
+app.include_router(mailbox_router)
+app.include_router(user_router)
 templates.env.globals.update(
     csrf_field=security.csrf_field, has_role=security.has_role, role_names=ROLE_NAMES,
+    can_approve=security.can_approve,
 )
 
 # Mənbənin növü — dashboard və validasiya qəbzlərində rəng/etiket.
@@ -130,10 +141,12 @@ def lead_kind(source: str) -> str:
 
 
 def nav_counts(user: User | None) -> dict[str, int]:
-    """Sol menyudakı sayğaclar: validasiyada gözləyən, mənim açıq/gecikən tapşırıqlarım."""
+    """Sol menyudakı sayğaclar: validasiyada gözləyən, mənim açıq/gecikən tapşırıqlarım,
+    oxunmamış bildirişlər (vaxtı çatan xatırlatmalar burada bildirişə çevrilir), təsdiq gözləyən məktublar."""
     from sqlalchemy import func, select
 
-    from app.db.models import LeadRecord, Task
+    from app import notify
+    from app.db.models import LeadRecord, LetterApproval, Task
 
     if user is None:
         return {}
@@ -144,10 +157,15 @@ def nav_counts(user: User | None) -> dict[str, int]:
                 Task.assignee_id == user.id, Task.status.in_(("open", "in_progress")))
             open_tasks = db.scalar(mine)
             late = db.scalar(mine.where(Task.due_at < datetime.utcnow()))
+            notify.fire_due(db, user.id)
+            unread = notify.unread_count(db, user.id)
+            approvals = db.scalar(select(func.count()).select_from(LetterApproval).where(
+                LetterApproval.status == "pending")) if security.can_approve(user) else 0
     except Exception:
         log.warning("nav_counts_failed", exc_info=True)
         return {}
-    return {"pending": pending or 0, "tasks": open_tasks or 0, "late": late or 0}
+    return {"pending": pending or 0, "tasks": open_tasks or 0, "late": late or 0, "unread": unread or 0,
+            "approvals": approvals or 0}
 
 
 templates.env.globals.update(nav_counts=nav_counts, lead_kind=lead_kind, kind_names=KIND_NAMES)
@@ -443,8 +461,13 @@ def tier_sort_key(lead) -> tuple:
 
 
 @app.get("/leads/pending_review")
-def leads_pending(request: Request, tier: str = "", mine: str = "", user: User = Depends(REQUIRE["viewer"])):
+def leads_pending(request: Request, tier: str = "", mine: str = "", cat: str = "",
+                  user: User = Depends(REQUIRE["viewer"])):
+    from sqlalchemy import select
+
     from app import keywords as kw_store
+    from app import lead_filters as lf
+    from app.db.models import UserCategory
 
     session = SessionLocal()
     try:
@@ -452,8 +475,22 @@ def leads_pending(request: Request, tier: str = "", mine: str = "", user: User =
         all_leads = sorted(repo.list_by_status("pending_review"), key=tier_sort_key)
         contact_counts = repo.contact_counts([lead.dedupe_key for lead in all_leads])
         my_terms = kw_store.user_terms(session, user.id)
+        categories = list(session.scalars(select(UserCategory).where(UserCategory.user_id == user.id)
+                                          .order_by(UserCategory.name)))
     finally:
         session.close()
+    # Şəxsi A/B/C süzgəci (məs. C-də yalnız xəbərlər) — bu istifadəçi üçün hər tabda qüvvədədir.
+    filters = lf.parse_filters(user.lead_filters)
+    total_before = len(all_leads)
+    if filters:
+        all_leads = [lead for lead in all_leads if lf.passes(filters, lead.tier, lead_kind(lead.source))]
+    hidden_by_filter = total_before - len(all_leads)
+    cat_counts = {c.id: sum(1 for lead in all_leads if lf.in_category(c, lead, lead_kind(lead.source)))
+                  for c in categories}
+    current_cat = next((c for c in categories if str(c.id) == cat), None)
+    cat = str(current_cat.id) if current_cat else ""
+    if current_cat:
+        all_leads = [lead for lead in all_leads if lf.in_category(current_cat, lead, lead_kind(lead.source))]
     # İstifadəçinin öz sözlərindən hansıları lead-ə uyğun gəlir (kartda çip, "Mənim sözlərim" filtri).
     my_hits = {lead.dedupe_key: hits for lead in all_leads
                if (hits := kw_store.matched_terms(f"{lead.title}\n{lead.raw_text}", my_terms))} if my_terms else {}
@@ -481,6 +518,10 @@ def leads_pending(request: Request, tier: str = "", mine: str = "", user: User =
             "mine": mine,
             "my_hits": my_hits,
             "has_my_terms": bool(my_terms),
+            "categories": categories,
+            "cat_counts": cat_counts,
+            "cat": cat,
+            "hidden_by_filter": hidden_by_filter,
         },
     )
 

@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Təsdiq gözləyənlər — Neo{% endblock %}
+{% block main_class %}mc mc-kw mc-opp{% endblock %}
+{% block content %}
+  <header class="ld-head">
+    <h1 class="mc-title">Təsdiq gözləyənlər</h1>
+    <p class="ld-sub">Satış komandasının “Təsdiqə göndər” basdığı məktublar. Lazım olsa mətni düzəlt, sonra təsdiqlə və ya səbəb yazıb rədd et — qərar göndərənə bildiriş kimi gedir. <b>{{ pending|length }} məktub gözləyir.</b></p>
+  </header>
+
+  {% if pending %}
+    {% for a, opp, author in pending %}
+    <section class="od-card" id="a{{ a.id }}">
+      <h2><a href="/opportunities/{{ opp.id }}">{{ opp.title[:120] }}</a></h2>
+      <p class="od-hint">Göndərən: <b>{{ author.full_name }}</b> · {{ a.created_at|baku_time }} · kimə: {{ a.to_address }}</p>
+      <form method="post" action="/approvals/{{ a.id }}/decide">
+        {{ csrf_field(request) }}
+        <label class="kw-f">Mövzu<input name="subject" maxlength="200" value="{{ a.subject }}"></label>
+        <label class="kw-f">Məktub (düzəldə bilərsən)<textarea name="body" rows="12">{{ a.body }}</textarea></label>
+        <label class="kw-f">Qeyd (rədd edəndə məcburi)<input name="note" maxlength="1000" placeholder="məs. qiyməti yazma, görüşü təklif et"></label>
+        <div class="em-act">
+          <button class="mc-btn mc-btn-yes" type="submit" name="decision" value="approved">Təsdiqlə</button>
+          <button class="mc-btn mc-btn-no" type="submit" name="decision" value="rejected">Rədd et</button>
+        </div>
+      </form>
+    </section>
+    {% endfor %}
+  {% else %}
+    <div class="empty"><b>Təsdiq gözləyən məktub yoxdur</b>Satış əməkdaşı “Təsdiqə göndər” basanda burada görünəcək və sənə bildiriş gələcək.</div>
+  {% endif %}
+
+  {% if decided %}
+  <section class="kw-sec">
+    <h2>Son qərarlar <em>{{ decided|length }}</em></h2>
+    <ul class="ct-list">
+      {% for a, opp, author in decided %}
+      <li class="ct">
+        <div class="ct-main">
+          <b><a href="/opportunities/{{ opp.id }}#approvals">{{ a.subject }}</a></b>
+          <span class="ct-role">{{ author.full_name }} · <span class="ap ap-{{ a.status }}">{{ approval_names[a.status] }}</span> · {{ a.decided_at|baku_time }}{% if a.sent_at %} · göndərilib{% endif %}</span>
+          {% if a.decision_note %}<span class="ct-role">Qeyd: {{ a.decision_note }}</span>{% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+{% endblock %}

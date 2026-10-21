@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Poçt qutuları — Neo{% endblock %}
+{% block main_class %}mc mc-kw{% endblock %}
+{% block content %}
+  <header class="ld-head">
+    <h1 class="mc-title">Poçt qutuları</h1>
+    <p class="ld-sub">Məktub göndərilərkən “Kimdən” siyahısında görünən şirkətlər. Cavablar həmin poçtdan IMAP ilə oxunur və fürsətdə görünür. Şifrə bazada saxlanmır — server env-ində <code>MAILBOX_&lt;AÇAR&gt;_PASSWORD</code> (Gmail üçün “app password”).</p>
+  </header>
+
+  <section class="kw-sec">
+    <h2>Defolt poçt (.env)</h2>
+    {% if default %}
+      <p>{{ default.name }} — {{ default.email }} · SMTP {{ default.smtp_host }}:{{ default.smtp_port }} · IMAP {{ default.imap_host or 'yoxdur (cavablar oxunmur)' }}{% if not default.password %} · <b class="t-err">SMTP_PASSWORD yoxdur</b>{% endif %}</p>
+    {% else %}
+      <p class="kw-hint">SMTP_USER təyin edilməyib — yalnız aşağıdakı poçt qutuları işləyəcək.</p>
+    {% endif %}
+  </section>
+
+  <section class="kw-sec">
+    <h2>Şirkət poçtları <em>{{ rows|length }}</em></h2>
+    {% for mb in rows %}
+    <details class="kw-new" id="mb{{ mb.id }}">
+      <summary>{{ mb.name }} — {{ mb.email }} {% if not mb.is_active %}<span class="kw-chip">Söndürülüb</span>{% endif %}{% if has_password[mb.id] %}<span class="kw-chip on">şifrə var</span>{% else %}<span class="kw-chip neg">{{ env_name(mb.key) }} yoxdur</span>{% endif %}{% if mb.last_polled_at %} <small>son yoxlama {{ mb.last_polled_at|baku_time }}</small>{% endif %}</summary>
+      <form method="post" action="/settings/mailboxes">
+        {{ csrf_field(request) }}<input type="hidden" name="mailbox_id" value="{{ mb.id }}">
+        {% include "_mailbox_fields.html" %}
+        <button class="mc-btn mc-btn-hero" type="submit">Yadda saxla</button>
+      </form>
+      <form method="post" action="/settings/mailboxes/{{ mb.id }}/active" style="margin-top:10px">
+        {{ csrf_field(request) }}<button class="mc-btn mc-btn-sm {{ 'kw-del' if mb.is_active else '' }}" type="submit">{{ 'Söndür' if mb.is_active else 'Aktiv et' }}</button>
+      </form>
+    </details>
+    {% endfor %}
+
+    <details class="kw-new" {% if not rows %}open{% endif %}>
+      <summary>+ Yeni poçt qutusu</summary>
+      <form method="post" action="/settings/mailboxes">
+        {{ csrf_field(request) }}
+        {% set mb = none %}
+        {% include "_mailbox_fields.html" %}
+        <button class="mc-btn mc-btn-hero" type="submit">Əlavə et</button>
+      </form>
+    </details>
+  </section>
+{% endblock %}

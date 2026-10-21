@@ -2,11 +2,11 @@
 {% block title %}İstifadəçilər — Neo{% endblock %}
 {% block main_class %}mc mc-kw mc-users{% endblock %}
 {% block content %}
-  {% set role_desc = {'viewer': 'Yalnız baxır', 'sales': 'Lead-ləri təsdiqləyir və ya rədd edir', 'manager': 'Üstəlik saytları yoxlamağa başladır', 'admin': 'Üstəlik istifadəçiləri idarə edir'} %}
+  {% set role_desc = {'viewer': 'Yalnız baxır', 'sales': 'Lead-ləri təsdiqləyir və ya rədd edir', 'manager': 'Üstəlik saytları yoxlamağa başladır', 'approver': 'Menecer kimi + “Təsdiq gözləyənlər”: satışın məktublarını təsdiqləyir və ya rədd edir', 'admin': 'Üstəlik istifadəçiləri idarə edir'} %}
 
   <header class="ld-head">
     <h1 class="mc-title">İstifadəçilər</h1>
-    <p class="ld-sub">Komandanın kim olduğunu və nə edə biləcəyini burada idarə edirsən. Hər rol əvvəlkinin üstünə əlavə icazə verir.</p>
+    <p class="ld-sub">Komandanın kim olduğunu və nə edə biləcəyini burada idarə edirsən. Hər rol əvvəlkinin üstünə əlavə icazə verir; Təsdiqləyici menecerin icazələri ilə yanaşı məktubları təsdiqləyir.</p>
   </header>
 
   <section class="us-roles" aria-label="Rolların izahı">

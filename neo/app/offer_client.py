@@ -143,6 +143,23 @@ def validate_offer_request(data: Any) -> dict:
     return body
 
 
+def with_package(body: dict, package_id: Any, package_name: Any = None) -> dict:
+    """İstifadəçinin seçdiyi paket: agentə təklifi YALNIZ bu paketlə qurmaq göstərişi (müştəri sorğusunun
+    sonuna). Agent API-də ayrıca "paket" sahəsi yoxdur — göstəriş mətnlə gedir. Boş seçim → dəyişmir."""
+    if package_id in (None, ""):
+        return body
+    package_id = validate_package_id(package_id if isinstance(package_id, str) else "")
+    name = package_name.strip()[:120] if isinstance(package_name, str) and package_name.strip() else package_id
+    note = (f"\n\n[Seçilmiş paket: «{name}» (id: {package_id}). Təklifi YALNIZ bu paketlə hazırla, "
+            f"başqa paket əlavə etmə və ya əvəz etmə.]")
+    room = MAX_MESSAGE_LENGTH - len(note)  # agentin mesaj limiti aşılmasın
+    if "messages" in body:
+        body["messages"][0] = {**body["messages"][0], "content": body["messages"][0]["content"][:room] + note}
+    else:
+        body["message"] = body["message"][:room] + note
+    return body
+
+
 def validate_package_id(package_id: str) -> str:
     if not PACKAGE_ID_RE.match(package_id or ""):
         raise ValueError("Paket id-si yanlışdır (kiçik latın hərfləri, rəqəm, - və _)")

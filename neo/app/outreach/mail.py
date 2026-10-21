@@ -60,20 +60,56 @@ def _client(client: OpenAI | None) -> OpenAI:
     return OpenAI(api_key=os.environ["OPENAI_API_KEY"], max_retries=OPENAI_MAX_RETRIES)
 
 
+TEMPLATE_RULES = """
+The user uploaded THEIR OWN LETTER TEMPLATE (below, between <template> tags). Follow it closely:
+keep its structure, paragraph order, tone, approximate length and fixed phrases; replace its
+placeholders ([...], {...}, <...>, "X", blanks) with real facts from the source; drop template parts
+that clearly do not fit this client. If it is in another language, write it in the language above.
+Skip any signature/contact block in the template — the signature is appended automatically.
+The general rules above still apply where the template is silent.
+"""
+REVISION_RULES = """
+This is a REVISION. The previous draft is below (between <previous> tags) and the user asked for
+changes (between <changes> tags). Apply exactly the requested changes / additions and keep the rest
+of the draft as it is, unless the change requires otherwise. Do not invent facts.
+"""
+MAX_TEMPLATE = 6000
+MAX_INSTRUCTIONS = 2000
+
+
+def without_signature(body: str) -> str:
+    """Panel imzanı "\\n--\\n" ilə əlavə edir — yenidən yazdırmazdan əvvəl çıxarılır ki, ikiqat olmasın."""
+    head, sep, _ = (body or "").rpartition("\n--\n")
+    return head.rstrip() if sep else (body or "").strip()
+
+
 def draft_email(*, lead_title: str, lead_text: str, org_name: str | None, contact_name: str | None,
                 contact_title: str | None, sender_name: str, language: str,
-                client: OpenAI | None = None) -> dict[str, str]:
-    """{subject, body} — body imzasızdır (imza `with_signature` ilə əlavə olunur)."""
+                template: str | None = None, previous: dict | None = None, instructions: str | None = None,
+                company_name: str | None = None, client: OpenAI | None = None) -> dict[str, str]:
+    """{subject, body} — body imzasızdır (imza `with_signature` ilə əlavə olunur).
+    `template` — istifadəçinin şablonu; `previous` + `instructions` — "Yenidən yarat" (istifadəçinin düzəlişi);
+    `company_name` — seçilmiş göndərən şirkət (yoxdursa .env-dəki COMPANY_NAME)."""
     system = (PROMPT.replace("{language}", LANGUAGE_NAMES_EN.get(language, "Azerbaijani"))
               .replace("{company}", company_description()))
+    if template:
+        system += TEMPLATE_RULES
+    if previous:
+        system += REVISION_RULES
     me = company()
-    user = (f"OUR COMPANY NAME: {me['name'] or '(not set)'}\nSENDER: {sender_name}\n"
+    user = (f"OUR COMPANY NAME: {company_name or me['name'] or '(not set)'}\nSENDER: {sender_name}\n"
             f"CLIENT ORGANIZATION: {org_name or '(unknown)'}\n"
             f"CONTACT: {contact_name or '(unknown)'}{', ' + contact_title if contact_title else ''}\n\n"
             f"SOURCE TITLE: {lead_title}\n\nSOURCE TEXT:\n{(lead_text or '')[:3500]}")
+    if template:
+        user += f"\n\n<template>\n{template[:MAX_TEMPLATE]}\n</template>"
+    if previous:
+        user += (f"\n\n<previous>\nSUBJECT: {previous.get('subject', '')}\n\n"
+                 f"{without_signature(previous.get('body', ''))[:6000]}\n</previous>"
+                 f"\n\n<changes>\n{(instructions or '').strip()[:MAX_INSTRUCTIONS]}\n</changes>")
     model = os.environ.get("AI_EMAIL_MODEL") or os.environ.get("AI_MODEL_V2") or DEFAULT_MODEL
     try:
-        out, _ = chat_json(_client(client), model, system, user, SCHEMA, "email")
+        out, _ = chat_json(_client(client), model, system, user, SCHEMA, "email", max_tokens=1500)
     except OutreachError:
         raise
     except Exception as exc:
@@ -97,19 +133,29 @@ def smtp_configured() -> bool:
 
 
 def send_email(*, to: str, subject: str, body: str, reply_to: str | None,
-               attachments: list[tuple[str, bytes, str]] = (), smtp_factory=smtplib.SMTP) -> str:
+               attachments: list[tuple[str, bytes, str]] = (), smtp_factory=smtplib.SMTP, sender=None) -> str:
     """Göndərir, Message-ID qaytarır. Xəta → OutreachError (mətn istifadəçiyə göstərilir).
-    `attachments` — (fayl adı, məzmun, MIME tipi); yoxlama (ölçü, növ) çağıranın işidir."""
-    user, password = os.environ.get("SMTP_USER"), os.environ.get("SMTP_PASSWORD")
+    `attachments` — (fayl adı, məzmun, MIME tipi); yoxlama (ölçü, növ) çağıranın işidir.
+    `sender` — seçilmiş şirkət poçtu (app/mailboxes.Sender); None → .env-dəki defolt SMTP."""
+    if sender is not None:
+        user, password, address, from_name = sender.user, sender.password, sender.email, sender.name
+        host, port = sender.smtp_host, sender.smtp_port
+        if not password:
+            raise OutreachError(f"{sender.name} poçtunun şifrəsi təyin edilməyib"
+                                + (f" ({sender.password_env})" if sender.password_env else ""))
+    else:
+        user, password = os.environ.get("SMTP_USER"), os.environ.get("SMTP_PASSWORD")
+        address, from_name = user, os.environ.get("MAIL_FROM_NAME") or company()["name"] or user
+        host, port = os.environ.get("SMTP_HOST", "smtp.gmail.com"), int(os.environ.get("SMTP_PORT", "587"))
     if not (user and password):
         raise OutreachError("Poçt qoşulmayıb: SMTP_USER və SMTP_PASSWORD təyin edilməyib")
     msg = EmailMessage()
-    msg["From"] = formataddr((os.environ.get("MAIL_FROM_NAME") or company()["name"] or user, user))
+    msg["From"] = formataddr((from_name, address))
     msg["To"] = to
     msg["Subject"] = subject
-    if reply_to and reply_to.lower() != user.lower():
+    if reply_to and reply_to.lower() not in (user.lower(), (address or "").lower()):
         msg["Reply-To"] = reply_to
-    msg["Message-ID"] = make_msgid(domain=user.rsplit("@", 1)[-1])
+    msg["Message-ID"] = make_msgid(domain=(address or user).rsplit("@", 1)[-1])
     msg.set_content(body)
     paragraphs = "".join(f"<p>{escape(p).replace(chr(10), '<br>')}</p>" for p in body.split("\n\n"))
     msg.add_alternative(f"<html><body style=\"font-family:Arial,sans-serif;font-size:14px\">{paragraphs}</body></html>",
@@ -119,14 +165,18 @@ def send_email(*, to: str, subject: str, body: str, reply_to: str | None,
         if not (maintype and subtype):
             maintype, subtype = "application", "octet-stream"
         msg.add_attachment(data, maintype=maintype, subtype=subtype, filename=name)
-    host, port = os.environ.get("SMTP_HOST", "smtp.gmail.com"), int(os.environ.get("SMTP_PORT", "587"))
+    # 465 — birbaşa TLS (SMTP_SSL), digər portlar — STARTTLS.
+    implicit_tls = port == 465 and smtp_factory is smtplib.SMTP
+    factory = (lambda h, p, timeout: smtplib.SMTP_SSL(h, p, timeout=timeout, context=ssl.create_default_context())) \
+        if implicit_tls else smtp_factory
     try:
-        with smtp_factory(host, port, timeout=20) as smtp:
-            smtp.starttls(context=ssl.create_default_context())
+        with factory(host, port, timeout=20) as smtp:
+            if not implicit_tls:
+                smtp.starttls(context=ssl.create_default_context())
             smtp.login(user, password)
             smtp.send_message(msg)
     except smtplib.SMTPAuthenticationError as exc:
-        raise OutreachError("Poçt girişi alınmadı — SMTP_USER / app password-u yoxla") from exc
+        raise OutreachError(f"Poçt girişi alınmadı ({address}) — istifadəçi adını / app password-u yoxla") from exc
     except smtplib.SMTPRecipientsRefused as exc:
         raise OutreachError(f"Alıcı ünvanı qəbul edilmədi: {to}") from exc
     except (smtplib.SMTPException, OSError) as exc:

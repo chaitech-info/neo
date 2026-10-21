@@ -82,6 +82,7 @@ async def offers_create(request: Request, me: User = Depends(REQUIRE["sales"]),
     raw = await _body(request)
     try:
         body = agent.validate_offer_request(raw)
+        body = agent.with_package(body, raw.get("package_id"), raw.get("package_name"))
     except ValueError as exc:
         return _error(str(exc), 422)
     lead_id = raw.get("lead_id") if isinstance(raw.get("lead_id"), str) else None
@@ -177,6 +178,28 @@ def offers_page(request: Request, lead: str = "", brand: str = "seaport", me: Us
         "brand": brand if brand in agent.BRANDS else "seaport", "history": history, "prefill": prefill,
         "csrf": csrf_token(request), "can_manage": security.has_role(me, "admin"),
     })
+
+
+@router.get("/api/offers/packages/{brand}")
+def offers_packages(brand: str, me: User = Depends(REQUIRE["sales"])):
+    """Təklif formundakı "Paket" seçimi üçün aktiv paketlər (yalnız ad, id, qiymət — redaktə admin-dədir)."""
+    if (bad := _brand_or_error(brand)):
+        return bad
+    try:
+        data = agent.list_packages(brand)
+    except agent.OfferAgentError as exc:
+        return _agent_error(exc)
+    items = data if isinstance(data, list) else (data.get("packages") if isinstance(data, dict) else None) or []
+    out = []
+    for p in items:
+        if not isinstance(p, dict) or not p.get("active", True) or not isinstance(p.get("id"), str):
+            continue
+        name = p.get("name")
+        name = (name.get("az") or p["id"]) if isinstance(name, dict) else (name or p["id"])
+        out.append({"id": p["id"], "name": str(name)[:120], "price": p.get("price"), "example": bool(p.get("example")),
+                    "sort_order": p.get("sort_order") or 0})
+    out.sort(key=lambda x: (x["sort_order"], x["name"]))
+    return JSONResponse({"packages": out})
 
 
 # --- Paketlər (yalnız admin) -----------------------------------------------------

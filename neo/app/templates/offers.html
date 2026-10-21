@@ -12,11 +12,19 @@
       <h2 id="of-form-h" class="sr">Sorğu</h2>
       {% if prefill %}<p class="flash info" role="status">Lead-dən doldurulub. Göndərməzdən əvvəl mətni yoxla.</p>{% endif %}
       <form id="of-form" novalidate>
-        <label class="kw-f">Brend
-          <select id="of-brand" name="brand">
-            {% for code, name in brands.items() %}<option value="{{ code }}" {% if code == brand %}selected{% endif %}>{{ name }}</option>{% endfor %}
-          </select>
-        </label>
+        <div class="kw-row" style="margin-top:0">
+          <label class="kw-f">Brend
+            <select id="of-brand" name="brand">
+              {% for code, name in brands.items() %}<option value="{{ code }}" {% if code == brand %}selected{% endif %}>{{ name }}</option>{% endfor %}
+            </select>
+          </label>
+          <label class="kw-f">Paket
+            <select id="of-package" name="package_id">
+              <option value="">— agent özü seçsin —</option>
+            </select>
+          </label>
+        </div>
+        <p class="of-note" id="of-package-note" hidden></p>
         <label class="kw-f" for="of-message">Müştəri sorğusu</label>
         <textarea id="of-message" name="message" rows="9" maxlength="4000" required
           placeholder="Müştərinin yazdığı mətni bura yapışdırın. Məsələn: &quot;Azersun MMC bizdən qiymət istəyir, 3 paket, gündə 120 nəfər, 22 gün&quot;"></textarea>
@@ -73,6 +81,11 @@
           <b>Agentin fərziyyələri</b>
           <ul id="of-assume-list"></ul>
         </div>
+        <form id="of-regen-form" class="of-reply" novalidate>
+          <label class="kw-f" for="of-regen">Təklifdə nəyi dəyişək və ya əlavə edək?</label>
+          <textarea id="of-regen" rows="3" maxlength="1500" placeholder="məs. nəfər sayı 150 olsun, 30 gün üçün hesabla, desert əlavə et"></textarea>
+          <button class="mc-btn mc-btn-hero" id="of-regen-submit" type="submit">Yenidən yarat</button>
+        </form>
       </div>
     </section>
   </div>
@@ -109,6 +122,8 @@
     var leadId = PREFILL ? PREFILL.lead_id : null;
     var blobUrl = null;
     var busy = false;
+    var lastText = '';        // son uğurlu sorğunun mətni — "Yenidən yarat" onu düzəlişlə təkrar göndərir
+    var lastOffer = null;     // son təklif (sətirlər) — düzəliş istəyinə kontekst kimi qoşulur
 
     function fmt(v, cur) {
       if (v === null || v === undefined || v === '') return '—';
@@ -124,7 +139,7 @@
     }
     function setBusy(on) {
       busy = on;
-      $('of-submit').disabled = on; $('of-reply-submit').disabled = on;
+      $('of-submit').disabled = on; $('of-reply-submit').disabled = on; $('of-regen-submit').disabled = on;
       $('of-submit').textContent = on ? 'Təklif hazırlanır…' : 'PDF yarat';
       if (on) { ['of-empty', 'of-error', 'of-chat', 'of-ok'].forEach(function (id) { show(id, false); }); show('of-loading', true); }
     }
@@ -168,8 +183,29 @@
     function baseBody() {
       var b = { brand: $('of-brand').value, customer_name: $('of-customer').value, contact_person: $('of-contact').value };
       if (leadId) b.lead_id = leadId;
+      var pk = $('of-package');
+      if (pk.value) { b.package_id = pk.value; b.package_name = pk.options[pk.selectedIndex].dataset.name || ''; }
       return b;
     }
+
+    /* Paket seçimi: brendin aktiv paketləri. Seçilsə, agent təklifi yalnız o paketlə qurur. */
+    function loadPackages() {
+      var sel = $('of-package'), note = $('of-package-note');
+      sel.length = 1; sel.disabled = true; note.hidden = true;
+      fetch('/api/offers/packages/' + encodeURIComponent($('of-brand').value), { credentials: 'same-origin' })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, data: j }; }); })
+        .then(function (res) {
+          if (!res.ok) throw new Error(res.data.error || 'Paketlər yüklənmədi');
+          (res.data.packages || []).forEach(function (p) {
+            var o = el('option', '', p.name + (p.price != null ? ' — ' + fmt(p.price) : '') + (p.example ? ' (nümunə)' : ''));
+            o.value = p.id; o.dataset.name = p.name; sel.appendChild(o);
+          });
+          if (!(res.data.packages || []).length) { note.textContent = 'Bu brend üçün paket yoxdur — agent özü seçəcək.'; note.hidden = false; }
+        })
+        .catch(function (err) { note.textContent = (err && err.message) || 'Paketlər yüklənmədi'; note.hidden = false; })
+        .then(function () { sel.disabled = false; });
+    }
+    $('of-brand').addEventListener('change', loadPackages);
 
     function renderChat(question) {
       conv.push({ role: 'assistant', content: question });
@@ -181,6 +217,9 @@
     }
 
     function renderOk(d) {
+      lastText = conv.filter(function (m) { return m.role === 'user'; }).map(function (m) { return m.content; }).join('\n\n') || lastText;
+      lastOffer = d;
+      $('of-regen').value = '';
       conv = [];
       $('of-ok-title').textContent = d.customer_name ? d.customer_name : 'Qiymət təklifi';
       $('of-ok-sub').textContent = d.offer_id + ' · ' + (BRANDS[$('of-brand').value] || '');
@@ -265,6 +304,22 @@
       call(b, r);
     });
 
+    /* "Yenidən yarat": əvvəlki sorğu + əvvəlki təklifin sətirləri + istifadəçinin düzəlişi → yeni təklif. */
+    $('of-regen-form').addEventListener('submit', function (e) {
+      e.preventDefault();
+      if (busy || !lastText) return;
+      var change = $('of-regen').value.trim();
+      if (!change) { $('of-regen').focus(); return; }
+      var prev = (lastOffer && lastOffer.lines || []).map(function (l) {
+        return '- ' + (l.name || l.package_id) + (l.quantity != null ? ', ' + l.quantity + ' nəfər' : '') + (l.days != null ? ' × ' + l.days + ' gün' : '');
+      }).join('\n');
+      var tail = (prev ? '\n\nƏvvəlki təklif:\n' + prev : '') + '\n\nDƏYİŞİKLİK İSTƏYİ (bunu mütləq tətbiq et): ' + change;
+      var msg = lastText.slice(0, Math.max(200, 3900 - tail.length)) + tail;
+      conv = [{ role: 'user', content: msg }];
+      var b = baseBody(); b.message = msg.slice(0, 4000);
+      call(b);
+    });
+
     $('of-message').addEventListener('input', function () { $('of-count').textContent = this.value.length + ' / 4000'; });
     // Mətn dəyişəndə köhnə aydınlaşdırma söhbəti etibarsızdır — söhbət də gizlənir ki, cavab kontekstsiz getməsin.
     $('of-message').addEventListener('change', function () {
@@ -281,6 +336,7 @@
     document.querySelectorAll('#of-hist [data-money]').forEach(function (td) {
       td.textContent = fmt(td.getAttribute('data-money'), td.getAttribute('data-cur'));
     });
+    loadPackages();
     view('of-empty');
   })();
   </script>

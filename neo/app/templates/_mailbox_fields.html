@@ -1,0 +1,12 @@
+<div class="kw-row" style="margin-top:0">
+  <label class="kw-f">Açar (env adı üçün)<input name="key" required pattern="[a-z0-9][a-z0-9_]{1,31}" maxlength="32" value="{{ mb.key if mb else '' }}" placeholder="seaport"></label>
+  <label class="kw-f kw-g">Şirkətin adı (“Kimdən”)<input name="name" required maxlength="120" value="{{ mb.name if mb else '' }}" placeholder="Seaport Catering"></label>
+  <label class="kw-f kw-g">Email<input type="email" name="email" required maxlength="255" value="{{ mb.email if mb else '' }}" placeholder="sales@seaport.az"></label>
+</div>
+<div class="kw-row">
+  <label class="kw-f kw-g">SMTP host<input name="smtp_host" maxlength="255" value="{{ mb.smtp_host or '' if mb else '' }}" placeholder="smtp.gmail.com"></label>
+  <label class="kw-f">SMTP port<input name="smtp_port" inputmode="numeric" maxlength="5" value="{{ mb.smtp_port or '' if mb else '' }}" placeholder="587"></label>
+  <label class="kw-f kw-g">IMAP host (cavablar üçün)<input name="imap_host" maxlength="255" value="{{ mb.imap_host or '' if mb else '' }}" placeholder="imap.gmail.com"></label>
+  <label class="kw-f">IMAP port<input name="imap_port" inputmode="numeric" maxlength="5" value="{{ mb.imap_port or '' if mb else '' }}" placeholder="993"></label>
+</div>
+<label class="kw-f">İstifadəçi adı (boşdursa — email)<input name="username" maxlength="255" value="{{ mb.username or '' if mb else '' }}"></label>

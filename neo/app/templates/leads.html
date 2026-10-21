@@ -63,15 +63,27 @@
   {% endif %}
 
   {% if tier_counts is defined and tier_counts is not none %}
-  {% set mq = '&mine=1' if mine else '' %}
+  {% set cq = '&cat=' ~ cat if cat else '' %}
+  {% set tq = '&tier=' ~ tier if tier else '' %}
+  {% set mq = ('&mine=1' if mine else '') ~ cq %}
   <div class="ld-filter" role="group" aria-label="Kimin sözləri">
-    <a class="{{ 'on' if not mine else '' }}" href="/leads/pending_review{{ '?tier=' ~ tier if tier else '' }}">Bütün lead-lər</a>
+    <a class="{{ 'on' if not mine else '' }}" href="/leads/pending_review?{{ (tq ~ cq)[1:] }}">Bütün lead-lər</a>
     {% if has_my_terms %}
-    <a class="{{ 'on' if mine else '' }}" href="/leads/pending_review?mine=1{{ '&tier=' ~ tier if tier else '' }}" title="Yalnız sənin açar sözlərinə uyğun gələnlər">Mənim sözlərim <i>{{ my_hits|length }}</i></a>
+    <a class="{{ 'on' if mine else '' }}" href="/leads/pending_review?mine=1{{ tq }}{{ cq }}" title="Yalnız sənin açar sözlərinə uyğun gələnlər">Mənim sözlərim <i>{{ my_hits|length }}</i></a>
     {% else %}
     <a href="/me/keywords" title="Öz açar sözlərini əlavə et — sənə uyğun xəbərlər ayrıca görünsün">+ Mənim sözlərim</a>
     {% endif %}
   </div>
+  <div class="ld-filter" role="group" aria-label="Mənim kateqoriyalarım">
+    {% if categories %}
+    <a class="{{ 'on' if not cat else '' }}" href="/leads/pending_review?{{ (('&mine=1' if mine else '') ~ tq)[1:] }}">Bütün kateqoriyalar</a>
+    {% for c in categories %}
+    <a class="{{ 'on' if cat == c.id|string else '' }}" href="/leads/pending_review?cat={{ c.id }}{{ '&mine=1' if mine else '' }}{{ tq }}">{{ c.name }} <i>{{ cat_counts.get(c.id, 0) }}</i></a>
+    {% endfor %}
+    {% endif %}
+    <a href="/me/categories" title="A/B/C-də hansı lead növlərini görəcəyini seç və öz kateqoriyanı yarat">{{ 'Süzgəci dəyiş' if categories or hidden_by_filter else '+ Öz kateqoriyam / süzgəc' }}</a>
+  </div>
+  {% if hidden_by_filter %}<p class="ld-sub">Şəxsi süzgəcin {{ hidden_by_filter }} lead-i gizlədir. <a href="/me/categories">Süzgəci dəyiş</a></p>{% endif %}
   {% endif %}
 
   {% if tier_counts %}
@@ -133,11 +145,11 @@
           {{ csrf_field(request) }}
           <button class="mc-btn mc-btn-yes" type="submit"><svg class="ic" aria-hidden="true"><use href="#i-check"/></svg>Uyğundur — fürsət yarat</button>
         </form>
+        <a class="mc-btn" href="/tools/offers?lead={{ lead.dedupe_key|urlencode }}">Qiymət təklifi yarat</a>
         <form method="post" action="/leads/{{ lead.dedupe_key }}/reject">
           {{ csrf_field(request) }}
           <button class="mc-btn mc-btn-no" type="submit"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg>Uyğun deyil</button>
         </form>
-        <a class="mc-btn mc-btn-sm" href="/tools/offers?lead={{ lead.dedupe_key|urlencode }}">Qiymət təklifi yarat</a>
       </div>
       {% endif %}
     </article>

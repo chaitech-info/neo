@@ -130,16 +130,29 @@ def test_send_writes_history_task_and_moves_stage(factory, opp_id, monkeypatch):
     assert len(FakeSMTP.sent) == 1
 
     msg = FakeSMTP.sent[0]
-    assert msg["To"] == "rauf@sahil.az" and msg["Reply-To"] == "test@neo.az"
+    # Gmail poçtu IMAP ilə oxunur — cavab şirkət poçtuna gəlməlidir (panel onu fürsətdə göstərir), əməkdaşa yox.
+    assert msg["To"] == "rauf@sahil.az" and msg["Reply-To"] is None
     with factory() as s:
         out = s.scalars(select(Outreach)).one()
         opp = s.get(Opportunity, opp_id)
         tasks = [t.title for t in s.scalars(select(Task).where(Task.opportunity_id == opp_id))]
         events = [e.action for e in s.scalars(select(LeadEvent))]
     assert (out.status, out.kind, out.to_address, out.user_id) == ("sent", "email", "rauf@sahil.az", 1)
-    assert opp.stage == "contacted"
+    assert opp.stage == "contacted" and opp.reply_status == "waiting"
     assert "Məktuba cavabı yoxla: rauf@sahil.az" in tasks
     assert events == ["approve", "email"]
+
+
+def test_reply_to_is_the_user_when_mailbox_cannot_be_read(factory, opp_id, monkeypatch):
+    FakeSMTP.sent = []
+    monkeypatch.setenv("SMTP_HOST", "smtp.office365.com")  # IMAP_HOST yoxdur — cavablar oxunmur
+    monkeypatch.setenv("SMTP_USER", "sales@dadli.az")
+    monkeypatch.setenv("SMTP_PASSWORD", "app-password")
+    monkeypatch.setattr(mail.send_email, "__kwdefaults__", {"smtp_factory": FakeSMTP})
+    TestClient(web.app).post(f"/opportunities/{opp_id}/email/send", data={
+        "to": "rauf@sahil.az", "subject": "S", "body": "Kifayət qədər uzun məktub mətni.", "send_key": SEND_KEY},
+        follow_redirects=False)
+    assert FakeSMTP.sent[0]["Reply-To"] == "test@neo.az"
 
 
 def test_send_without_smtp_records_failure(factory, opp_id):

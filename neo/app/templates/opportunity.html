@@ -11,6 +11,7 @@
     <h1 class="mc-title">{{ opp.title }}</h1>
     <p class="od-tags">
       <span class="stg s-{{ opp.stage }}"><i></i>{{ stage_names[opp.stage] }}</span>
+      {% if opp.reply_status %}<a class="rs rs-{{ opp.reply_status }}" href="#replies" title="Məktuba cavab vəziyyəti">{{ reply_status_names[opp.reply_status] }}</a>{% endif %}
       {% if tender %}<span class="tag">Tender</span>{% endif %}
       {% if opp.stage == 'lost' and opp.lost_reason_code %}<span class="od-lost">{{ lost_reasons[opp.lost_reason_code] }}{% if opp.lost_reason_note %}: {{ opp.lost_reason_note }}{% endif %}</span>{% endif %}
     </p>
@@ -171,6 +172,15 @@
 
   <section class="od-card" id="email">
     <h2>Ünsiyyət <em>{{ outreach|length }}</em></h2>
+    {% macro sender_select(selected) %}
+      <label class="kw-f">Kimdən (göndərən şirkət)
+        <select name="mailbox_id">
+          {% if default_sender %}<option value="">{{ default_sender.name }} — {{ default_sender.email }}</option>{% endif %}
+          {% for mb in mailbox_list %}<option value="{{ mb.id }}" {% if selected|string == mb.id|string %}selected{% endif %}>{{ mb.name }} — {{ mb.email }}</option>{% endfor %}
+          {% if not default_sender and not mailbox_list %}<option value="">— poçt qoşulmayıb —</option>{% endif %}
+        </select>
+      </label>
+    {% endmacro %}
     {% if can_edit %}
       {% if draft %}
       <form method="post" action="/opportunities/{{ opp.id }}/email/send" class="em-form" enctype="multipart/form-data" data-once>
@@ -178,34 +188,59 @@
         <input type="hidden" name="send_key" value="{{ draft.send_key }}">
         <input type="hidden" name="language" value="{{ draft.language }}">
         <input type="hidden" name="contact_id" value="{{ draft.contact_id }}">
-        <label class="kw-f">Kimə<input type="email" name="to" required value="{{ draft.to }}" list="em-to" placeholder="ad@sirket.az"></label>
+        <input type="hidden" name="template_id" value="{{ draft.template_id or '' }}">
+        <input type="hidden" name="approval_id" value="{{ draft.approval_id or '' }}">
+        {% if draft.approval_id %}<p class="flash" role="status">Bu məktub təsdiqlənib. Fayl əlavə edib göndərə bilərsən; mətni dəyişsən, yenidən təsdiqə göndərmək tövsiyə olunur.</p>{% endif %}
+        {% if draft.revised %}<p class="flash" role="status">Məktub göstərişinə görə yenidən yazıldı — yoxla.</p>{% endif %}
+        <div class="kw-row" style="margin-top:0">
+          <label class="kw-f">Kimə<input type="email" name="to" required value="{{ draft.to }}" list="em-to" placeholder="ad@sirket.az"></label>
+          {{ sender_select(draft.mailbox_id) }}
+        </div>
         <datalist id="em-to">{% for c in email_contacts %}<option value="{{ c.email }}">{{ c.name or '' }}{% if c.title %} — {{ c.title }}{% endif %}</option>{% endfor %}</datalist>
         <label class="kw-f">Mövzu<input name="subject" required maxlength="200" value="{{ draft.subject }}"></label>
         <label class="kw-f">Məktub — göndərməzdən əvvəl oxu və düzəlt<textarea name="body" required rows="16">{{ draft.body }}</textarea></label>
+        <div class="em-regen">
+          <label class="kw-f">Nəyi dəyişək və ya əlavə edək? (AI məktubu buna görə yenidən yazır)
+            <textarea name="instructions" rows="2" maxlength="2000" placeholder="məs. daha qısa yaz, 3 paket təklif etdiyimizi qeyd et, görüşü cümə axşamına təklif et"></textarea>
+          </label>
+          <button class="mc-btn" type="submit" formaction="/opportunities/{{ opp.id }}/email/draft" formenctype="application/x-www-form-urlencoded" formnovalidate data-busy="Yenidən yazılır…">Yenidən yarat</button>
+        </div>
         <label class="kw-f">Fayl əlavə et (istəyə görə: təklif, kataloq, menyu — ən çox 5 fayl, cəmi 4 MB)<input type="file" name="files" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.zip,.txt,.csv"></label>
         {% if page_error %}<p class="od-hint">Fayl seçmişdinsə, yenidən seç — səhv olanda fayllar formada qalmır.</p>{% endif %}
-        {% if not smtp_ready %}<p class="od-hint">Poçt hələ qoşulmayıb (SMTP_USER / SMTP_PASSWORD) — göndərmə xəta verəcək.</p>{% endif %}
+        {% if not default_sender and not mailbox_list %}<p class="od-hint">Poçt hələ qoşulmayıb (SMTP_USER / SMTP_PASSWORD və ya Ayarlar → Poçt qutuları) — göndərmə xəta verəcək.</p>{% endif %}
         <div class="em-act">
           <button class="mc-btn mc-btn-hero" type="submit" data-busy="Göndərilir…">Göndər</button>
+          <button class="mc-btn" type="submit" formaction="/opportunities/{{ opp.id }}/email/approval" formenctype="application/x-www-form-urlencoded" data-busy="Göndərilir…" title="Məktubu təsdiqləyiciyə göndər — təsdiq və ya rədd bildiriş kimi gələcək">Təsdiqə göndər</button>
           <a class="mc-btn" href="/opportunities/{{ opp.id }}">Ləğv et</a>
         </div>
-        <p class="od-hint">Məktub şirkət poçtundan gedir; cavab sənin ünvanına ({{ me.email }}) gələcək.</p>
+        <p class="od-hint">Məktub seçdiyin şirkət poçtundan gedir. Cavab həmin poçta gəlir və “Cavablar” bölməsində görünür; status özü dəyişir (müsbət → Potensial müştəri, mənfi → İmtina).</p>
       </form>
       {% else %}
-      <form method="post" action="/opportunities/{{ opp.id }}/email/draft" class="kw-row em-start">
+      <form method="post" action="/opportunities/{{ opp.id }}/email/draft" class="em-start" data-once>
         {{ csrf_field(request) }}
-        <label class="kw-f">Kimə
-          <select name="contact_id">
-            {% for c in email_contacts %}<option value="{{ c.id }}">{{ c.name or c.email }}{% if c.title %} — {{ c.title }}{% endif %}{% if c.name %} ({{ c.email }}){% endif %}</option>{% endfor %}
-            <option value="">— ünvanı özüm yazacağam —</option>
-          </select>
-        </label>
-        <label class="kw-f">Dil
-          <select name="language">{% for k, v in languages.items() %}<option value="{{ k }}" {% if k == default_language %}selected{% endif %}>{{ v }}</option>{% endfor %}</select>
-        </label>
-        <button class="mc-btn mc-btn-hero" type="submit">AI ilə məktub yaz</button>
+        <div class="kw-row" style="margin-top:0">
+          <label class="kw-f">Kimə
+            <select name="contact_id">
+              {% for c in email_contacts %}<option value="{{ c.id }}">{{ c.name or c.email }}{% if c.title %} — {{ c.title }}{% endif %}{% if c.name %} ({{ c.email }}){% endif %}</option>{% endfor %}
+              <option value="">— ünvanı özüm yazacağam —</option>
+            </select>
+          </label>
+          {{ sender_select('') }}
+        </div>
+        <div class="kw-row">
+          <label class="kw-f">Şablon
+            <select name="template_id">
+              <option value="">— şablonsuz, AI özü yazsın —</option>
+              {% for t in templates %}<option value="{{ t.id }}">{{ t.name }}{% if t.is_shared and t.user_id != me.id %} (komanda){% endif %}</option>{% endfor %}
+            </select>
+          </label>
+          <label class="kw-f">Dil
+            <select name="language">{% for k, v in languages.items() %}<option value="{{ k }}" {% if k == default_language %}selected{% endif %}>{{ v }}</option>{% endfor %}</select>
+          </label>
+        </div>
+        <button class="mc-btn mc-btn-hero" type="submit" data-busy="AI yazır…">AI ilə məktub yaz</button>
       </form>
-      <p class="od-hint">AI ~10 cümləlik qaralama yazır; göndərməzdən əvvəl oxuyub düzəldə bilərsən.</p>
+      <p class="od-hint">AI ~10 cümləlik qaralama yazır{% if templates %}; şablon seçsən, onun quruluşu və tonu ilə{% endif %}. Göndərməzdən əvvəl oxuyub düzəldə və ya göstəriş verib yenidən yazdıra bilərsən. <a href="/me/templates">Şablonlarım</a></p>
       {% endif %}
     {% endif %}
     {% if outreach %}
@@ -231,8 +266,71 @@
     {% endif %}
   </section>
 
+  <section class="od-card" id="replies">
+    <h2>Cavablar <em>{{ replies|length }}</em></h2>
+    <div class="rs-bar">
+      <span>Status: {% if opp.reply_status %}<span class="rs rs-{{ opp.reply_status }}">{{ reply_status_names[opp.reply_status] }}</span>{% else %}<span class="od-hint">məktub göndərilməyib</span>{% endif %}</span>
+      {% if can_edit %}
+      <form method="post" action="/opportunities/{{ opp.id }}/reply-status" class="rs-set">
+        {{ csrf_field(request) }}
+        <label class="sr" for="rs-select">Statusu əl ilə dəyiş</label>
+        <select name="status" id="rs-select">
+          <option value="">— status yoxdur —</option>
+          {% for k, v in reply_status_names.items() %}<option value="{{ k }}" {% if k == opp.reply_status %}selected{% endif %}>{{ v }}</option>{% endfor %}
+        </select>
+        <button class="mc-btn mc-btn-sm" type="submit">Dəyiş</button>
+      </form>
+      <form method="post" action="/mail/check" data-once>
+        {{ csrf_field(request) }}<input type="hidden" name="back" value="/opportunities/{{ opp.id }}#replies">
+        <button class="mc-btn mc-btn-sm" type="submit" data-busy="Yoxlanılır…">Cavabları yoxla</button>
+      </form>
+      {% endif %}
+    </div>
+    {% if replies %}
+    <ul class="ct-list">
+      {% for r in replies %}
+      <li class="ct">
+        <div class="ct-main">
+          <b>{{ r.subject or '(mövzusuz)' }}</b>
+          <span class="ct-role">{{ r.from_address }} · {{ r.received_at|baku_time }}{% if r.sentiment %} · <span class="rs rs-{{ {'positive': 'potential', 'negative': 'declined'}.get(r.sentiment, 'waiting') }}">{{ sentiment_names.get(r.sentiment, r.sentiment) }}</span>{% else %} · <span class="od-hint">AI təsnif edə bilmədi — statusu özün seç</span>{% endif %}</span>
+          {% if r.summary %}<span class="ct-role">{{ r.summary }}</span>{% endif %}
+          <details class="od-more"><summary>Cavabı oxu</summary><div class="raw">{{ r.body }}</div></details>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+      <p class="od-empty">Hələ cavab gəlməyib. Poçt avtomatik yoxlanılır; dərhal baxmaq üçün “Cavabları yoxla”.</p>
+    {% endif %}
+  </section>
+
+  {% if approvals %}
+  <section class="od-card" id="approvals">
+    <h2>Təsdiq <em>{{ approvals|length }}</em></h2>
+    <ul class="ct-list">
+      {% for a in approvals %}
+      <li class="ct" id="ap{{ a.id }}">
+        <div class="ct-main">
+          <b>{{ a.subject }}</b>
+          <span class="ct-role">{{ a.to_address }} · göndərdi: {{ users[a.requested_by_id].full_name if a.requested_by_id in users else '—' }} · {{ a.created_at|baku_time }}</span>
+          <span class="ct-role"><span class="ap ap-{{ a.status }}">{{ approval_names[a.status] }}</span>{% if a.decided_by_id %} · {{ users[a.decided_by_id].full_name if a.decided_by_id in users else '' }} · {{ a.decided_at|baku_time }}{% endif %}{% if a.sent_at %} · göndərilib {{ a.sent_at|baku_time }}{% endif %}</span>
+          {% if a.decision_note %}<span class="ct-role">Qeyd: {{ a.decision_note }}</span>{% endif %}
+          <details class="od-more"><summary>Mətni göstər</summary><div class="raw">{{ a.body }}</div></details>
+        </div>
+        {% if can_edit and a.status == 'approved' and not a.sent_at %}
+        <a class="mc-btn mc-btn-sm mc-btn-hero" href="/opportunities/{{ opp.id }}?approval={{ a.id }}#email">Göndərməyə hazırla</a>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
   <section class="od-card" id="contacts">
     <h2>Kontaktlar <em>{{ contacts|length }}</em></h2>
+    {% if can_edit %}
+    <p class="od-hint"><a href="/tools/employees?company={{ ((org.name if org else (lead.entity_name if lead and lead.entity_name != lead.author_name else '')) or '')|urlencode }}&opp={{ opp.id }}">Şirkətin bütün işçiləri (LinkedIn) →</a></p>
+    {% endif %}
     {% if can_edit and leaders_ready %}
     {# Rəhbərlərin LinkedIn profilləri: ilk açılışda avtomatik (bir dəfə, pulludur), sonra düymə ilə. #}
     <form class="ld-leaders" method="post" action="/opportunities/{{ opp.id }}/leaders" data-leaders
@@ -324,7 +422,7 @@
       f.addEventListener('submit', function (e) {
         if (f.dataset.sent) { e.preventDefault(); return; }
         f.dataset.sent = '1';
-        var b = f.querySelector('button[type=submit]');
+        var b = e.submitter || f.querySelector('button[type=submit]');  // "Yenidən yarat" / "Təsdiqə göndər" də bu formdadır
         if (b) { b.disabled = true; if (b.dataset.busy) b.textContent = b.dataset.busy; }
       });
     });

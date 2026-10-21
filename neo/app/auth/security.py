@@ -33,8 +33,11 @@ log = structlog.get_logger()
 
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
-ROLE_RANK = {"viewer": 0, "sales": 1, "manager": 2, "admin": 3}
-ROLE_NAMES = {"viewer": "Müşahidəçi", "sales": "Satış", "manager": "Menecer", "admin": "Administrator"}
+# approver (Təsdiqləyici, 0012): menecerin icazələri + "Təsdiq gözləyənlər" — satışın məktublarını təsdiqləyir.
+ROLE_RANK = {"viewer": 0, "sales": 1, "manager": 2, "approver": 2, "admin": 3}
+ROLE_NAMES = {"viewer": "Müşahidəçi", "sales": "Satış", "manager": "Menecer", "approver": "Təsdiqləyici",
+              "admin": "Administrator"}
+APPROVER_ROLES = ("approver", "admin")
 
 SESSION_MAX_AGE = 12 * 3600
 MAX_FAILED_LOGINS = 5
@@ -110,6 +113,11 @@ def has_role(user: Optional[User], role: str) -> bool:
     return user is not None and ROLE_RANK[user.role_code] >= ROLE_RANK[role]
 
 
+def can_approve(user: Optional[User]) -> bool:
+    """Məktub təsdiqi rütbə ilə yox, rolun özü ilə verilir — menecer təsdiqləyici deyil."""
+    return user is not None and user.role_code in APPROVER_ROLES
+
+
 class Require:
     """Route dependency: `Depends(REQUIRE["sales"])`. Instance-dır ki, testlər
     `app.dependency_overrides` ilə əvəz edə bilsin."""
@@ -127,6 +135,17 @@ class Require:
 
 
 REQUIRE = {role: Require(role) for role in ROLE_RANK}
+
+
+class RequireApprover(Require):
+    def __call__(self, request: Request) -> User:
+        user = super().__call__(request)
+        if not can_approve(user):
+            raise PermissionDenied("approver")
+        return user
+
+
+REQUIRE_APPROVER = RequireApprover("viewer")
 
 
 # --- CSRF --------------------------------------------------------------------

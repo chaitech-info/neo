@@ -962,3 +962,59 @@ th.num, td.num { text-align: right; white-space: nowrap; font-variant-numeric: t
 .em-act { display: flex; gap: 10px; align-items: center; margin-top: 12px; }
 .em-start { align-items: end; }
 .em-history { margin-top: 14px; }
+
+/* --- 0012: bildirişlər, təsdiq, cavab statusu, şəxsi alətlər ------------------- */
+
+/* Menyunun yuxarısı: bildiriş zəngi və təsdiq növbəsi (nav-group linkləri ilə eyni görünüş) */
+.nav-bell, .nav-approve {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: var(--radius);
+  color: var(--rail-ink); text-decoration: none; font-size: 14.5px; border-left: 3px solid transparent;
+}
+.nav-bell .count, .nav-approve .count { margin-left: auto; }
+.nav-bell .ic { width: 16px; height: 16px; flex: none; }
+.nav-bell.active, .nav-approve.active { background: var(--rail-hov); color: var(--rail-brand); border-left-color: var(--saffron); font-weight: 600; }
+.nav-approve { font-weight: 600; color: var(--rail-brand); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+@media (hover: hover) and (pointer: fine) { .nav-bell:hover, .nav-approve:hover { background: var(--rail-hov); color: var(--rail-brand); } }
+
+/* Məktuba cavab statusu: Gözləmədə / Potensial müştəri / İmtina */
+.rs { display: inline-flex; align-items: center; font: 600 12px/1 var(--font); padding: 5px 10px; border-radius: 100px; text-decoration: none; white-space: nowrap; }
+.rs-waiting { background: var(--warn-w); color: var(--warn); }
+.rs-potential { background: var(--go-w); color: var(--go); }
+.rs-declined { background: var(--err-w); color: var(--err); }
+.rs-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-bottom: 8px; }
+.rs-bar form { display: flex; gap: 8px; align-items: center; }
+.rs-bar select { min-height: 36px; }
+
+/* Təsdiq statusu */
+.ap { font-weight: 600; }
+.ap-pending { color: var(--warn); } .ap-approved { color: var(--go); } .ap-rejected { color: var(--err); }
+
+/* Məktub: "Yenidən yarat" bloku */
+.em-regen { display: flex; gap: 10px; align-items: end; margin: 10px 0 4px; padding: 12px; border: 1px dashed var(--line); border-radius: var(--radius); }
+.em-regen .kw-f { flex: 1; margin: 0; }
+.em-form .em-regen textarea { min-height: 0; }
+@media (max-width: 700px) { .em-regen { flex-direction: column; align-items: stretch; } .em-act { flex-wrap: wrap; } }
+
+/* Bildirişlər səhifəsi */
+.nt-list { list-style: none; margin: 0; padding: 0; }
+.nt { border-top: 1px solid var(--line); }
+.nt-btn { all: unset; box-sizing: border-box; cursor: pointer; display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 12px 4px; }
+.nt-btn b { font-weight: 500; color: var(--tx2); }
+.nt.is-new .nt-btn b { font-weight: 600; color: var(--tx); }
+.nt-btn small { color: var(--tx3); font-size: 12.5px; }
+.nt-btn:focus-visible { outline: 2px solid var(--saffron); }
+
+/* Küncdə bildiriş (toast) */
+.toasts { position: fixed; right: 16px; bottom: 16px; z-index: 50; display: flex; flex-direction: column; gap: 8px; max-width: min(380px, calc(100vw - 32px)); }
+.toast { display: flex; align-items: flex-start; gap: 6px; background: var(--s1); border: 1px solid var(--line); border-left: 3px solid var(--go); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.25); padding: 10px 8px 10px 12px; }
+.toast-body { all: unset; cursor: pointer; flex: 1; display: flex; flex-direction: column; gap: 2px; font-size: 14px; color: var(--tx); }
+.toast-body small { color: var(--tx3); font-size: 12px; }
+.toast-x { all: unset; cursor: pointer; padding: 0 6px; font-size: 18px; line-height: 1; color: var(--tx2); }
+
+/* Süzgəc cədvəli və kateqoriya formu */
+.cf-grid td, .cf-grid th { text-align: center; }
+.cf-grid td:first-child, .cf-grid th:first-child { text-align: left; }
+.cf-set { border: 0; padding: 0; margin: 12px 0 0; display: flex; flex-wrap: wrap; gap: 4px 18px; }
+.cf-set legend { font-size: 13px; color: var(--tx2); padding: 0; margin-bottom: 4px; }
+.ct-ok { color: var(--go); }
+.mc-title small { font-size: 15px; font-weight: 500; color: var(--tx2); margin-left: 6px; }

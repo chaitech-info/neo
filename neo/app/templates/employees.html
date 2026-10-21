@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Şirkətin işçiləri — Neo{% endblock %}
+{% block main_class %}mc mc-kw mc-opp{% endblock %}
+{% block content %}
+  {% if opp %}<nav class="od-crumb" aria-label="Yol"><a href="/opportunities/{{ opp.id }}#contacts">← Fürsət #{{ opp.id }}</a></nav>{% endif %}
+  <header class="ld-head">
+    <h1 class="mc-title">Şirkətin işçiləri</h1>
+    <p class="ld-sub">Seçdiyin şirkətdə işləyən bütün əməkdaşların LinkedIn siyahısı (Apify). Axtarış pulludur — nəticə saxlanılır və təkrar açanda pulsuz göstərilir.{% if opp %} İstədiyin işçini bir kliklə fürsətin kontaktlarına əlavə et.{% endif %}</p>
+  </header>
+
+  <section class="od-card">
+    {% if not ready %}<p class="flash error">APIFY_TOKEN təyin edilməyib — LinkedIn axtarışı işləmir.</p>{% endif %}
+    <form method="post" action="/tools/employees" data-once>
+      {{ csrf_field(request) }}<input type="hidden" name="opp" value="{{ opp.id if opp else '' }}">
+      <div class="kw-row" style="margin-top:0">
+        <label class="kw-f kw-g">Şirkətin adı (LinkedIn-dəki kimi)<input name="company" required minlength="2" maxlength="200" value="{{ company }}" placeholder="məs. Azersun Holding"></label>
+        <label class="kw-f">Ən çox neçə nəfər<input type="number" name="limit" min="1" max="{{ max }}" value="{{ limit }}" inputmode="numeric"></label>
+      </div>
+      <div class="em-act">
+        <button class="mc-btn mc-btn-hero" type="submit" data-busy="LinkedIn-də axtarılır… (~45 san.)">{{ 'Göstər' if not search else 'Axtar' }}</button>
+        {% if search %}<button class="mc-btn" type="submit" name="force" value="1" data-busy="Yenidən axtarılır…" title="Pulludur — Apify yenidən çağırılır">Yenidən axtar</button>{% endif %}
+      </div>
+    </form>
+  </section>
+
+  {% if search %}
+  <section class="od-card">
+    <h2>{{ search.company }} <em>{{ items|length }}</em></h2>
+    <p class="od-hint">{{ 'Saxlanılmış nəticə' if from_cache else 'Yeni axtarış' }} · {{ search.created_at|baku_time }}</p>
+    {% if items %}
+    <label class="lr-search"><span class="sr">İşçilərdə axtar</span>
+      <input type="search" id="em-q" placeholder="Ad, vəzifə və ya şəhər üzrə süz…" autocomplete="off">
+    </label>
+    <ul class="ct-list" id="em-list">
+      {% for p in items %}
+      <li class="ct" data-q="{{ ((p.name or '') ~ ' ' ~ (p.title or '') ~ ' ' ~ (p.location or ''))|lower }}">
+        <div class="ct-main">
+          <b><a href="{{ p.linkedin_url }}" target="_blank" rel="noopener">{{ p.name }} ↗</a></b>
+          {% if p.title %}<span class="ct-role">{{ p.title }}</span>{% endif %}
+          {% if p.location %}<span class="ct-role">{{ p.location }}</span>{% endif %}
+        </div>
+        {% if opp %}
+          {% if p.linkedin_url.rstrip('/').lower() in have %}<span class="ct-src">kontaktdadır</span>
+          {% else %}
+          <form method="post" action="/tools/employees/contact">
+            {{ csrf_field(request) }}
+            <input type="hidden" name="opp" value="{{ opp.id }}"><input type="hidden" name="company" value="{{ company or search.company }}">
+            <input type="hidden" name="name" value="{{ p.name }}"><input type="hidden" name="title" value="{{ p.title or '' }}">
+            <input type="hidden" name="linkedin_url" value="{{ p.linkedin_url }}">
+            <button class="mc-btn mc-btn-sm" type="submit">+ Kontakt</button>
+          </form>
+          {% endif %}
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+      <p class="od-empty">LinkedIn-də bu adla işçi tapılmadı. Şirkətin LinkedIn-dəki adını yoxla.</p>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  <script>
+    (function () {
+      var q = document.getElementById('em-q'), list = document.getElementById('em-list');
+      if (q && list) q.addEventListener('input', function () {
+        var t = q.value.trim().toLowerCase();
+        Array.prototype.forEach.call(list.children, function (li) { li.hidden = t && li.dataset.q.indexOf(t) < 0; });
+      });
+      document.querySelectorAll('form[data-once]').forEach(function (f) {
+        f.addEventListener('submit', function (e) {
+          if (f.dataset.sent) { e.preventDefault(); return; }
+          f.dataset.sent = '1';
+          var b = e.submitter || f.querySelector('button[type=submit]');
+          if (b && b.dataset.busy) b.textContent = b.dataset.busy;
+        });
+      });
+    })();
+  </script>
+{% endblock %}

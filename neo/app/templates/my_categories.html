@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Süzgəc və kateqoriyalar — Neo{% endblock %}
+{% block main_class %}mc mc-kw{% endblock %}
+{% block content %}
+  <header class="ld-head">
+    <h1 class="mc-title">Süzgəc və kateqoriyalar</h1>
+    <p class="ld-sub">Validasiyanı özünə uyğunlaşdır. Bu ayarlar yalnız sənə aiddir — komandanın digər üzvləri bütün lead-ləri görməyə davam edir.</p>
+  </header>
+
+  <section class="kw-sec">
+    <h2>A, B, C-də nəyi görürəm</h2>
+    <p class="kw-hint">Məsələn, C kateqoriyasında yalnız xəbərləri görmək istəyirsənsə, C sətrində yalnız “Xəbər”i saxla. Hamısı seçilibsə — süzgəc yoxdur.</p>
+    <form method="post" action="/me/categories/filters">
+      {{ csrf_field(request) }}
+      <div class="table-wrap">
+        <table class="of-hist cf-grid">
+          <thead><tr><th>Kateqoriya</th>{% for k, label in kinds.items() %}<th>{{ label }}</th>{% endfor %}</tr></thead>
+          <tbody>
+            {% for t in tiers %}
+            <tr>
+              <td><span class="tier tier-{{ t }}">{{ t }}</span></td>
+              {% for k, label in kinds.items() %}
+              <td><label class="kw-chk"><input type="checkbox" name="{{ t }}_{{ k }}" value="1" {% if t not in filters or k in filters[t] %}checked{% endif %}><span class="sr">{{ t }} — {{ label }}</span></label></td>
+              {% endfor %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <button class="mc-btn mc-btn-hero" type="submit">Süzgəci yadda saxla</button>
+    </form>
+  </section>
+
+  <section class="kw-sec">
+    <h2>Öz kateqoriyalarım <em>{{ cats|length }} / {{ limit }}</em></h2>
+    <p class="kw-hint">Öz kateqoriyanı yarat — Validasiyada ayrıca tab kimi görünəcək. Şərtlər birlikdə işləyir: seçilmiş A/B/C <b>və</b> lead növü <b>və</b> (yazılıbsa) sözlərdən biri.</p>
+    <details class="kw-new" {% if not cats %}open{% endif %}>
+      <summary>+ Yeni kateqoriya</summary>
+      <form method="post" action="/me/categories">
+        {{ csrf_field(request) }}
+        <label class="kw-f">Ad<input name="name" required maxlength="60" placeholder="məs. Xəstəxanalar, Bakı zavodları"></label>
+        <fieldset class="cf-set"><legend>A / B / C (heç biri seçilməsə — hamısı)</legend>
+          {% for t in tiers %}<label class="kw-chk"><input type="checkbox" name="tier_{{ t }}" value="1"><span class="tier tier-{{ t }}">{{ t }}</span></label>{% endfor %}
+        </fieldset>
+        <fieldset class="cf-set"><legend>Lead növü (heç biri seçilməsə — hamısı)</legend>
+          {% for k, label in kinds.items() %}<label class="kw-chk"><input type="checkbox" name="kind_{{ k }}" value="1">{{ label }}</label>{% endfor %}
+        </fieldset>
+        <label class="kw-f">Açar sözlər (istəyə görə, hər sətirdə biri)<textarea name="terms" rows="3" placeholder="xəstəxana&#10;klinika"></textarea></label>
+        <button class="mc-btn mc-btn-hero" type="submit">Kateqoriyanı yarat</button>
+      </form>
+    </details>
+
+    {% if cats %}
+    <ul class="kw-list">
+      {% for c in cats %}
+      <li class="kw">
+        <div class="kw-main">
+          <b><a href="/leads/pending_review?cat={{ c.id }}">{{ c.name }}</a></b>
+          <small>
+            {{ lf.category_tiers(c)|join(', ') or 'A, B, C' }} ·
+            {% set ks = lf.category_kinds(c) %}{% for k in ks %}{{ kinds[k] }}{% if not loop.last %}, {% endif %}{% else %}bütün növlər{% endfor %}
+            {% if c.terms %} · sözlər: {{ c.terms.splitlines()|join(', ')|truncate(80) }}{% endif %}
+          </small>
+        </div>
+        <div class="kw-act">
+          <form method="post" action="/me/categories/{{ c.id }}/delete" onsubmit="return confirm('Kateqoriya silinsin?')">{{ csrf_field(request) }}<button class="mc-btn mc-btn-sm kw-del" type="submit">Sil</button></form>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </section>
+{% endblock %}

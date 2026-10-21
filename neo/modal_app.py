@@ -56,10 +56,27 @@ def catchup_window(now: datetime, last: str | None) -> int:
     return 0 if gap <= 0 else min(gap, MAX_CATCHUP_MIN)
 
 
+@app.function(timeout=300, retries=0)
+def poll_mail() -> int:
+    """Göndərilmiş məktublara gələn cavablar (app/mailboxes.py) — şirkət poçtlarının şifrələri
+    (SMTP_PASSWORD, MAILBOX_<KEY>_PASSWORD) neo-secrets-də olmalıdır."""
+    from sqlalchemy.orm import sessionmaker
+
+    from app import mailboxes
+    from app.db.engine import engine
+
+    with sessionmaker(bind=engine, expire_on_commit=False)() as db:
+        added, errors = mailboxes.poll_all(db)
+    print(f"poll_mail: {added} yeni cavab" + (f", xəta: {errors}" if errors else ""))
+    return added
+
+
 @app.function(schedule=modal.Cron(f"*/{TICK_MINUTES} * * * *") if MODAL_CRON else None, timeout=120)
 def tick() -> list[str]:
     from app.scheduler import due_sources
 
+    if os.environ.get("NEO_MAIL_POLL", "on") != "off":
+        poll_mail.spawn()
     now = datetime.now(ZoneInfo("Asia/Baku")).replace(second=0, microsecond=0)
     state = modal.Dict.from_name(TICK_STATE, create_if_missing=True)
     window = catchup_window(now, state.get("last"))

@@ -50,7 +50,7 @@ def _enum(name: str, *values: str) -> Enum:
 # --- Dəyər siyahıları — miqrasiya 0002 bunların nüsxəsini saxlayır; ikisinin
 # uyğunluğunu tests/test_migrations.py yoxlayır. -------------------------------
 
-ROLE_CODES = ("admin", "manager", "sales", "viewer")
+ROLE_CODES = ("admin", "approver", "manager", "sales", "viewer")  # approver — 0012
 SOURCE_KINDS = ("tender_portal", "news", "jobs", "corporate", "intl_api", "social")
 RUN_TRIGGERS = ("schedule", "manual", "scrape_all")
 RUN_STATUSES = ("running", "ok", "failed", "blocked_robots")
@@ -68,6 +68,9 @@ LEAD_ACTIONS = ("approve", "reject", "restore", "comment", "email")
 CONTACT_SOURCES = ("text", "ai", "author", "website", "enrichment", "manual")
 OUTREACH_KINDS = ("linkedin_comment", "email")
 OUTREACH_STATUSES = ("sent", "failed", "skipped")
+# 0012 — sərbəst sətir kimi saxlanılır (CHECK yoxdur), dəyərlər kodda yoxlanılır.
+REPLY_STATUSES = ("waiting", "potential", "declined")
+APPROVAL_STATUSES = ("pending", "approved", "rejected")
 
 
 # --- Toplama qatı -----------------------------------------------------------
@@ -272,6 +275,8 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # 0012: Validasiyada A/B/C üçün öz süzgəci — JSON {"A": ["tender", "news"], ...}; boş = hamısı.
+    lead_filters: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
 class LoginFailure(Base):
@@ -305,6 +310,8 @@ class Opportunity(Base):
     closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     # 0011: rəhbərlərin LinkedIn profilləri axtarılıb (Apify pulludur — hər fürsət üçün bir dəfə).
     leaders_fetched_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # 0012: məktuba cavab vəziyyəti (REPLY_STATUSES) — boş = məktub göndərilməyib.
+    reply_status: Mapped[Optional[str]] = mapped_column(String(16), nullable=True, index=True)
 
 
 class Task(Base):
@@ -400,6 +407,8 @@ class Outreach(Base):
     send_key: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, unique=True, index=True)
     # 0011: əlavə olunmuş faylların adları (sətirlə); faylın özü saxlanmır — yalnız məktubla gedir.
     attachments: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # 0012: hansı şirkət poçtundan göndərilib (boş = .env-dəki defolt SMTP).
+    mailbox_id: Mapped[Optional[int]] = mapped_column(ForeignKey("mailboxes.id"), nullable=True)
 
 
 class LeadBrief(Base):
@@ -411,4 +420,153 @@ class LeadBrief(Base):
     script: Mapped[str] = mapped_column(Text)
     audio: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
     voice: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+# --- İstifadəçi alətləri (0012) -------------------------------------------------
+
+
+class UserCategory(Base):
+    """İstifadəçinin öz kateqoriyası — Validasiyada ayrıca tab: seçilmiş A/B/C, lead növləri, açar sözlər."""
+
+    __tablename__ = "user_categories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(60))
+    tiers: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)  # "AC"; boş = hamısı
+    kinds: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)  # "tender,news"; boş = hamısı
+    terms: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # sətirlə; boş = sözsüz
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class LetterTemplate(Base):
+    """İstifadəçinin yüklədiyi məktub şablonu — AI qaralamanı onun quruluşu və tonu ilə yazır."""
+
+    __tablename__ = "letter_templates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    body: Mapped[str] = mapped_column(Text)
+    is_shared: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class Mailbox(Base):
+    """Göndərən şirkətin poçt qutusu (SMTP + cavablar üçün IMAP). Şifrə bazada saxlanmır —
+    env-də `MAILBOX_<KEY>_PASSWORD` (app/mailboxes.py)."""
+
+    __tablename__ = "mailboxes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key: Mapped[str] = mapped_column(String(32), unique=True)
+    name: Mapped[str] = mapped_column(String(120))  # şirkətin adı — "Kimdən" sahəsində görünür
+    email: Mapped[str] = mapped_column(String(255))
+    smtp_host: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    smtp_port: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    imap_host: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    imap_port: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # boş = email
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_polled_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class InboundEmail(Base):
+    """Göndərdiyimiz məktuba gələn cavab (IMAP-dan) — fürsət səhifəsində görünür."""
+
+    __tablename__ = "inbound_emails"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    message_id: Mapped[str] = mapped_column(String(255), unique=True)
+    mailbox_id: Mapped[Optional[int]] = mapped_column(ForeignKey("mailboxes.id"), nullable=True)
+    outreach_id: Mapped[Optional[int]] = mapped_column(ForeignKey("outreach.id"), index=True, nullable=True)
+    opportunity_id: Mapped[Optional[int]] = mapped_column(ForeignKey("opportunities.id"), index=True, nullable=True)
+    from_address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    subject: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    body: Mapped[str] = mapped_column(Text)
+    sentiment: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)  # positive/negative/auto
+    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    received_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class Reminder(Base):
+    """İstifadəçinin öz qeydi/xatırlatması: `due_at`-dan `remind_before_min` dəqiqə əvvəl bildiriş."""
+
+    __tablename__ = "reminders"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    title: Mapped[str] = mapped_column(Text)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    due_at: Mapped[datetime] = mapped_column(DateTime)
+    remind_before_min: Mapped[int] = mapped_column(Integer, default=0)
+    remind_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    notified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    done_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    contract_id: Mapped[Optional[int]] = mapped_column(ForeignKey("client_contracts.id"), index=True, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class Notification(Base):
+    """Saytdaxili bildiriş (xatırlatma, məktubun təsdiqi/rəddi, məktuba cavab)."""
+
+    __tablename__ = "notifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    text: Mapped[str] = mapped_column(Text)
+    link: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    read_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class LetterApproval(Base):
+    """"Təsdiqə göndər": satışın məktub qaralaması təsdiqləyicinin növbəsinə düşür."""
+
+    __tablename__ = "letter_approvals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    opportunity_id: Mapped[int] = mapped_column(ForeignKey("opportunities.id"), index=True)
+    requested_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    to_address: Mapped[str] = mapped_column(Text)
+    subject: Mapped[str] = mapped_column(Text)
+    body: Mapped[str] = mapped_column(Text)
+    language: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
+    contact_id: Mapped[Optional[int]] = mapped_column(ForeignKey("contacts.id"), nullable=True)
+    mailbox_id: Mapped[Optional[int]] = mapped_column(ForeignKey("mailboxes.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)  # APPROVAL_STATUSES
+    decided_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    decision_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class ClientContract(Base):
+    """Alətlər → Şirkət əlavə et: müştəri şirkət və müqavilənin bitmə tarixi."""
+
+    __tablename__ = "client_contracts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    company_name: Mapped[str] = mapped_column(Text)
+    organization_id: Mapped[Optional[int]] = mapped_column(ForeignKey("organizations.id"), nullable=True)
+    contract_end: Mapped[datetime] = mapped_column(Date, index=True)
+    contact: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class EmployeeSearch(Base):
+    """Şirkətin LinkedIn-dəki bütün işçiləri (Apify, pulludur) — nəticə saxlanılır, təkrar ödənilməsin."""
+
+    __tablename__ = "employee_searches"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    company: Mapped[str] = mapped_column(Text)
+    company_key: Mapped[str] = mapped_column(String(200), index=True)
+    items: Mapped[str] = mapped_column(Text)  # JSON siyahı: [{name, title, linkedin_url, location}]
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

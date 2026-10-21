@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Qeydlər və xatırlatmalar — Neo{% endblock %}
+{% block main_class %}mc mc-kw{% endblock %}
+{% block content %}
+  <header class="ld-head">
+    <h1 class="mc-title">Qeydlər və xatırlatmalar</h1>
+    <p class="ld-sub">Özün üçün qeyd yaz: “bu tarixdə yadıma sal”. Xatırlatma vaxtını sən seçirsən — X dəqiqə, saat və ya gün əvvəl. Vaxtı çatanda saytda bildiriş görünür (sol menyuda zəng).</p>
+  </header>
+
+  <section class="kw-sec">
+    <form class="kw-add" method="post" action="/me/reminders">
+      {{ csrf_field(request) }}
+      <label class="kw-f">Nəyi yadına salaq?<input name="title" required maxlength="300" placeholder="məs. Azersun-a təklifin cavabını soruş"></label>
+      <div class="kw-row">
+        <label class="kw-f">Tarix və saat (Bakı vaxtı)<input type="datetime-local" name="due_at" required></label>
+        <label class="kw-f">Neçə əvvəl xatırladım?<input type="number" name="before" min="0" max="525600" value="30" inputmode="numeric"></label>
+        <label class="kw-f">&nbsp;<select name="unit" aria-label="Vahid">{% for k, v in units.items() %}<option value="{{ k }}">{{ v }} əvvəl</option>{% endfor %}</select></label>
+      </div>
+      <label class="kw-f">Qeyd (istəyə görə)<textarea name="note" rows="2" maxlength="2000"></textarea></label>
+      <button class="mc-btn mc-btn-hero" type="submit">Xatırlatma qur</button>
+    </form>
+  </section>
+
+  <section class="kw-sec">
+    <div class="ld-filter" role="group" aria-label="Status">
+      <a class="{{ 'on' if show != 'done' else '' }}" href="/me/reminders">Aktiv</a>
+      <a class="{{ 'on' if show == 'done' else '' }}" href="/me/reminders?show=done">Bitmiş</a>
+    </div>
+    {% if rows %}
+    <ul class="tk-list">
+      {% for r in rows %}
+      {% set late = r.due_at < utcnow() and not r.done_at %}
+      <li class="tk {{ 'is-late' if late else '' }} {{ 'is-done' if r.done_at else '' }}">
+        <div class="tk-main">
+          <b>{{ r.title }}</b>
+          {% if r.contract_id %}<a href="/tools/contracts#c{{ r.contract_id }}">Müqavilə →</a>{% endif %}
+          {% if r.note %}<details class="od-more"><summary>Qeyd</summary>{{ r.note }}</details>{% endif %}
+        </div>
+        <div class="tk-side">
+          <span class="tk-when {{ 'late' if late else '' }}">{{ r.due_at|baku_time }}</span>
+          <span class="tk-who">Bildiriş: {{ describe(r.remind_before_min) }}{% if r.notified_at %} · göndərilib{% endif %}</span>
+        </div>
+        <div class="tk-act">
+          <form method="post" action="/me/reminders/{{ r.id }}/done">{{ csrf_field(request) }}<button class="mc-btn mc-btn-sm {{ '' if r.done_at else 'tk-done' }}" type="submit">{{ 'Geri aç' if r.done_at else 'Bitdi' }}</button></form>
+          <form method="post" action="/me/reminders/{{ r.id }}/delete" onsubmit="return confirm('Xatırlatma silinsin?')">{{ csrf_field(request) }}<button class="mc-btn mc-btn-sm kw-del" type="submit">Sil</button></form>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+      <div class="empty"><b>{{ 'Aktiv xatırlatma yoxdur' if show != 'done' else 'Bitmiş xatırlatma yoxdur' }}</b></div>
+    {% endif %}
+  </section>
+{% endblock %}

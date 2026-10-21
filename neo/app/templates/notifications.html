@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Bildirişlər — Neo{% endblock %}
+{% block main_class %}mc mc-kw{% endblock %}
+{% block content %}
+  <header class="ld-head">
+    <h1 class="mc-title">Bildirişlər</h1>
+    <p class="ld-sub">Xatırlatmalar, məktubların təsdiqi/rəddi və müştəri cavabları. Son 100 bildiriş.</p>
+  </header>
+  {% if rows %}
+  <form method="post" action="/notifications/read-all" style="margin-bottom:14px">{{ csrf_field(request) }}<button class="mc-btn mc-btn-sm" type="submit">Hamısını oxunmuş et</button></form>
+  <ul class="nt-list">
+    {% for n in rows %}
+    <li class="nt {{ '' if n.read_at else 'is-new' }}">
+      <form method="post" action="/notifications/{{ n.id }}/read">
+        {{ csrf_field(request) }}
+        <button type="submit" class="nt-btn"><b>{{ n.text }}</b><small>{{ n.created_at|baku_time }}{% if not n.read_at %} · yeni{% endif %}</small></button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+    <div class="empty"><b>Bildiriş yoxdur</b>Xatırlatma qursan və ya məktubun təsdiqlənsə, burada görünəcək.</div>
+  {% endif %}
+{% endblock %}
