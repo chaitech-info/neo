@@ -69,22 +69,15 @@ MAX_EXPECTED_VALUE = Decimal("1000000000000")  # Numeric(14, 2) → ən çox 12 
 @router.get("/opportunities")
 def opportunities_page(request: Request, owner: str = "all", reply: str = "", me: User = Depends(REQUIRE["viewer"])):
     with security.SessionLocal() as db:
-        next_due = (
-            select(Task.opportunity_id, func.min(Task.due_on).label("due"))
-            .where(Task.status.in_(("open", "in_progress")))
-            .group_by(Task.opportunity_id)
-            .subquery()
-        )
         # Kartda bir email: təşkilatın, elandakı, yoxdursa ilk kontaktın (heç biri yoxdursa göstərilmir).
         contact_email = (select(Contact.email).where(Contact.lead_key == Opportunity.lead_key, Contact.email.is_not(None))
                          .order_by(Contact.id).limit(1).correlate(Opportunity).scalar_subquery())
         email = func.coalesce(Organization.email, LeadRecord.contact_email, contact_email)
         q = (
-            select(Opportunity, Organization, User, next_due.c.due, email)
+            select(Opportunity, Organization, User, email)
             .outerjoin(Organization, Organization.id == Opportunity.organization_id)
             .outerjoin(LeadRecord, LeadRecord.dedupe_key == Opportunity.lead_key)
             .outerjoin(User, User.id == Opportunity.owner_id)
-            .outerjoin(next_due, next_due.c.opportunity_id == Opportunity.id)
         )
         if owner == "me":
             q = q.where(Opportunity.owner_id == me.id)
