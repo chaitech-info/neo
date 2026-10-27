@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Şirkət bazası — Neo{% endblock %}
+{% block main_class %}mc mc-kw{% endblock %}
+{% block content %}
+  <header class="ld-head">
+    <h1 class="mc-title">Şirkət bazası</h1>
+    <p class="ld-sub">Analiz olunmuş və əlavə edilmiş şirkətlər. Şirkəti aç — saxlanmış analiz, işçilər, əməkdaşlıq razılaşmaları və fürsətlər. Yeni analiz üçün <a href="/tools/company">Şirkət analizi</a>, yeni şirkət üçün <a href="/tools/contracts">Şirkət əlavə et</a>.</p>
+  </header>
+
+  <form class="lr-bar" method="get" action="/companies" role="search">
+    <input type="hidden" name="show" value="{{ show }}">
+    <label class="lr-search"><span class="sr">Şirkət axtar</span>
+      <svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      <input type="search" name="q" value="{{ q }}" maxlength="100" placeholder="Ad, sayt, sahə, VÖEN və ya qeyd…">
+    </label>
+    <button class="mc-btn" type="submit">Axtar</button>
+    {% if q %}<a class="mc-btn mc-btn-sm" href="/companies?show={{ show }}">Təmizlə</a>{% endif %}
+  </form>
+
+  {% set qs = '&q=' ~ (q|urlencode) if q else '' %}
+  <div class="ld-filter" role="group" aria-label="Hansı şirkətlər">
+    <a class="{{ 'on' if show == 'all' else '' }}" href="/companies?show=all{{ qs }}">Hamısı <i>{{ counts.all }}</i></a>
+    <a class="{{ 'on' if show == 'analysed' else '' }}" href="/companies?show=analysed{{ qs }}">Analiz olunub <i>{{ counts.analysed }}</i></a>
+    <a class="{{ 'on' if show == 'agreements' else '' }}" href="/companies?show=agreements{{ qs }}">Razılaşması var <i>{{ counts.agreements }}</i></a>
+  </div>
+
+  {% if rows %}
+  <ul class="tk-list cd-list">
+    {% for org, n_agreements, n_opps in rows %}
+    <li class="tk">
+      <div class="tk-main">
+        <b><a class="cd-name" href="/companies/{{ org.id }}">{{ org.name }}</a></b>
+        <small class="cd-meta">
+          {% if org.industry %}<span>{{ org.industry }}</span>{% endif %}
+          {% if org.website %}<span>{{ org.domain or org.website }}</span>{% endif %}
+          {% if org.voen %}<span>VÖEN {{ org.voen }}</span>{% endif %}
+          {% if n_agreements %}<span>{{ n_agreements }} razılaşma</span>{% endif %}
+          {% if n_opps %}<span>{{ n_opps }} fürsət</span>{% endif %}
+        </small>
+        {% if org.notes %}<small class="cd-note">{{ org.notes|truncate(140) }}</small>{% endif %}
+      </div>
+      <div class="tk-side">
+        {% if org.analysed_at %}
+          <span class="kw-chip on">Analiz olunub</span>
+          <span>{{ org.analysed_at|baku_time }}</span>
+        {% else %}
+          <span class="kw-chip">Analiz olunmayıb</span>
+        {% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% if pages > 1 %}
+  <nav class="ld-filter" aria-label="Səhifələr">
+    {% if page > 1 %}<a href="/companies?show={{ show }}{{ qs }}&page={{ page - 1 }}">← Əvvəlki</a>{% endif %}
+    <a class="on">{{ page }} / {{ pages }}</a>
+    {% if page < pages %}<a href="/companies?show={{ show }}{{ qs }}&page={{ page + 1 }}">Növbəti →</a>{% endif %}
+  </nav>
+  {% endif %}
+  {% elif q %}
+    <div class="empty"><b>«{{ q }}» üzrə şirkət tapılmadı</b><a href="/companies?show={{ show }}">Axtarışı təmizlə</a></div>
+  {% else %}
+    <div class="empty"><b>Bazada hələ şirkət yoxdur</b>Şirkəti analiz edəndə və ya “Şirkət əlavə et”-dən əlavə edəndə burada görünəcək.<br><a class="mc-btn mc-btn-sm" style="margin-top:14px" href="/tools/company">Şirkət analizi</a></div>
+  {% endif %}
+{% endblock %}

@@ -1,0 +1,47 @@
+{# Əməkdaşlıq razılaşmaları (client_contracts, app/companies.py): forma sahələri və siyahı. #}
+{% macro agreement_fields(status_names, a=none, required=true) %}
+  <div class="kw-row" style="margin-top:0">
+    <label class="kw-f kw-g">Razılaşmanın adı<input name="title" {% if required %}required minlength="2"{% endif %} maxlength="300" value="{{ (a.title or '') if a else '' }}" placeholder="məs. İşçi qidalanması xidməti 2027"></label>
+    <label class="kw-f">Status<select name="status">{% for k, v in status_names.items() %}<option value="{{ k }}" {% if (a and a.status == k) or (not a and k == 'active') %}selected{% endif %}>{{ v }}</option>{% endfor %}</select></label>
+  </div>
+  <div class="kw-row">
+    <label class="kw-f">Başlama tarixi<input type="date" name="starts_on" value="{{ a.starts_on.isoformat() if a and a.starts_on else '' }}"></label>
+    <label class="kw-f">Bitmə tarixi<input type="date" name="ends_on" value="{{ a.contract_end.isoformat() if a and a.contract_end else '' }}"></label>
+    <label class="kw-f kw-g">Əlaqə (istəyə görə)<input name="contact" maxlength="300" value="{{ (a.contact or '') if a else '' }}" placeholder="ad, telefon, email"></label>
+  </div>
+  <label class="kw-f">Təsvir (istəyə görə)<textarea name="description" rows="2" maxlength="4000" placeholder="şərtlər, xidmətin həcmi, qiymət…">{{ (a.note or '') if a else '' }}</textarea></label>
+{% endmacro %}
+
+{% macro agreement_list(request, rows, status_names, shown_status, today, users, me, back='') %}
+  {% set can_manage = has_role(me, 'manager') %}
+  <ul class="tk-list">
+    {% for a in rows %}
+    {% set st = shown_status(a, today) %}
+    {% set left = (a.contract_end - today).days if a.contract_end else none %}
+    <li class="tk {{ 'is-late' if st == 'expired' and a.status == 'active' else '' }}" id="a{{ a.id }}">
+      <div class="tk-main">
+        <b>{{ a.title or 'Müqavilə' }} <span class="ag ag-{{ st }}">{{ status_names[st] }}</span></b>
+        <small>{% if a.starts_on %}{{ a.starts_on|day }}{% else %}—{% endif %} → {% if a.contract_end %}{{ a.contract_end|day }}{% else %}müddətsiz{% endif %}{% if a.contact %} · {{ a.contact }}{% endif %}</small>
+        {% if a.note %}<details class="od-more"><summary>Təsvir</summary>{{ a.note }}</details>{% endif %}
+        {% if can_manage or a.created_by_id == me.id %}
+        <details class="od-add">
+          <summary>Redaktə et</summary>
+          <form method="post" action="/agreements/{{ a.id }}">
+            {{ csrf_field(request) }}<input type="hidden" name="back" value="{{ back }}">
+            {{ agreement_fields(status_names, a) }}
+            <div class="em-act">
+              <button class="mc-btn mc-btn-sm mc-btn-hero" type="submit">Yadda saxla</button>
+              <button class="mc-btn mc-btn-sm" type="submit" formaction="/agreements/{{ a.id }}/delete" formnovalidate onclick="return confirm('Razılaşma silinsin?')">Sil</button>
+            </div>
+          </form>
+        </details>
+        {% endif %}
+      </div>
+      <div class="tk-side">
+        {% if left is not none and st == 'active' %}<span class="tk-when {{ 'late' if left <= 30 else '' }}">{{ left }} gün qalıb</span>{% endif %}
+        <span class="tk-who">{{ users.get(a.created_by_id, '') }}</span>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+{% endmacro %}

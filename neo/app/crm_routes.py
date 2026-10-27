@@ -19,7 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from app import crm, leaders, mailboxes
 from app.auth import security
 from app.auth.security import REQUIRE, verify_csrf
-from app.contacts import EMAIL_RE, contacts_for, normalize_phone
+from app.contacts import EMAIL_RE, contacts_for, normalize_phone, opportunity_emails
 from app.notify import notify
 from app.outreach import LANGUAGES, OutreachError, detect_language
 from app.outreach import linkedin_comment, mail
@@ -28,7 +28,7 @@ from app.db.models import (REPLY_STATUSES, Contact, InboundEmail, LeadRecord, Le
 
 router = APIRouter()
 
-BAKU_OFFSET = timedelta(hours=4)
+BAKU_OFFSET = crm.BAKU_OFFSET
 
 
 def _render(request: Request, name: str, context: dict):
@@ -36,12 +36,13 @@ def _render(request: Request, name: str, context: dict):
 
 
 def _go(path: str, *, msg: str | None = None, err: str | None = None) -> RedirectResponse:
+    path, hash_, fragment = path.partition("#")  # ?msg= fraqmentdən (#...) əvvəl olmalıdır, yoxsa brauzer görmür
     sep = "&" if "?" in path else "?"
     if msg:
         path += f"{sep}msg={quote(msg)}"
     elif err:
         path += f"{sep}err={quote(err)}"
-    return RedirectResponse(url=path, status_code=303)
+    return RedirectResponse(url=path + hash_ + fragment, status_code=303)
 
 
 def _parse_local_datetime(value: str | None) -> datetime | None:
@@ -69,14 +70,19 @@ MAX_EXPECTED_VALUE = Decimal("1000000000000")  # Numeric(14, 2) → ən çox 12 
 def opportunities_page(request: Request, owner: str = "all", reply: str = "", me: User = Depends(REQUIRE["viewer"])):
     with security.SessionLocal() as db:
         next_due = (
-            select(Task.opportunity_id, func.min(Task.due_at).label("due"))
+            select(Task.opportunity_id, func.min(Task.due_on).label("due"))
             .where(Task.status.in_(("open", "in_progress")))
             .group_by(Task.opportunity_id)
             .subquery()
         )
+        # Kartda bir email: təşkilatın, elandakı, yoxdursa ilk kontaktın (heç biri yoxdursa göstərilmir).
+        contact_email = (select(Contact.email).where(Contact.lead_key == Opportunity.lead_key, Contact.email.is_not(None))
+                         .order_by(Contact.id).limit(1).correlate(Opportunity).scalar_subquery())
+        email = func.coalesce(Organization.email, LeadRecord.contact_email, contact_email)
         q = (
-            select(Opportunity, Organization, User, next_due.c.due)
+            select(Opportunity, Organization, User, next_due.c.due, email)
             .outerjoin(Organization, Organization.id == Opportunity.organization_id)
+            .outerjoin(LeadRecord, LeadRecord.dedupe_key == Opportunity.lead_key)
             .outerjoin(User, User.id == Opportunity.owner_id)
             .outerjoin(next_due, next_due.c.opportunity_id == Opportunity.id)
         )
@@ -113,8 +119,10 @@ def _opp_context(db, opp: Opportunity, me: User | None = None) -> dict:
     lead = db.get(LeadRecord, opp.lead_key) if opp.lead_key else None
     users = _active_users(db)
     contacts = contacts_for(db, opp.lead_key, opp.organization_id)
+    org = db.get(Organization, opp.organization_id) if opp.organization_id else None
     default = mailboxes.default_sender()
     return {
+        "emails": opportunity_emails(lead, org, contacts),
         "mailbox_list": mailboxes.active(db), "default_sender": default, "templates": _templates_for(db, me),
         "approvals": list(db.scalars(select(LetterApproval).where(LetterApproval.opportunity_id == opp.id)
                                      .order_by(LetterApproval.created_at.desc()))),
@@ -123,7 +131,7 @@ def _opp_context(db, opp: Opportunity, me: User | None = None) -> dict:
         "reply_status_names": mailboxes.REPLY_STATUS_NAMES, "sentiment_names": mailboxes.SENTIMENT_NAMES,
         "approval_names": APPROVAL_NAMES,
         "active": "opportunities", "opp": opp, "lead": lead,
-        "org": db.get(Organization, opp.organization_id) if opp.organization_id else None,
+        "org": org,
         "tender": db.get(Tender, opp.tender_id) if opp.tender_id else None,
         "contacts": contacts, "contact_sources": CONTACT_SOURCE_NAMES,
         "email_contacts": [c for c in contacts if c.email],
@@ -189,6 +197,10 @@ def opportunity_email_draft(request: Request, opp_id: int, contact_id: str = For
             return _go("/opportunities", err="Fürsət tapılmadı")
         context = _opp_context(db, opp, me)
         contact = db.get(Contact, int(contact_id)) if contact_id.isdigit() else None
+        # "to:<email>" — kontakt olmayan ünvan (təşkilatın / elanın emaili), yalnız bu fürsətinkilərdən.
+        picked = contact_id.removeprefix("to:").lower() if contact_id.startswith("to:") else ""
+        if picked and not to.strip() and any(e["email"] == picked for e in context["emails"]):
+            to = picked
         tpl = _template(db, template_id, me)
         sender = mailboxes.resolve(db, mailbox_id)
         lead, org = context["lead"], context["org"]
@@ -448,7 +460,7 @@ def opportunity_details(opp_id: int, expected_value: str = Form(""), expected_cl
 
 
 @router.post("/opportunities/{opp_id}/tasks", dependencies=[Depends(verify_csrf)])
-def opportunity_add_task(opp_id: int, title: str = Form(...), due_at: str = Form(""),
+def opportunity_add_task(opp_id: int, title: str = Form(...), due_on: str = Form(""),
                          assignee_id: str = Form(""), priority: str = Form("normal"),
                          description: str = Form(""), me: User = Depends(REQUIRE["sales"])):
     path = f"/opportunities/{opp_id}"
@@ -461,7 +473,7 @@ def opportunity_add_task(opp_id: int, title: str = Form(...), due_at: str = Form
         if target is None or not target.is_active:
             return _go(path, err="Məsul istifadəçi tapılmadı")
         try:
-            crm.add_task(db, opp, title, _parse_local_datetime(due_at), assignee, me.id, priority, description)
+            crm.add_task(db, opp, title, crm.parse_due(due_on), assignee, me.id, priority, description)
         except crm.CrmError as exc:
             return _go(path, err=str(exc))
     return _go(path, msg="Tapşırıq əlavə olundu")
@@ -566,12 +578,9 @@ def tasks_page(request: Request, who: str = "me", status: str = "open", me: User
         elif status in crm.TASK_STATUS_NAMES:
             q = q.where(Task.status == status)
         # Son tarixi olanlar əvvəl (ən təcili yuxarıda), sonra tarixsizlər.
-        rows = db.execute(q.order_by(Task.due_at.is_(None), Task.due_at, Task.id)).all()
-    # "Bu gün" = Bakı vaxtı ilə günün sonuna qədər (bazada naive UTC).
-    now_baku = datetime.utcnow() + BAKU_OFFSET
-    today_end = now_baku.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1) - BAKU_OFFSET
+        rows = db.execute(q.order_by(Task.due_on.is_(None), Task.due_on, Task.id)).all()
     return _render(request, "tasks.html", {
-        "active": "tasks", "rows": rows, "who": who, "status": status, "today_end": today_end,
+        "active": "tasks", "rows": rows, "who": who, "status": status, "today": crm.today(),
         "task_status_names": crm.TASK_STATUS_NAMES, "priority_names": crm.PRIORITY_NAMES,
     })
 

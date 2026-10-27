@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}{{ org.name }} — Şirkət bazası — Neo{% endblock %}
+{% block main_class %}mc mc-kw mc-opp{% endblock %}
+{% block content %}
+  {% from "_company_analysis.html" import analysis_view, employees_section, notes_section %}
+  {% from "_agreements.html" import agreement_fields, agreement_list %}
+  {% set me = request.state.user %}
+
+  <nav class="od-crumb" aria-label="Yol"><a href="/companies">← Şirkət bazası</a></nav>
+  <header class="ld-head od-head">
+    <h1 class="mc-title">{{ org.name }}</h1>
+    <p class="od-tags">
+      {% if org.analysed_at %}<span class="kw-chip on">Analiz olunub · {{ org.analysed_at|baku_time }}{% if org.analysed_by_id in users %} · {{ users[org.analysed_by_id] }}{% endif %}</span>
+      {% else %}<span class="kw-chip">Analiz olunmayıb</span>{% endif %}
+      {% if org.industry %}<span class="tag">{{ org.industry }}</span>{% endif %}
+    </p>
+  </header>
+
+  <div class="od-grid">
+    <section class="od-card">
+      <h2>Məlumat</h2>
+      <dl class="od-kv">
+        {% if org.website %}<dt>Sayt</dt><dd><a href="{{ org.website }}" target="_blank" rel="noopener">{{ org.domain or org.website }} ↗</a></dd>{% endif %}
+        {% if org.voen %}<dt>VÖEN</dt><dd>{{ org.voen }}</dd>{% endif %}
+        {% if org.email %}<dt>Email</dt><dd><a href="mailto:{{ org.email }}">{{ org.email }}</a></dd>{% endif %}
+        {% if org.phone %}<dt>Telefon</dt><dd><a href="tel:{{ org.phone }}">{{ org.phone }}</a></dd>{% endif %}
+        <dt>Bazada</dt><dd>{{ org.created_at|baku_time }}</dd>
+      </dl>
+      <details class="od-add">
+        <summary>Məlumatı dəyiş</summary>
+        <form method="post" action="/companies/{{ org.id }}">
+          {{ csrf_field(request) }}
+          <div class="kw-row" style="margin-top:0">
+            <label class="kw-f kw-g">Sayt<input name="website" maxlength="300" value="{{ org.website or '' }}" placeholder="sahil.az"></label>
+            <label class="kw-f">VÖEN<input name="voen" maxlength="10" pattern="\d{10}" inputmode="numeric" value="{{ org.voen or '' }}"></label>
+          </div>
+          <div class="kw-row">
+            <label class="kw-f kw-g">Email<input type="email" name="email" maxlength="255" value="{{ org.email or '' }}"></label>
+            <label class="kw-f">Telefon<input name="phone" maxlength="64" value="{{ org.phone or '' }}"></label>
+          </div>
+          <label class="kw-f">Sahə<input name="industry" maxlength="300" value="{{ org.industry or '' }}"></label>
+          <button class="mc-btn mc-btn-hero" type="submit">Yadda saxla</button>
+        </form>
+      </details>
+    </section>
+
+    <section class="od-card">
+      <h2>Fürsətlər <em>{{ opportunities|length }}</em></h2>
+      {% if opportunities %}
+      <ul class="ct-list">
+        {% for o in opportunities %}
+        <li class="ct"><div class="ct-main"><b><a href="/opportunities/{{ o.id }}">{{ o.title[:120] }}</a></b><span class="ct-role">{{ stage_names[o.stage] }}</span></div></li>
+        {% endfor %}
+      </ul>
+      {% else %}<p class="od-empty">Bu şirkətlə fürsət yoxdur.</p>{% endif %}
+    </section>
+  </div>
+
+  {{ notes_section(request, org, users) }}
+
+  <section class="od-card" id="agreements">
+    <h2>Əməkdaşlıq razılaşmaları <em>{{ agreements|length }}</em></h2>
+    {% if agreements %}
+      {{ agreement_list(request, agreements, status_names, shown_status, today, users, me) }}
+    {% else %}
+      <p class="od-empty">Hələ razılaşma yoxdur.</p>
+    {% endif %}
+    <details class="od-add" {% if not agreements %}open{% endif %}>
+      <summary>+ Razılaşma əlavə et</summary>
+      <form method="post" action="/companies/{{ org.id }}/agreements">
+        {{ csrf_field(request) }}
+        {{ agreement_fields(status_names) }}
+        <button class="mc-btn mc-btn-hero" type="submit">Əlavə et</button>
+      </form>
+    </details>
+  </section>
+
+  <h2 class="cd-sec">Analiz</h2>
+  {% if analysis %}
+    {{ analysis_view(analysis, size_names, fit_names, heading=false) }}
+    <p class="od-hint">AI yalnız saytdakı və bazadakı məlumata əsaslanır — rəqəmləri və adları istifadə etməzdən əvvəl yoxla.</p>
+  {% else %}
+    <p class="od-empty">Bu şirkət hələ analiz olunmayıb.</p>
+  {% endif %}
+  <form method="post" action="/tools/company" data-once class="cd-reanalyse">
+    {{ csrf_field(request) }}<input type="hidden" name="name" value="{{ org.name }}"><input type="hidden" name="website" value="{{ org.website or '' }}">
+    <button class="mc-btn" type="submit" data-busy="Analiz olunur… (~15 san.)">{{ 'Yenidən analiz et' if analysis else 'Analiz et' }}</button>
+  </form>
+
+  {{ employees_section(request, org.name, staff, staff_at, employees_ready) }}
+
+  <script>
+    document.querySelectorAll('form[data-once]').forEach(function (f) {
+      f.addEventListener('submit', function (e) {
+        if (f.dataset.sent) { e.preventDefault(); return; }
+        f.dataset.sent = '1';
+        var b = f.querySelector('button[type=submit]');
+        if (b) { b.disabled = true; if (b.dataset.busy) b.textContent = b.dataset.busy; }
+      });
+    });
+  </script>
+{% endblock %}

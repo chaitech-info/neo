@@ -41,6 +41,7 @@ from app.keyword_routes import router as keyword_router
 from app.offer_routes import router as offer_router
 from app.brief_routes import router as brief_router
 from app.company_routes import router as company_router
+from app.company_db_routes import router as company_db_router
 from app.approval_routes import router as approval_router
 from app.contracts_routes import router as contracts_router
 from app.employee_routes import router as employee_router
@@ -117,6 +118,7 @@ app.include_router(keyword_router)
 app.include_router(offer_router)
 app.include_router(brief_router)
 app.include_router(company_router)
+app.include_router(company_db_router)
 app.include_router(approval_router)
 app.include_router(contracts_router)
 app.include_router(employee_router)
@@ -156,7 +158,7 @@ def nav_counts(user: User | None) -> dict[str, int]:
             mine = select(func.count()).select_from(Task).where(
                 Task.assignee_id == user.id, Task.status.in_(("open", "in_progress")))
             open_tasks = db.scalar(mine)
-            late = db.scalar(mine.where(Task.due_at < datetime.utcnow()))
+            late = db.scalar(mine.where(Task.due_on < crm.today()))
             notify.fire_due(db, user.id)
             unread = notify.unread_count(db, user.id)
             approvals = db.scalar(select(func.count()).select_from(LetterApproval).where(
@@ -226,8 +228,15 @@ def _baku_time(value: datetime | None) -> str:
     return (value + timedelta(hours=4)).strftime("%d.%m.%Y %H:%M") if value else "—"
 
 
+def _day(value) -> str:
+    """Tarix (saatsız) — tapşırıqların son tarixi, razılaşmalar."""
+    return value.strftime("%d.%m.%Y") if value else "—"
+
+
 templates.env.filters["baku_time"] = _baku_time
+templates.env.filters["day"] = _day
 templates.env.globals["utcnow"] = datetime.utcnow  # son tarixin keçib-keçmədiyi üçün
+templates.env.globals["baku_today"] = crm.today  # tapşırığın tarixi keçibmi (Bakı günü ilə)
 
 
 @app.on_event("startup")

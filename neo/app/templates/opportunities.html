@@ -9,20 +9,21 @@
   {% set open_stages = ['new', 'contacted', 'qualified', 'proposal', 'negotiation'] %}
   {% set closed_stages = ['won', 'lost'] %}
 
-  {% macro card(opp, org, owner_user, next_due) %}
+  {% macro card(opp, org, owner_user, next_due, email) %}
     <li>
       <a class="op {{ 'is-tender' if opp.tender_id else '' }}" href="/opportunities/{{ opp.id }}">
         <span class="op-main">
           <b>{{ opp.title[:100] }}</b>
           {% if org %}<small>{{ org.name[:70] }}</small>{% endif %}
+          {% if email %}<small class="op-email">✉ {{ email }}</small>{% endif %}
         </span>
         <span class="op-side">
           {% if opp.tender_id %}<span class="tag">Tender</span>{% endif %}
           {% if opp.reply_status %}<span class="rs rs-{{ opp.reply_status }}">{{ reply_status_names[opp.reply_status] }}</span>{% endif %}
           <span class="op-who">{{ owner_user.full_name if owner_user else 'Məsul təyin edilməyib' }}</span>
           {% if next_due %}
-            {% if next_due < utcnow() %}<span class="op-due late">Tapşırığın vaxtı keçib · {{ next_due|baku_time }}</span>
-            {% else %}<span class="op-due">Növbəti tapşırıq · {{ next_due|baku_time }}</span>{% endif %}
+            {% if next_due < baku_today() %}<span class="op-due late">Tapşırığın vaxtı keçib · {{ next_due|day }}</span>
+            {% else %}<span class="op-due">Növbəti tapşırıq · {{ next_due|day }}</span>{% endif %}
           {% endif %}
         </span>
       </a>
@@ -67,7 +68,7 @@
     <section class="op-grp s-{{ stage }}" id="st-{{ stage }}">
       <h2><i></i>{{ stage_names[stage] }} <em>{{ totals[stage] }}</em></h2>
       <ul class="op-list">
-        {% for opp, org, owner_user, next_due in columns[stage] %}{{ card(opp, org, owner_user, next_due) }}{% endfor %}
+        {% for opp, org, owner_user, next_due, email in columns[stage] %}{{ card(opp, org, owner_user, next_due, email) }}{% endfor %}
       </ul>
     </section>
     {% endif %}
@@ -78,7 +79,7 @@
     <details class="op-closed s-{{ stage }}">
       <summary><span><i></i>{{ stage_names[stage] }} <em>{{ totals[stage] }}</em></span><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></summary>
       <ul class="op-list">
-        {% for opp, org, owner_user, next_due in columns[stage] %}{{ card(opp, org, owner_user, next_due) }}{% endfor %}
+        {% for opp, org, owner_user, next_due, email in columns[stage] %}{{ card(opp, org, owner_user, next_due, email) }}{% endfor %}
       </ul>
       {% if totals[stage] > columns[stage]|length %}<p class="op-more">və daha {{ totals[stage] - columns[stage]|length }} fürsət</p>{% endif %}
     </details>

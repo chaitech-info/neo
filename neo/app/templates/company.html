@@ -4,7 +4,7 @@
 {% block content %}
   <header class="ld-head">
     <h1 class="mc-title">Şirkət analizi</h1>
-    <p class="ld-sub">Şirkətin adını (və varsa saytını) yaz — AI onun saytını və bazamızdakı lead/fürsətləri oxuyub potensial müştəri kimi qiymətləndirir: nə iş görür, nə qədər böyükdür, catering ehtiyacı, necə yanaşmaq lazımdır.</p>
+    <p class="ld-sub">Şirkətin adını (və varsa saytını) yaz — AI onun saytını və bazamızdakı lead/fürsətləri oxuyub potensial müştəri kimi qiymətləndirir: nə iş görür, nə qədər böyükdür, catering ehtiyacı, necə yanaşmaq lazımdır. Hər uğurlu analiz <a href="/companies">Şirkət bazasında</a> saxlanılır.</p>
   </header>
 
   <section class="od-card">
@@ -18,28 +18,24 @@
     </form>
   </section>
 
-  {% if result %}
-  {% set ai = result.ai %}
-  <section class="od-card">
-    <h2>{{ result.name }}</h2>
-    <p>{{ ai.summary }}</p>
-    <dl class="od-kv">
-      <dt>Sahə</dt><dd>{{ ai.industry }}</dd>
-      <dt>Ölçü</dt><dd>{{ size_names.get(ai.size, ai.size) }}{% if ai.size_note %} — {{ ai.size_note }}{% endif %}</dd>
-      <dt>Catering uyğunluğu</dt><dd><b>{{ fit_names.get(ai.fit, ai.fit) }}</b> — {{ ai.fit_reason }}</dd>
-      <dt>Sayt</dt><dd>{% if result.site %}<a href="{{ result.site }}" target="_blank" rel="noopener">{{ result.site }} ↗</a>{% if not result.site_ok %} (oxunmadı — analiz yalnız bazadakı məlumatla){% endif %}{% else %}verilməyib{% endif %}</dd>
-      {% if result.found %}<dt>Saytdakı əlaqə</dt><dd>{% for f in result.found %}{{ f.email or f.phone }}{% if not loop.last %} · {% endif %}{% endfor %}</dd>{% endif %}
-    </dl>
-  </section>
-
-  <div class="od-grid">
-    {% for title, items in [("Ehtimal olunan ehtiyaclar", ai.needs), ("Necə yanaşmalı", ai.approach), ("İlk söhbətdə deyiləcəklər", ai.talking_points), ("Risklər", ai.risks)] if items %}
-    <section class="od-card">
-      <h2>{{ title }}</h2>
-      <ul>{% for x in items %}<li>{{ x }}</li>{% endfor %}</ul>
-    </section>
-    {% endfor %}
+  {# Analiz gedərkən (~15 san.) nəticənin skeleti göstərilir; köhnə nəticə gizlənir. #}
+  <div class="skel-wrap" data-skel hidden aria-live="polite">
+    <div class="skel-card"><b>AI şirkəti analiz edir — saytı və bazadakı məlumatı oxuyur…</b><div class="skel"><i></i><i></i><i></i><i></i></div></div>
+    <div class="skel-grid">
+      <div class="skel-card"><div class="skel"><i></i><i></i><i></i></div></div>
+      <div class="skel-card"><div class="skel"><i></i><i></i><i></i></div></div>
+    </div>
   </div>
+
+  {% if result %}
+  <div data-result>
+  {% from "_company_analysis.html" import analysis_view, employees_section, notes_section %}
+  {% if saved %}<p class="flash" role="status">Analiz şirkət bazasında saxlanıldı. <a href="/companies/{{ saved.id }}">«{{ saved.name }}» şirkət kartını aç →</a></p>{% endif %}
+  {{ analysis_view(result, size_names, fit_names) }}
+
+  {% if saved %}{{ notes_section(request, saved, users) }}{% endif %}
+
+  {{ employees_section(request, result.name, staff, staff_at, employees_ready) }}
 
   <section class="od-card">
     <h2>Bazamızda <em>{{ result.facts.leads|length }}</em></h2>
@@ -58,6 +54,7 @@
     {% endif %}
   </section>
   <p class="od-hint">AI yalnız saytdakı və bazadakı məlumata əsaslanır — rəqəmləri və adları göndərməzdən əvvəl yoxla.</p>
+  </div>
   {% endif %}
 
   <script>
@@ -67,7 +64,22 @@
         f.dataset.sent = '1';
         var b = f.querySelector('button[type=submit]');
         if (b) { b.disabled = true; if (b.dataset.busy) b.textContent = b.dataset.busy; }
+        var skel = document.querySelector('[data-skel]'), old = document.querySelector('[data-result]');
+        if (skel) skel.hidden = false;
+        if (old) old.hidden = true;
       });
+    });
+    /* Geri düyməsi ilə qayıdanda (bfcache) forma yenidən işləsin. */
+    window.addEventListener('pageshow', function (e) {
+      if (!e.persisted) return;
+      document.querySelectorAll('form[data-once]').forEach(function (f) {
+        delete f.dataset.sent;
+        var b = f.querySelector('button[type=submit]');
+        if (b) { b.disabled = false; b.textContent = 'Analiz et'; }
+      });
+      var skel = document.querySelector('[data-skel]'), old = document.querySelector('[data-result]');
+      if (skel) skel.hidden = true;
+      if (old) old.hidden = false;
     });
   </script>
 {% endblock %}

@@ -2,26 +2,35 @@
 {% block title %}Şirkət əlavə et — Neo{% endblock %}
 {% block main_class %}mc mc-kw{% endblock %}
 {% block content %}
+  {% from "_agreements.html" import agreement_fields %}
   <header class="ld-head">
     <h1 class="mc-title">Şirkət əlavə et</h1>
-    <p class="ld-sub">Müştəri şirkəti və müqaviləsinin bitmə tarixini əlavə et. Müqaviləsi {{ soon_days }} gün ərzində bitənlər burada görünür; hər şirkət üçün özünə xatırlatma qura bilərsən — vaxtı çatanda saytda bildiriş gələcək.</p>
+    <p class="ld-sub">Müştəri şirkəti və onunla əməkdaşlıq razılaşmalarını əlavə et — bir şirkətin bir neçə razılaşması ola bilər. Şirkət <a href="/companies">Şirkət bazasına</a> düşür, razılaşmaları sonra orada dəyişmək olar. Müddəti {{ soon_days }} gün ərzində bitənlər burada görünür; özünə xatırlatma qura bilərsən — vaxtı çatanda saytda bildiriş gələcək.</p>
   </header>
 
   <section class="kw-sec">
     <details class="kw-new" {% if not total %}open{% endif %}>
       <summary>+ Şirkət əlavə et</summary>
-      <form method="post" action="/tools/contracts">
+      <form method="post" action="/tools/contracts" id="company-new">
         {{ csrf_field(request) }}
         <div class="kw-row" style="margin-top:0">
           <label class="kw-f kw-g">Şirkətin adı<input name="company_name" required minlength="2" maxlength="300" placeholder="məs. Azersun MMC"></label>
-          <label class="kw-f">Müqavilə bitir<input type="date" name="contract_end" required></label>
+          <label class="kw-f">Sayt (istəyə görə)<input name="website" maxlength="300" placeholder="azersun.az"></label>
+          <label class="kw-f">VÖEN (istəyə görə)<input name="voen" maxlength="10" pattern="\d{10}" inputmode="numeric" title="10 rəqəm"></label>
         </div>
-        <div class="kw-row">
-          <label class="kw-f kw-g">Əlaqə (istəyə görə)<input name="contact" maxlength="300" placeholder="ad, telefon, email"></label>
+        <label class="kw-f">Əlavə qeydlər (istəyə görə)<textarea name="notes" rows="2" maxlength="10000" placeholder="şirkət haqqında istənilən qeyd"></textarea></label>
+        <p class="od-hint">Bu şirkət bazada varsa (eyni VÖEN, sayt və ya ad), yenisi yaranmır — razılaşmalar və qeyd mövcud şirkətə əlavə olunur.</p>
+
+        <div data-agreements>
+          <fieldset class="ag-set" data-agreement>
+            <legend>Əməkdaşlıq razılaşması <span data-agreement-n>1</span> <small>(istəyə görə — boş qalsa yalnız şirkət əlavə olunur)</small></legend>
+            {{ agreement_fields(status_names, required=false) }}
+          </fieldset>
         </div>
-        <label class="kw-f">Qeyd (istəyə görə)<textarea name="note" rows="2" maxlength="2000"></textarea></label>
+        <button class="mc-btn mc-btn-sm" type="button" data-agreement-add>+ Daha bir razılaşma</button>
+
         <div class="kw-row">
-          <label class="kw-chk"><input type="checkbox" name="remind" value="1" checked>Mənə xatırlat</label>
+          <label class="kw-chk"><input type="checkbox" name="remind" value="1" checked>Bitmə tarixindən əvvəl mənə xatırlat</label>
           <label class="kw-f"><span class="sr">Neçə</span><input type="number" name="before" min="0" max="365" value="30" inputmode="numeric" aria-label="Neçə əvvəl"></label>
           <label class="kw-f"><span class="sr">Vahid</span><select name="unit" aria-label="Vahid">{% for k, v in units.items() %}<option value="{{ k }}" {% if k == 'day' %}selected{% endif %}>{{ v }} əvvəl</option>{% endfor %}</select></label>
         </div>
@@ -30,7 +39,7 @@
     </details>
   </section>
 
-  <div class="ld-filter" role="group" aria-label="Hansı şirkətlər">
+  <div class="ld-filter" role="group" aria-label="Hansı razılaşmalar">
     <a class="{{ 'on' if show != 'all' else '' }}" href="/tools/contracts">Bitməyə yaxın ({{ soon_days }} gün)</a>
     <a class="{{ 'on' if show == 'all' else '' }}" href="/tools/contracts?show=all">Hamısı <i>{{ total }}</i></a>
   </div>
@@ -38,40 +47,62 @@
   {% if rows %}
   <ul class="tk-list">
     {% for c in rows %}
-    {% set left = (c.contract_end - today).days %}
-    <li class="tk {{ 'is-late' if left < 0 else '' }}" id="c{{ c.id }}">
+    {% set st = shown_status(c, today) %}
+    {% set left = (c.contract_end - today).days if c.contract_end else none %}
+    <li class="tk {{ 'is-late' if left is not none and left < 0 and c.status == 'active' else '' }}" id="c{{ c.id }}">
       <div class="tk-main">
-        <b>{{ c.company_name }}</b>
+        <b>{% if c.organization_id %}<a class="cd-name" href="/companies/{{ c.organization_id }}#a{{ c.id }}">{{ c.company_name }}</a>{% else %}{{ c.company_name }}{% endif %}</b>
+        <small>{{ c.title or 'Müqavilə' }} · <span class="ag ag-{{ st }}">{{ status_names[st] }}</span>{% if c.starts_on %} · {{ c.starts_on|day }} →{% endif %}</small>
         {% if c.contact %}<small>{{ c.contact }}</small>{% endif %}
-        {% if c.note %}<details class="od-more"><summary>Qeyd</summary>{{ c.note }}</details>{% endif %}
+        {% if c.note %}<details class="od-more"><summary>Təsvir</summary>{{ c.note }}</details>{% endif %}
         {% for r in mine.get(c.id, []) %}
         <small class="ct-ok">Xatırlatma: {{ r.remind_at|baku_time }} ({{ describe(r.remind_before_min) }}){% if r.notified_at %} · göndərilib{% endif %}</small>
         {% endfor %}
+        {% if c.contract_end %}
         <details class="od-add">
           <summary>+ Xatırlatma qur</summary>
           <form method="post" action="/me/reminders" class="kw-row">
             {{ csrf_field(request) }}
             <input type="hidden" name="back" value="/tools/contracts"><input type="hidden" name="contract_id" value="{{ c.id }}">
-            <input type="hidden" name="title" value="Müqavilə bitir: {{ c.company_name }}">
+            <input type="hidden" name="title" value="Müqavilə bitir: {{ c.company_name }}{% if c.title %} — {{ c.title }}{% endif %}">
             <label class="kw-f">Nə vaxta (Bakı)<input type="datetime-local" name="due_at" required value="{{ c.contract_end.isoformat() }}T{{ '%02d'|format(remind_hour) }}:00"></label>
             <label class="kw-f">Neçə əvvəl<input type="number" name="before" min="0" max="525600" value="30" inputmode="numeric"></label>
             <label class="kw-f">&nbsp;<select name="unit" aria-label="Vahid">{% for k, v in units.items() %}<option value="{{ k }}" {% if k == 'day' %}selected{% endif %}>{{ v }} əvvəl</option>{% endfor %}</select></label>
             <button class="mc-btn mc-btn-sm mc-btn-hero" type="submit">Qur</button>
           </form>
         </details>
+        {% endif %}
       </div>
       <div class="tk-side">
-        <span class="tk-when {{ 'late' if left < 0 or left <= 30 else '' }}">{{ c.contract_end.strftime('%d.%m.%Y') }} · {% if left < 0 %}{{ -left }} gün əvvəl bitib{% elif left == 0 %}bu gün bitir{% else %}{{ left }} gün qalıb{% endif %}</span>
+        {% if c.contract_end %}
+        <span class="tk-when {{ 'late' if left <= 30 else '' }}">{{ c.contract_end|day }} · {% if left < 0 %}{{ -left }} gün əvvəl bitib{% elif left == 0 %}bu gün bitir{% else %}{{ left }} gün qalıb{% endif %}</span>
+        {% else %}<span class="tk-when">müddətsiz</span>{% endif %}
         <span class="tk-who">{{ authors.get(c.created_by_id, '—') }}</span>
       </div>
       <div class="tk-act">
         <a class="mc-btn mc-btn-sm" href="/tools/company?name={{ c.company_name|urlencode }}">Analiz</a>
-        <form method="post" action="/tools/contracts/{{ c.id }}/delete" onsubmit="return confirm('Şirkət və onun xatırlatmaları silinsin?')">{{ csrf_field(request) }}<button class="mc-btn mc-btn-sm kw-del" type="submit">Sil</button></form>
+        <form method="post" action="/agreements/{{ c.id }}/delete" onsubmit="return confirm('Razılaşma və onun xatırlatmaları silinsin?')">{{ csrf_field(request) }}<input type="hidden" name="back" value="/tools/contracts?show={{ show }}"><button class="mc-btn mc-btn-sm kw-del" type="submit">Sil</button></form>
       </div>
     </li>
     {% endfor %}
   </ul>
   {% else %}
-    <div class="empty"><b>{{ 'Yaxın ' ~ soon_days ~ ' gündə bitən müqavilə yoxdur' if show != 'all' else 'Hələ şirkət əlavə edilməyib' }}</b>{% if show != 'all' and total %}<a href="/tools/contracts?show=all">Hamısına bax</a>{% endif %}</div>
+    <div class="empty"><b>{{ 'Yaxın ' ~ soon_days ~ ' gündə bitən razılaşma yoxdur' if show != 'all' else 'Hələ razılaşma əlavə edilməyib' }}</b>{% if show != 'all' and total %}<a href="/tools/contracts?show=all">Hamısına bax</a>{% endif %}</div>
   {% endif %}
+
+  <script>
+    /* "+ Daha bir razılaşma": ilk blokun boş nüsxəsi əlavə olunur (sahələr eyni adla — server siyahı kimi oxuyur). */
+    (function () {
+      var box = document.querySelector('[data-agreements]'), add = document.querySelector('[data-agreement-add]');
+      if (!box || !add) return;
+      add.addEventListener('click', function () {
+        var first = box.querySelector('[data-agreement]'), copy = first.cloneNode(true);
+        copy.querySelectorAll('input, textarea').forEach(function (el) { el.value = ''; });
+        copy.querySelectorAll('select').forEach(function (el) { el.value = 'active'; });
+        copy.querySelector('[data-agreement-n]').textContent = box.children.length + 1;
+        box.appendChild(copy);
+        copy.querySelector('input').focus();
+      });
+    })();
+  </script>
 {% endblock %}

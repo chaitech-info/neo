@@ -1,0 +1,133 @@
+{# Şirkət analizinin nəticəsi — Şirkət analizi (yeni nəticə) və Şirkət bazası (saxlanmış) səhifələri. #}
+{% macro analysis_view(a, size_names, fit_names, heading=true) %}
+  {% set ai = a.ai %}
+  <section class="od-card">
+    {% if heading %}<h2>{{ a.name }}</h2>{% endif %}
+    <p>{{ ai.summary }}</p>
+    <dl class="od-kv">
+      <dt>Sahə</dt><dd>{{ ai.industry }}</dd>
+      <dt>Ölçü</dt><dd>{{ size_names.get(ai.size, ai.size) }}{% if ai.size_note %} — {{ ai.size_note }}{% endif %}</dd>
+      <dt>Catering uyğunluğu</dt><dd><b>{{ fit_names.get(ai.fit, ai.fit) }}</b> — {{ ai.fit_reason }}</dd>
+      <dt>Sayt</dt><dd>{% if a.site %}<a href="{{ a.site }}" target="_blank" rel="noopener">{{ a.site }} ↗</a>{% if not a.site_ok %} (oxunmadı — analiz yalnız bazadakı məlumatla){% endif %}{% else %}verilməyib{% endif %}</dd>
+      {% if a.found %}<dt>Saytdakı əlaqə</dt><dd>{% for f in a.found %}{% if f.email %}<a href="mailto:{{ f.email }}">{{ f.email }}</a>{% elif f.phone %}<a href="tel:{{ f.phone }}">{{ f.phone }}</a>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</dd>{% endif %}
+    </dl>
+  </section>
+
+  <div class="od-grid">
+    {% for title, items in [("Ehtimal olunan ehtiyaclar", ai.needs), ("Necə yanaşmalı", ai.approach), ("İlk söhbətdə deyiləcəklər", ai.talking_points), ("Risklər", ai.risks)] if items %}
+    <section class="od-card">
+      <h2>{{ title }}</h2>
+      <ul>{% for x in items %}<li>{{ x }}</li>{% endfor %}</ul>
+    </section>
+    {% endfor %}
+  </div>
+{% endmacro %}
+
+{# Əlavə qeydlər (organizations.notes): JS ilə səhifə yenilənmədən saxlanılır, JS-siz adi forma kimi işləyir. #}
+{% macro notes_section(request, org, users) %}
+  <section class="od-card" id="notes">
+    <h2>Əlavə qeydlər</h2>
+    <form method="post" action="/companies/{{ org.id }}/notes" data-notes>
+      {{ csrf_field(request) }}
+      <label class="kw-f"><span class="sr">Qeydlər</span>
+        <textarea name="notes" rows="5" maxlength="10000" placeholder="Şirkət haqqında istənilən qeyd: kimlə danışılıb, nə razılaşdırılıb, nəyə diqqət etmək lazımdır…">{{ org.notes or '' }}</textarea>
+      </label>
+      <div class="em-act">
+        <button class="mc-btn mc-btn-hero" type="submit" data-busy="Saxlanılır…">Qeydi yadda saxla</button>
+        <span class="od-hint nt-status" data-notes-status role="status">{% if org.notes_updated_at %}Son dəyişiklik: {{ org.notes_updated_at|baku_time }}{% if org.notes_updated_by_id in users %} · {{ users[org.notes_updated_by_id] }}{% endif %}{% endif %}</span>
+      </div>
+    </form>
+  </section>
+  <script>
+    (function () {
+      var f = document.querySelector('form[data-notes]');
+      if (!f || !window.fetch) return;
+      var ta = f.querySelector('textarea'), b = f.querySelector('button'), st = f.querySelector('[data-notes-status]'),
+          saved = ta.value, label = b.textContent;
+      ta.addEventListener('input', function () {
+        st.textContent = ta.value === saved ? '' : 'Yadda saxlanmayıb';
+        st.classList.toggle('is-dirty', ta.value !== saved);
+      });
+      f.addEventListener('submit', function (e) {
+        e.preventDefault();
+        b.disabled = true; b.textContent = b.dataset.busy;
+        fetch(f.action, { method: 'POST', body: new FormData(f), credentials: 'same-origin',
+                          headers: { 'Accept': 'application/json' } })
+          .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+          .then(function (res) {
+            if (!res.ok) throw new Error(res.d.error || 'Saxlanılmadı');
+            saved = ta.value;
+            st.classList.remove('is-dirty');
+            st.textContent = 'Yadda saxlandı · ' + res.d.saved_at + ' · ' + res.d.by;
+          })
+          .catch(function (err) { st.classList.add('is-dirty'); st.textContent = (err && err.message) || 'Saxlanılmadı'; })
+          .then(function () { b.disabled = false; b.textContent = label; });
+      });
+    })();
+  </script>
+{% endmacro %}
+
+{# İşçilər (LinkedIn, app/employees.py): yalnız LinkedIn profili olan real nəticələr göstərilir, AI ad uydurmur.
+   Keşdə varsa dərhal, yoxdursa düymə ilə JS axtarır (analiz + Apify bir sorğuda Vercel-in 60 saniyəsinə sığmır). #}
+{% macro employees_section(request, company, items, searched_at, ready, can_search=true) %}
+  <section class="od-card" id="employees" data-emp-box>
+    <h2>İşçilər <em data-emp-count>{{ items|length if searched_at else '' }}</em></h2>
+    <p class="od-hint" data-emp-status>
+      {% if searched_at %}LinkedIn axtarışı · {{ searched_at|baku_time }}{% if not items %} — LinkedIn-də bu şirkətin işçisi tapılmadı.{% endif %}
+      {% elif not ready %}İşçi məlumatı yoxdur: LinkedIn axtarışı qoşulmayıb (APIFY_TOKEN).
+      {% else %}İşçilər hələ axtarılmayıb. Mənbə — LinkedIn profilləri (təxmini və ya uydurma məlumat göstərilmir).{% endif %}
+    </p>
+    <ul class="ct-list" data-emp-list>
+      {% for p in items %}
+      <li class="ct"><div class="ct-main">
+        <b>{{ p.name }}</b>{% if p.title %}<span class="ct-role">{{ p.title }}</span>{% endif %}
+        <span class="ct-ways">{% if p.location %}<span>{{ p.location }}</span>{% endif %}<a href="{{ p.linkedin_url }}" target="_blank" rel="noopener">LinkedIn ↗</a></span>
+      </div></li>
+      {% endfor %}
+    </ul>
+    {% if ready and can_search %}
+    <form method="post" action="/tools/company/employees" data-emp-form>
+      {{ csrf_field(request) }}<input type="hidden" name="company" value="{{ company }}">
+      <input type="hidden" name="force" value="{{ '1' if searched_at else '' }}">
+      <button class="mc-btn mc-btn-sm" type="submit">{{ 'Yenidən axtar' if searched_at else 'İşçiləri LinkedIn-də axtar' }}</button>
+    </form>
+    {% endif %}
+  </section>
+  <script>
+    (function () {
+      var f = document.querySelector('form[data-emp-form]');
+      if (!f) return;
+      var box = document.querySelector('[data-emp-box]'), list = box.querySelector('[data-emp-list]'),
+          st = box.querySelector('[data-emp-status]'), cnt = box.querySelector('[data-emp-count]'), b = f.querySelector('button');
+      function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; }
+      f.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var before = list.innerHTML;
+        b.disabled = true; st.textContent = 'LinkedIn-də axtarılır… (~30 san.)';
+        list.innerHTML = '<li class="ct" aria-hidden="true"><div class="skel" style="flex:1"><i></i><i></i><i></i></div></li>';
+        fetch(f.action, { method: 'POST', body: new FormData(f), credentials: 'same-origin' })
+          .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+          .then(function (res) {
+            if (!res.ok) throw new Error(res.d.error || 'Axtarış alınmadı');
+            var items = res.d.items || [];
+            list.innerHTML = '';
+            items.forEach(function (p) {
+              var li = el('li', 'ct'), m = el('div', 'ct-main');
+              m.appendChild(el('b', '', p.name));
+              if (p.title) m.appendChild(el('span', 'ct-role', p.title));
+              var w = el('span', 'ct-ways');
+              if (p.location) w.appendChild(el('span', '', p.location));
+              var a = el('a', '', 'LinkedIn ↗'); a.href = p.linkedin_url; a.target = '_blank'; a.rel = 'noopener';
+              w.appendChild(a); m.appendChild(w); li.appendChild(m); list.appendChild(li);
+            });
+            cnt.textContent = items.length;
+            st.textContent = 'LinkedIn axtarışı · ' + res.d.searched_at + (res.d.from_cache ? ' (saxlanmış nəticə)' : '')
+              + (items.length ? '' : ' — LinkedIn-də bu şirkətin işçisi tapılmadı.');
+            f.querySelector('[name=force]').value = '1'; b.textContent = 'Yenidən axtar';
+          })
+          .catch(function (err) { list.innerHTML = before; st.textContent = (err && err.message) || 'Axtarış alınmadı'; })
+          .then(function () { b.disabled = false; });
+      });
+    })();
+  </script>
+{% endmacro %}

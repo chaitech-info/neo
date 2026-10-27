@@ -11,7 +11,7 @@ səbəbsiz bağlana bilməz.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
@@ -44,10 +44,11 @@ LOST_REASON_NAMES = {
 TASK_STATUS_NAMES = {"open": "Açıq", "in_progress": "İcrada", "done": "Bitib", "cancelled": "Ləğv"}
 PRIORITY_NAMES = {"low": "Aşağı", "normal": "Normal", "high": "Yüksək"}
 
+# Tapşırıqlarda saat yoxdur — yalnız Bakı tarixi (Task.due_on, 0013).
 # İlk tapşırığın son tarixi: tender üçün son tarixdən 2 gün əvvəl (sənəd
-# hazırlamağa vaxt), amma ən azı indidən 4 saat sonra; digər lead-lər üçün 1 gün.
+# hazırlamağa vaxt), amma bu gündən tez yox; digər lead-lər üçün sabah.
+BAKU_OFFSET = timedelta(hours=4)
 TENDER_PREP_BUFFER = timedelta(days=2)
-MIN_TASK_LEAD = timedelta(hours=4)
 DEFAULT_FIRST_CONTACT = timedelta(days=1)
 URGENT_WITHIN = timedelta(days=3)
 
@@ -74,14 +75,24 @@ def _now() -> datetime:
     return datetime.utcnow()
 
 
-def _first_task(lead: LeadRecord, org_name: str | None, now: datetime) -> tuple[str, str, datetime, str]:
+def baku_date(value: datetime) -> date:
+    """Naive UTC (bazadakı format) → Bakı tarixi."""
+    return (value + BAKU_OFFSET).date()
+
+
+def today() -> date:
+    return baku_date(_now())
+
+
+def _first_task(lead: LeadRecord, org_name: str | None, now: datetime) -> tuple[str, str, date, str]:
     """(başlıq, təsvir, son tarix, prioritet) — lead növünə görə."""
     who = org_name or lead.entity_name or "müştəri"
+    day = baku_date(now)
     if lead.category == "tender" or lead.tender_id:
-        due = now + DEFAULT_FIRST_CONTACT
+        due = day + DEFAULT_FIRST_CONTACT
         if lead.deadline_at:
-            due = max(lead.deadline_at - TENDER_PREP_BUFFER, now + MIN_TASK_LEAD)
-            due = min(due, lead.deadline_at)
+            deadline = baku_date(lead.deadline_at)
+            due = min(max(deadline - TENDER_PREP_BUFFER, day), deadline)
         urgent = lead.deadline_at is not None and lead.deadline_at - now <= URGENT_WITHIN
         return (
             f"Tender sənədlərini yoxla və təklif hazırla — {who}",
@@ -94,7 +105,7 @@ def _first_task(lead: LeadRecord, org_name: str | None, now: datetime) -> tuple[
         f"İlk əlaqə: {who}",
         "Zəng et və ya yaz, işçi qidalanması / tədbir ehtiyacını dəqiqləşdir, görüş təyin et."
         + (f"\nƏlaqə: {contact}" if contact else ""),
-        now + DEFAULT_FIRST_CONTACT,
+        day + DEFAULT_FIRST_CONTACT,
         "high" if (lead.ai_score or 0) >= 0.8 else "normal",
     )
 
@@ -138,7 +149,7 @@ def convert_lead(session: Session, dedupe_key: str, user_id: int | None) -> Conv
         description=description,
         assignee_id=user_id,
         created_by_id=None,  # sistem yaradıb
-        due_at=due,
+        due_on=due,
         status="open",
         priority=priority,
         created_at=now,
@@ -210,7 +221,7 @@ def email_sent(session: Session, opp: Opportunity, *, to: str, subject: str, bod
     if lead is not None:
         record_event(session, lead, "email", lead.status, user_id, note=f"{to}: {subject}"[:500])
     session.add(Task(opportunity_id=opp.id, title=f"Məktuba cavabı yoxla: {to}", description=subject,
-                     due_at=now + EMAIL_FOLLOW_UP, assignee_id=opp.owner_id or user_id, created_by_id=None,
+                     due_on=baku_date(now) + EMAIL_FOLLOW_UP, assignee_id=opp.owner_id or user_id, created_by_id=None,
                      priority="normal", status="open", created_at=now))
     if opp.stage == "new" and "contacted" in pipeline_for(opp):
         opp.stage = "contacted"
@@ -219,7 +230,20 @@ def email_sent(session: Session, opp: Opportunity, *, to: str, subject: str, bod
     return row
 
 
-def add_task(session: Session, opp: Opportunity, title: str, due_at: datetime | None,
+def parse_due(value: str | None) -> date | None:
+    """<input type="date"> → tarix; saat qəbul edilmir (tapşırıqlarda yalnız tarix var)."""
+    value = (value or "").strip()
+    if not value:
+        return None
+    try:
+        if len(value) != 10:
+            raise ValueError(value)
+        return date.fromisoformat(value)
+    except ValueError:
+        raise CrmError("Tarix formatı yanlışdır (gün.ay.il, saatsız)")
+
+
+def add_task(session: Session, opp: Opportunity, title: str, due_on: date | None,
              assignee_id: int | None, created_by_id: int | None, priority: str = "normal",
              description: str | None = None) -> Task:
     title = (title or "").strip()
@@ -227,8 +251,10 @@ def add_task(session: Session, opp: Opportunity, title: str, due_at: datetime | 
         raise CrmError("Tapşırığın adı boş ola bilməz")
     if priority not in PRIORITY_NAMES:
         raise CrmError("Yanlış prioritet")
+    if isinstance(due_on, datetime):  # saat atılır
+        due_on = due_on.date()
     task = Task(opportunity_id=opp.id, title=title[:500], description=(description or "").strip() or None,
-                due_at=due_at, assignee_id=assignee_id, created_by_id=created_by_id,
+                due_on=due_on, assignee_id=assignee_id, created_by_id=created_by_id,
                 priority=priority, status="open", created_at=_now())
     session.add(task)
     opp.updated_at = _now()
@@ -245,4 +271,4 @@ def set_task_status(session: Session, task: Task, status: str) -> None:
 
 
 def opp_tasks(session: Session, opp_id: int) -> list[Task]:
-    return list(session.scalars(select(Task).where(Task.opportunity_id == opp_id).order_by(Task.due_at)))
+    return list(session.scalars(select(Task).where(Task.opportunity_id == opp_id).order_by(Task.due_on)))

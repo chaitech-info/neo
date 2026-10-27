@@ -155,3 +155,27 @@ def test_0008_backfills_rejected_by_and_linkedin_post_link(engine):
         origin = c.execute(text("SELECT origin_url FROM leads WHERE dedupe_key='li'")).scalar()
     assert rows == {"ai": "ai", "hu": "human", "li": None}
     assert origin == "https://www.linkedin.com/posts/x-123"
+
+
+def test_0013_task_time_becomes_baku_date_and_org_domain_backfilled(engine):
+    """Tapşırıqda saat yoxdur: UTC due_at → Bakı tarixi (22:00 UTC = ertəsi gün 02:00 Bakı)."""
+    with engine.begin() as c:
+        command.upgrade(alembic_config(c), "0012")
+        c.execute(text(
+            "INSERT INTO tasks (id, opportunity_id, title, status, priority, created_at, due_at) VALUES "
+            "(1, 1, 'Gecə', 'open', 'normal', '2026-10-01 00:00:00', '2026-10-01 22:00:00'),"
+            "(2, 1, 'Gündüz', 'open', 'normal', '2026-10-01 00:00:00', '2026-10-01 07:00:00'),"
+            "(3, 1, 'Tarixsiz', 'open', 'normal', '2026-10-01 00:00:00', NULL)"))
+        c.execute(text("INSERT INTO organizations (id, name, name_normalized, website, created_at) VALUES "
+                       "(1, 'Sahil MMC', 'sahil', 'https://www.Sahil.az/haqqimizda', '2026-10-01 00:00:00')"))
+        c.execute(text("INSERT INTO client_contracts (company_name, organization_id, contract_end, created_at) "
+                       "VALUES ('Sahil MMC', 1, '2027-01-01', '2026-10-01 00:00:00')"))
+    upgrade_to_head(engine)
+    with engine.connect() as c:
+        due = dict(c.execute(text("SELECT title, due_on FROM tasks")).all())
+        assert "due_at" not in {col["name"] for col in inspect(c).get_columns("tasks")}
+        assert c.execute(text("SELECT domain FROM organizations")).scalar() == "sahil.az"
+        # Müqaviləsi olan köhnə şirkət şirkət bazasında görünür.
+        assert c.execute(text("SELECT listed_at FROM organizations")).scalar() is not None
+        assert c.execute(text("SELECT status FROM client_contracts")).scalar() == "active"
+    assert due == {"Gecə": "2026-10-02", "Gündüz": "2026-10-01", "Tarixsiz": None}

@@ -1,5 +1,5 @@
 """Öz CRM: "Təsdiqlə" → fürsət + tapşırıq, mərhələlər, tapşırıq ekranları."""
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -59,7 +59,7 @@ def test_approve_creates_opportunity_task_and_organization(factory):
         assert conv.opportunity.stage == "new" and conv.opportunity.owner_id == 1
         assert org.name == "Sahil Transport MMC"
         assert conv.task.title == "İlk əlaqə: Sahil Transport MMC"
-        assert conv.task.due_at == NOW + timedelta(days=1)
+        assert conv.task.due_on == date(2026, 10, 1)  # sabah (Bakı tarixi), saatsız
         assert conv.task.priority == "high"  # AI skoru >= 0.8
         assert conv.task.assignee_id == 1 and conv.task.created_by_id is None
 
@@ -78,8 +78,8 @@ def test_tender_task_is_due_before_the_deadline(factory):
         near_task = crm.convert_lead(s, near, 1).task
 
     assert far_task.title.startswith("Tender sənədlərini yoxla")
-    assert far_task.due_at == NOW + timedelta(days=7) and far_task.priority == "normal"
-    assert near_task.due_at == NOW + timedelta(hours=4)  # minimum hazırlıq vaxtı
+    assert far_task.due_on == date(2026, 10, 7) and far_task.priority == "normal"  # son tarixdən 2 gün əvvəl
+    assert near_task.due_on == date(2026, 9, 30)  # bu gündən tez ola bilməz
     assert near_task.priority == "high"
 
 
@@ -126,14 +126,19 @@ def test_web_approve_and_screens(factory):
     assert detail.status_code == 200 and "İlk əlaqə" in detail.text
 
     assert client.post(f"/opportunities/{opp.id}/tasks",
-                       data={"title": "Görüş təyin et", "due_at": "2026-10-02T11:00", "priority": "high"},
+                       data={"title": "Görüş təyin et", "due_on": "2026-10-02", "priority": "high"},
                        follow_redirects=False).status_code == 303
+    # Tapşırıqda saat yoxdur — saatlı dəyər rədd olunur, tapşırıq yaranmır.
+    bad = client.post(f"/opportunities/{opp.id}/tasks", data={"title": "Saatlı", "due_on": "2026-10-02T11:00"},
+                      follow_redirects=False)
+    assert "err=" in bad.headers["location"]
     assert client.post(f"/opportunities/{opp.id}/stage", data={"stage": "contacted"},
                        follow_redirects=False).status_code == 303
 
     with factory() as s:
         tasks = s.scalars(select(Task).where(Task.title == "Görüş təyin et")).all()
-        assert tasks[0].due_at == datetime(2026, 10, 2, 7, 0)  # Bakı 11:00 → UTC 07:00
+        assert tasks[0].due_on == date(2026, 10, 2)
+        assert not s.scalars(select(Task).where(Task.title == "Saatlı")).all()
         assert s.get(Opportunity, opp.id).stage == "contacted"
         first = s.scalars(select(Task).where(Task.title.startswith("İlk əlaqə"))).one()
 

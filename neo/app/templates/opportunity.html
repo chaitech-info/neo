@@ -15,6 +15,14 @@
       {% if tender %}<span class="tag">Tender</span>{% endif %}
       {% if opp.stage == 'lost' and opp.lost_reason_code %}<span class="od-lost">{{ lost_reasons[opp.lost_reason_code] }}{% if opp.lost_reason_note %}: {{ opp.lost_reason_note }}{% endif %}</span>{% endif %}
     </p>
+    {% if emails %}
+    <p class="od-emails" aria-label="Email ünvanları">
+      <span class="od-emails-l">Email:</span>
+      {% for e in emails %}
+      <span class="od-email"><a href="mailto:{{ e.email }}" title="{{ e.name or '' }}{% if e.title %} — {{ e.title }}{% endif %}">{{ e.email }}</a><button type="button" class="od-copy" data-copy="{{ e.email }}" title="Kopyala" aria-label="{{ e.email }} kopyala">⧉</button></span>
+      {% endfor %}
+    </p>
+    {% endif %}
   </header>
 
   <section class="od-card">
@@ -23,14 +31,14 @@
     <ul class="tk-list">
       {% for t in tasks %}
       {% set is_open = t.status in ('open', 'in_progress') %}
-      {% set late = t.due_at and t.due_at < utcnow() and is_open %}
+      {% set late = t.due_on and t.due_on < baku_today() and is_open %}
       <li class="tk {{ 'is-late' if late else '' }} {{ 'is-done' if not is_open else '' }}">
         <div class="tk-main">
           <b>{{ t.title }}{% if t.priority == 'high' %} <span class="tk-hi">Vacib</span>{% endif %}</b>
           {% if t.description %}<details class="od-more"><summary>Ətraflı</summary>{{ t.description }}</details>{% endif %}
         </div>
         <div class="tk-side">
-          <span class="tk-when {{ 'late' if late else '' }}">{% if t.due_at %}{% if late %}Vaxtı keçib · {% endif %}{{ t.due_at|baku_time }}{% else %}Tarixsiz{% endif %}</span>
+          <span class="tk-when {{ 'late' if late else '' }}">{% if t.due_on %}{% if late %}Vaxtı keçib · {% endif %}{{ t.due_on|day }}{% else %}Tarixsiz{% endif %}</span>
           <span class="tk-who">{{ users[t.assignee_id].full_name if t.assignee_id in users else 'Məsul təyin edilməyib' }}</span>
         </div>
         <div class="tk-act">
@@ -63,7 +71,7 @@
         {{ csrf_field(request) }}
         <label class="kw-f">Nə etmək lazımdır?<input name="title" required maxlength="300" placeholder="məs. Təklifi göndər"></label>
         <div class="kw-row">
-          <label class="kw-f">Son tarix (Bakı vaxtı)<input type="datetime-local" name="due_at"></label>
+          <label class="kw-f">Son tarix<input type="date" name="due_on"></label>
           <label class="kw-f">Məsul
             <select name="assignee_id">{% for u in user_list %}<option value="{{ u.id }}" {% if u.id == me.id %}selected{% endif %}>{{ u.full_name }}</option>{% endfor %}</select>
           </label>
@@ -157,6 +165,7 @@
         {% if org.email %}<dt>Email</dt><dd>{{ org.email }}</dd>{% endif %}
         {% if org.website %}<dt>Sayt</dt><dd><a href="{{ org.website }}" target="_blank" rel="noopener">{{ org.website }} ↗</a></dd>{% endif %}
       </dl>
+      {% if can_edit %}<p class="od-hint"><a href="/companies/{{ org.id }}">Şirkət kartı (analiz, razılaşmalar) →</a></p>{% endif %}
       {% else %}
         <p class="od-empty">Təşkilat müəyyən edilməyib.</p>
       {% endif %}
@@ -196,7 +205,7 @@
           <label class="kw-f">Kimə<input type="email" name="to" required value="{{ draft.to }}" list="em-to" placeholder="ad@sirket.az"></label>
           {{ sender_select(draft.mailbox_id) }}
         </div>
-        <datalist id="em-to">{% for c in email_contacts %}<option value="{{ c.email }}">{{ c.name or '' }}{% if c.title %} — {{ c.title }}{% endif %}</option>{% endfor %}</datalist>
+        <datalist id="em-to">{% for e in emails %}<option value="{{ e.email }}">{{ e.name or '' }}{% if e.title %} — {{ e.title }}{% endif %}</option>{% endfor %}</datalist>
         <label class="kw-f">Mövzu<input name="subject" required maxlength="200" value="{{ draft.subject }}"></label>
         <label class="kw-f">Məktub — göndərməzdən əvvəl oxu və düzəlt<textarea name="body" required rows="16">{{ draft.body }}</textarea></label>
         <div class="em-regen">
@@ -221,7 +230,7 @@
         <div class="kw-row" style="margin-top:0">
           <label class="kw-f">Kimə
             <select name="contact_id">
-              {% for c in email_contacts %}<option value="{{ c.id }}">{{ c.name or c.email }}{% if c.title %} — {{ c.title }}{% endif %}{% if c.name %} ({{ c.email }}){% endif %}</option>{% endfor %}
+              {% for e in emails %}<option value="{{ e.contact_id if e.contact_id else 'to:' ~ e.email }}">{{ e.name or e.email }}{% if e.title %} — {{ e.title }}{% endif %}{% if e.name %} ({{ e.email }}){% endif %}{% if e.origin == 'organization' %} — şirkətin emaili{% elif e.origin == 'lead' %} — elandakı email{% endif %}</option>{% endfor %}
               <option value="">— ünvanı özüm yazacağam —</option>
             </select>
           </label>
@@ -417,6 +426,15 @@
       if (f.hasAttribute('data-auto')) run(false);
     })();
     {% endif %}
+    /* Email ünvanını kopyala. */
+    document.querySelectorAll('[data-copy]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        if (!navigator.clipboard) return;
+        navigator.clipboard.writeText(b.dataset.copy).then(function () {
+          b.textContent = '✓'; setTimeout(function () { b.textContent = '⧉'; }, 1200);
+        });
+      });
+    });
     /* data-once formları ikinci dəfə göndərilməsin (ikiqat klik → iki məktub / iki şərh). */
     document.querySelectorAll('form[data-once]').forEach(function (f) {
       f.addEventListener('submit', function (e) {

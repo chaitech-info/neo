@@ -5,7 +5,7 @@ işləyən tiplər. Enum-lar VARCHAR + CHECK (`native_enum=False`), tarixlər na
 UTC `DateTime` (mövcud `leads` sütunları kimi), JSON adi `JSON`. Sxem dəyişikliyi
 yalnız Alembic miqrasiyası ilə (neo/migrations) — `create_all()` testlər üçündür.
 """
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 
@@ -71,6 +71,7 @@ OUTREACH_STATUSES = ("sent", "failed", "skipped")
 # 0012 — sərbəst sətir kimi saxlanılır (CHECK yoxdur), dəyərlər kodda yoxlanılır.
 REPLY_STATUSES = ("waiting", "potential", "declined")
 APPROVAL_STATUSES = ("pending", "approved", "rejected")
+AGREEMENT_STATUSES = ("draft", "active", "expired", "terminated")  # 0013: client_contracts.status
 
 
 # --- Toplama qatı -----------------------------------------------------------
@@ -175,6 +176,17 @@ class Organization(Base):
     phone: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    # 0013: Şirkət bazası — sayt domeni (dublikat yoxlaması) və son uğurlu analiz (app/companies.py)
+    domain: Mapped[Optional[str]] = mapped_column(String(255), index=True, nullable=True)
+    industry: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    analysis: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON
+    analysis_status: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    analysed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, index=True, nullable=True)
+    analysed_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    listed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, index=True, nullable=True)  # şirkət bazasında
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # əlavə qeydlər (sərbəst mətn)
+    notes_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    notes_updated_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
 
 
 class Tender(Base):
@@ -323,7 +335,7 @@ class Task(Base):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     assignee_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), index=True, nullable=True)
     created_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)  # boş = sistem
-    due_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    due_on: Mapped[Optional[date]] = mapped_column(Date, index=True, nullable=True)  # 0013: yalnız tarix (Bakı)
     status: Mapped[str] = mapped_column(_enum("task_status", *TASK_STATUSES), default="open")
     priority: Mapped[str] = mapped_column(_enum("task_priority", *TASK_PRIORITIES), default="normal")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -545,18 +557,23 @@ class LetterApproval(Base):
 
 
 class ClientContract(Base):
-    """Alətlər → Şirkət əlavə et: müştəri şirkət və müqavilənin bitmə tarixi."""
+    """Şirkətlə əməkdaşlıq razılaşması (müqavilə). Bir şirkətin bir neçə razılaşması ola bilər;
+    `note` — təsvir, `contract_end` boşdursa müddətsizdir."""
 
     __tablename__ = "client_contracts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     company_name: Mapped[str] = mapped_column(Text)
-    organization_id: Mapped[Optional[int]] = mapped_column(ForeignKey("organizations.id"), nullable=True)
-    contract_end: Mapped[datetime] = mapped_column(Date, index=True)
+    organization_id: Mapped[Optional[int]] = mapped_column(ForeignKey("organizations.id"), index=True, nullable=True)
+    title: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="active", server_default="active")  # AGREEMENT_STATUSES
+    starts_on: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    contract_end: Mapped[Optional[date]] = mapped_column(Date, index=True, nullable=True)
     contact: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
 class EmployeeSearch(Base):

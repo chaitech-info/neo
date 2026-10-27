@@ -192,3 +192,21 @@ def contacts_for(session: Session, lead_key: str | None, organization_id: int | 
         return []
     rows = session.execute(select(Contact).where(or_(*scope)).order_by(Contact.id)).scalars().all()
     return sorted(rows, key=lambda c: (c.name is None, c.email is None))
+
+
+def opportunity_emails(lead: LeadRecord | None, org, contacts: list[Contact]) -> list[dict]:
+    """Fürsətin bütün email ünvanları (təkrarsız): kontaktlar (adı olanlar əvvəl), təşkilatın və
+    lead-in emaili. Yalnız düzgün formatlı ünvanlar — boş/yanlış dəyər göstərilmir.
+    Hər biri: {email, name, title, contact_id, origin}."""
+    out: dict[str, dict] = {}
+
+    def add(email: str | None, **info) -> None:
+        email = (email or "").strip().lower()
+        if email and len(email) <= 254 and EMAIL_RE.fullmatch(email) and not _JUNK_EMAIL.search(email):
+            out.setdefault(email, {"email": email, "name": None, "title": None, "contact_id": None, **info})
+
+    for c in contacts:
+        add(c.email, name=c.name, title=c.title, contact_id=c.id, origin="contact")
+    add(getattr(org, "email", None), origin="organization")
+    add(lead.contact_email if lead is not None else None, origin="lead")
+    return list(out.values())

@@ -48,6 +48,7 @@
       <h4>Alətlər</h4>
       <a href="/tools/offers" class="{{ 'active' if active == 'offers' else '' }}">Qiymət təklifi</a>
       <a href="/tools/company" class="{{ 'active' if active == 'company' else '' }}">Şirkət analizi</a>
+      <a href="/companies" class="{{ 'active' if active == 'company_db' else '' }}">Şirkət bazası</a>
       <a href="/tools/employees" class="{{ 'active' if active == 'employees' else '' }}">Şirkətin işçiləri</a>
       <a href="/tools/contracts" class="{{ 'active' if active == 'contracts' else '' }}">Şirkət əlavə et</a>
       {% if has_role(current, 'admin') %}<a href="/tools/packages" class="{{ 'active' if active == 'packages' else '' }}">Paketlər</a>{% endif %}

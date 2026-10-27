@@ -1018,3 +1018,40 @@ th.num, td.num { text-align: right; white-space: nowrap; font-variant-numeric: t
 .cf-set legend { font-size: 13px; color: var(--tx2); padding: 0; margin-bottom: 4px; }
 .ct-ok { color: var(--go); }
 .mc-title small { font-size: 15px; font-weight: 500; color: var(--tx2); margin-left: 6px; }
+
+/* --- Fürsətin email ünvanları ------------------------------------------------------ */
+.od-emails { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 10px 0 0; font-size: 14px; }
+.od-emails-l { color: var(--tx3); }
+.od-email { display: inline-flex; align-items: center; gap: 2px; }
+.od-email a { color: var(--run); text-decoration: none; overflow-wrap: anywhere; }
+.od-email a:hover { text-decoration: underline; }
+.od-copy { border: 0; background: none; color: var(--tx2); cursor: pointer; font-size: 13px; min-width: 28px; min-height: 28px; border-radius: 6px; }
+.od-copy:hover { background: var(--s2); color: var(--tx); }
+.op-main small.op-email { color: var(--tx3); overflow-wrap: anywhere; }
+
+/* --- Şirkət bazası və əməkdaşlıq razılaşmaları --------------------------------------- */
+.ag { display: inline-flex; align-items: center; font: 600 11.5px/1 var(--font); padding: 4px 9px; border-radius: 100px; vertical-align: middle; white-space: nowrap; background: var(--s2); color: var(--tx2); }
+.ag-active { background: var(--go-w); color: var(--go); }
+.ag-draft { background: var(--warn-w); color: var(--warn); }
+.ag-expired, .ag-terminated { background: var(--err-w); color: var(--err); }
+.ag-set { border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px 14px; margin: 10px 0 8px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ag-set legend { font-size: 13.5px; font-weight: 500; color: var(--tx); padding: 0 4px; }
+.ag-set legend small { font-weight: 400; color: var(--tx2); }
+[data-agreement-add] { align-self: flex-start; }
+.cd-list .tk-main b a.cd-name, a.cd-name { color: var(--tx); text-decoration: none; font-size: inherit; margin: 0; }
+a.cd-name:hover { text-decoration: underline; }
+.cd-meta { display: flex; flex-wrap: wrap; gap: 2px 12px; margin-top: 4px; font-size: 13px; color: var(--tx2); }
+.cd-sec { margin: 26px 0 10px; font-size: 17px; font-weight: 600; }
+.cd-reanalyse { margin: 12px 0 0; }
+.cd-note { display: block; margin-top: 4px; font-size: 13px; color: var(--tx3); overflow-wrap: anywhere; }
+.nt-status.is-dirty { color: var(--warn); }
+
+/* Gözləmə: skelet sətirlər (analiz, işçilər) — statik, animasiyasız. */
+.skel { display: grid; gap: 10px; }
+.skel i { display: block; height: 13px; border-radius: 6px; background: var(--s2); }
+.skel i:nth-child(3n+2) { width: 82%; }
+.skel i:nth-child(3n) { width: 64%; }
+.skel-card { background: var(--s1); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; margin-top: 16px; }
+.skel-card b { display: block; margin-bottom: 14px; font: 600 14px var(--font); color: var(--tx2); }
+.skel-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }
+@media (max-width: 860px) { .skel-grid { grid-template-columns: 1fr; } }
