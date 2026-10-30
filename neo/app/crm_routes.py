@@ -570,10 +570,10 @@ def tasks_page(request: Request, who: str = "me", status: str = "open", me: User
             q = q.where(Task.status.in_(("open", "in_progress")))
         elif status in crm.TASK_STATUS_NAMES:
             q = q.where(Task.status == status)
-        # Son tarixi olanlar əvvəl (ən təcili yuxarıda), sonra tarixsizlər.
-        rows = db.execute(q.order_by(Task.due_on.is_(None), Task.due_on, Task.id)).all()
+        # Tapşırıqlarda vaxt göstərilmir: vacib olanlar əvvəl, sonra yaranma ardıcıllığı ilə.
+        rows = db.execute(q.order_by((Task.priority == "high").desc(), Task.created_at, Task.id)).all()
     return _render(request, "tasks.html", {
-        "active": "tasks", "rows": rows, "who": who, "status": status, "today": crm.today(),
+        "active": "tasks", "rows": rows, "who": who, "status": status,
         "task_status_names": crm.TASK_STATUS_NAMES, "priority_names": crm.PRIORITY_NAMES,
     })
 

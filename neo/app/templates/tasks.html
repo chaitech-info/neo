@@ -7,16 +7,12 @@
 
   {% macro task_row(t, opp, org, assignee) %}
     {% set is_open = t.status in ('open', 'in_progress') %}
-    {% set late = t.due_on and t.due_on < today and is_open %}
-    <li class="tk {{ 'is-late' if late else '' }} {{ 'is-done' if not is_open else '' }}">
+    <li class="tk {{ 'is-done' if not is_open else '' }}">
       <div class="tk-main">
         <b>{{ t.title }}{% if t.priority == 'high' %} <span class="tk-hi">Vacib</span>{% endif %}</b>
         <a href="/opportunities/{{ opp.id }}">{{ (org.name if org else opp.title)[:80] }}</a>
       </div>
       <div class="tk-side">
-        <span class="tk-when {{ 'late' if late else '' }}">
-          {% if t.due_on %}{% if late %}Vaxtı keçib · {% endif %}{{ t.due_on|day }}{% else %}Tarixsiz{% endif %}
-        </span>
         {% if who != 'me' %}<span class="tk-who">{{ assignee.full_name if assignee else 'Məsul təyin edilməyib' }}</span>{% endif %}
       </div>
       <div class="tk-act">
@@ -50,19 +46,6 @@
 
   {% if not rows %}
     <div class="empty"><b>{{ 'Açıq tapşırıq yoxdur' if status == 'open' else 'Bitmiş tapşırıq yoxdur' }}</b>{% if status == 'open' %}Hər şey görülüb. Yeni tapşırıq fürsət yaradanda və ya fürsət səhifəsindən əlavə olunur.{% endif %}</div>
-  {% elif status == 'open' %}
-    {% set groups = [
-      ('late', 'Vaxtı keçib', rows|selectattr('0.due_on')|selectattr('0.due_on', 'lt', today)|list),
-      ('today', 'Bu gün', rows|selectattr('0.due_on')|selectattr('0.due_on', 'eq', today)|list),
-      ('later', 'Sonra', rows|selectattr('0.due_on')|selectattr('0.due_on', 'gt', today)|list),
-      ('none', 'Tarixsiz', rows|rejectattr('0.due_on')|list),
-    ] %}
-    {% for key, title, items in groups if items %}
-    <section class="tk-grp g-{{ key }}">
-      <h2><i></i>{{ title }} <em>{{ items|length }}</em></h2>
-      <ul class="tk-list">{% for t, opp, org, assignee in items %}{{ task_row(t, opp, org, assignee) }}{% endfor %}</ul>
-    </section>
-    {% endfor %}
   {% else %}
     <ul class="tk-list">{% for t, opp, org, assignee in rows %}{{ task_row(t, opp, org, assignee) }}{% endfor %}</ul>
   {% endif %}

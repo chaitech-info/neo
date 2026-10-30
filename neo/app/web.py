@@ -143,7 +143,7 @@ def lead_kind(source: str) -> str:
 
 
 def nav_counts(user: User | None) -> dict[str, int]:
-    """Sol menyudakı sayğaclar: validasiyada gözləyən, mənim açıq/gecikən tapşırıqlarım,
+    """Sol menyudakı sayğaclar: validasiyada gözləyən, mənim açıq tapşırıqlarım,
     oxunmamış bildirişlər (vaxtı çatan xatırlatmalar burada bildirişə çevrilir), təsdiq gözləyən məktublar."""
     from sqlalchemy import func, select
 
@@ -158,7 +158,6 @@ def nav_counts(user: User | None) -> dict[str, int]:
             mine = select(func.count()).select_from(Task).where(
                 Task.assignee_id == user.id, Task.status.in_(("open", "in_progress")))
             open_tasks = db.scalar(mine)
-            late = db.scalar(mine.where(Task.due_on < crm.today()))
             notify.fire_due(db, user.id)
             unread = notify.unread_count(db, user.id)
             approvals = db.scalar(select(func.count()).select_from(LetterApproval).where(
@@ -166,7 +165,7 @@ def nav_counts(user: User | None) -> dict[str, int]:
     except Exception:
         log.warning("nav_counts_failed", exc_info=True)
         return {}
-    return {"pending": pending or 0, "tasks": open_tasks or 0, "late": late or 0, "unread": unread or 0,
+    return {"pending": pending or 0, "tasks": open_tasks or 0, "unread": unread or 0,
             "approvals": approvals or 0}
 
 
@@ -236,7 +235,6 @@ def _day(value) -> str:
 templates.env.filters["baku_time"] = _baku_time
 templates.env.filters["day"] = _day
 templates.env.globals["utcnow"] = datetime.utcnow  # son tarixin keçib-keçmədiyi üçün
-templates.env.globals["baku_today"] = crm.today  # tapşırığın tarixi keçibmi (Bakı günü ilə)
 
 
 @app.on_event("startup")

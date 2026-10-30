@@ -31,14 +31,12 @@
     <ul class="tk-list">
       {% for t in tasks %}
       {% set is_open = t.status in ('open', 'in_progress') %}
-      {% set late = t.due_on and t.due_on < baku_today() and is_open %}
-      <li class="tk {{ 'is-late' if late else '' }} {{ 'is-done' if not is_open else '' }}">
+      <li class="tk {{ 'is-done' if not is_open else '' }}">
         <div class="tk-main">
           <b>{{ t.title }}{% if t.priority == 'high' %} <span class="tk-hi">Vacib</span>{% endif %}</b>
           {% if t.description %}<details class="od-more"><summary>Ətraflı</summary>{{ t.description }}</details>{% endif %}
         </div>
         <div class="tk-side">
-          <span class="tk-when {{ 'late' if late else '' }}">{% if t.due_on %}{% if late %}Vaxtı keçib · {% endif %}{{ t.due_on|day }}{% else %}Tarixsiz{% endif %}</span>
           <span class="tk-who">{{ users[t.assignee_id].full_name if t.assignee_id in users else 'Məsul təyin edilməyib' }}</span>
         </div>
         <div class="tk-act">
@@ -71,7 +69,6 @@
         {{ csrf_field(request) }}
         <label class="kw-f">Nə etmək lazımdır?<input name="title" required maxlength="300" placeholder="məs. Təklifi göndər"></label>
         <div class="kw-row">
-          <label class="kw-f">Son tarix<input type="date" name="due_on"></label>
           <label class="kw-f">Məsul
             <select name="assignee_id">{% for u in user_list %}<option value="{{ u.id }}" {% if u.id == me.id %}selected{% endif %}>{{ u.full_name }}</option>{% endfor %}</select>
           </label>

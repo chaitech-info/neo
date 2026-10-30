@@ -271,4 +271,4 @@ def set_task_status(session: Session, task: Task, status: str) -> None:
 
 
 def opp_tasks(session: Session, opp_id: int) -> list[Task]:
-    return list(session.scalars(select(Task).where(Task.opportunity_id == opp_id).order_by(Task.due_on)))
+    return list(session.scalars(select(Task).where(Task.opportunity_id == opp_id).order_by(Task.created_at, Task.id)))

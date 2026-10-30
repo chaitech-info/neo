@@ -41,7 +41,7 @@
       <h4>Satış</h4>
       <a href="/leads/pending_review" class="{{ 'active' if active == 'validation' else '' }}">Validasiya{% if navc.pending %}<span class="count hot">{{ navc.pending }}</span>{% endif %}</a>
       <a href="/opportunities" class="{{ 'active' if active == 'opportunities' else '' }}">Fürsətlər</a>
-      <a href="/tasks" class="{{ 'active' if active == 'tasks' else '' }}">CRM{% if navc.late %}<span class="count late" title="{{ navc.late }} tapşırığın vaxtı keçib">{{ navc.tasks }}</span>{% elif navc.tasks %}<span class="count">{{ navc.tasks }}</span>{% endif %}</a>
+      <a href="/tasks" class="{{ 'active' if active == 'tasks' else '' }}">CRM{% if navc.tasks %}<span class="count">{{ navc.tasks }}</span>{% endif %}</a>
     </div>
     {% if has_role(current, 'sales') %}
     <div class="nav-group">
