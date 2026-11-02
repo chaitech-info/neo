@@ -11,7 +11,7 @@ from app.auth import security
 from app.auth.security import REQUIRE, verify_csrf
 from app.crm_routes import _go, _render
 from app.db.models import Contact, Opportunity, User
-from app.leaders import LeadersError, enabled
+from app.leaders import enabled
 
 router = APIRouter()
 
@@ -33,28 +33,15 @@ def _page(request: Request, *, company: str, opp_id: str, search=None, from_cach
 
 
 @router.get("/tools/employees")
-def employees_page(request: Request, company: str = "", opp: str = "", me: User = Depends(REQUIRE["sales"])):
+def employees_page(request: Request, company: str = "", opp: str = "", new: str = "",
+                   me: User = Depends(REQUIRE["sales"])):
+    """Axtarışın özü JS ilə gedir (/tools/company/employees + /poll); bu səhifə saxlanmış nəticəni göstərir."""
     company = company.strip()[:200]
     search = None
     if company:
         with security.SessionLocal() as db:
             search = employees.cached(db, company)  # əvvəlki (pulsuz) nəticə dərhal göstərilir
-    return _page(request, company=company, opp_id=opp, search=search, from_cache=search is not None)
-
-
-@router.post("/tools/employees", dependencies=[Depends(verify_csrf)])
-def employees_search(request: Request, company: str = Form(""), limit: int = Form(employees.DEFAULT_MAX),
-                     force: str = Form(""), opp: str = Form(""), me: User = Depends(REQUIRE["sales"])):
-    company = " ".join(company.split())[:200]
-    if len(company) < 2:
-        return _page(request, company=company, opp_id=opp, page_error="Şirkətin adını yaz")
-    with security.SessionLocal() as db:
-        try:
-            search, from_cache = employees.find(db, company, limit, force=force == "1", user_id=me.id)
-        except LeadersError as exc:
-            return _page(request, company=company, opp_id=opp, limit=limit, page_error=str(exc),
-                         search=employees.cached(db, company))
-    return _page(request, company=company, opp_id=opp, search=search, from_cache=from_cache, limit=limit)
+    return _page(request, company=company, opp_id=opp, search=search, from_cache=search is not None and new != "1")
 
 
 @router.post("/tools/employees/contact", dependencies=[Depends(verify_csrf)])

@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
-from app import companies, company_analysis, crm, employees, web
+from app import companies, company_analysis, crm, employees, leaders, web
 from app.auth import security
 from app.auth.users import create_user
 from app.db.migrate import upgrade_to_head
@@ -240,14 +240,27 @@ def test_notes_from_add_company_form_are_appended(factory):
 # --- Analizdə işçilər ----------------------------------------------------------------------
 
 
-def _apify(items, calls):
+def _apify(items, calls, pending=0):
+    """Apify asinxron API: POST .../runs → run id; GET /actor-runs/{id} → status; GET /datasets/{id}/items."""
+    state = {"polls": 0}
+
     def handler(request: httpx.Request):
         calls.append(request)
-        return httpx.Response(200, json=items)
-    return httpx.Client(transport=httpx.MockTransport(handler))
+        path = request.url.path
+        if path.endswith("/runs") and request.method == "POST":
+            return httpx.Response(201, json={"data": {"id": "empRun12345"}})
+        if "/actor-runs/" in path:
+            state["polls"] += 1
+            status = "RUNNING" if state["polls"] <= pending else "SUCCEEDED"
+            return httpx.Response(200, json={"data": {"status": status, "defaultDatasetId": "ds1"}})
+        if "/datasets/" in path:
+            return httpx.Response(200, json=items)
+        return httpx.Response(404)
+    return lambda: httpx.Client(transport=httpx.MockTransport(handler))
 
 
-def test_employees_endpoint_returns_only_verified_profiles(factory, monkeypatch):
+def test_employees_search_starts_run_and_polls(factory, monkeypatch):
+    """Axtarış Apify run-ı başladıb dərhal qayıdır (Vercel 60 san), nəticə /poll ilə gəlir."""
     monkeypatch.setenv("APIFY_TOKEN", "t")
     calls = []
     items = [
@@ -256,16 +269,35 @@ def test_employees_endpoint_returns_only_verified_profiles(factory, monkeypatch)
         {"fullName": "Adsız profil yoxdur"},  # LinkedIn linki yoxdur — göstərilmir
         {"headline": "HR", "linkedinUrl": "https://www.linkedin.com/in/noname"},  # adı yoxdur — göstərilmir
     ]
-    monkeypatch.setattr(employees, "_http", lambda: _apify(items, calls))
+    monkeypatch.setattr(leaders, "_http", _apify(items, calls, pending=1))
     client = TestClient(web.app)
-    r = client.post("/tools/company/employees", data={"company": "Sahil MMC"})
-    assert r.status_code == 200
-    data = r.json()
-    assert [p["name"] for p in data["items"]] == ["Rauf Əliyev"] and data["items"][0]["title"] == "Baş direktor"
-    assert data["from_cache"] is False
+    start = client.post("/tools/company/employees", data={"company": "Sahil MMC", "limit": "50"}).json()
+    assert start == {"run": "empRun12345"}
+    assert json.loads(calls[0].content) == {"companies": ["Sahil MMC"], "maxItems": 50}
 
+    poll = {"company": "Sahil MMC", "run": start["run"]}
+    assert client.post("/tools/company/employees/poll", data=poll).json() == {"pending": True}
+    data = client.post("/tools/company/employees/poll", data=poll).json()
+    assert [p["name"] for p in data["items"]] == ["Rauf Əliyev"] and data["items"][0]["title"] == "Baş direktor"
+    assert data["items"][0]["location"] == "Baku, Azerbaijan" and data["from_cache"] is False
+
+    n = len(calls)
     again = client.post("/tools/company/employees", data={"company": "Sahil MMC"}).json()
-    assert again["from_cache"] is True and len(calls) == 1  # keşdən, yenidən ödənilmir
+    assert again["from_cache"] is True and len(calls) == n  # keşdən, yenidən ödənilmir
+    assert "run" in client.post("/tools/company/employees", data={"company": "Sahil MMC", "force": "1"}).json()
+
+    page = client.get("/tools/employees", params={"company": "Sahil MMC", "new": "1"}).text
+    assert "Rauf Əliyev" in page and "Yeni axtarış" in page
+
+
+def test_employees_failed_run_is_a_clear_error(factory, monkeypatch):
+    monkeypatch.setenv("APIFY_TOKEN", "t")
+    monkeypatch.setattr(leaders, "_http", lambda: httpx.Client(transport=httpx.MockTransport(
+        lambda r: httpx.Response(200, json={"data": {"status": "TIMED-OUT"}}))))
+    r = TestClient(web.app).post("/tools/company/employees/poll", data={"company": "Sahil MMC", "run": "empRun12345"})
+    assert r.status_code == 502 and "TIMED-OUT" in r.json()["error"]
+    r = TestClient(web.app).post("/tools/company/employees/poll", data={"company": "Sahil MMC", "run": "../x"})
+    assert r.status_code == 502
 
 
 def test_employees_endpoint_without_token_is_a_clear_error(factory, monkeypatch):

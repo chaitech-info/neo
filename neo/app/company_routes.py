@@ -53,15 +53,43 @@ def company_analyse(request: Request, name: str = Form(""), website: str = Form(
                      staff=employees.items_of(staff), staff_at=staff.created_at if staff else None)
 
 
+def _employees_json(row, from_cache: bool) -> dict:
+    return {"items": employees.items_of(row), "from_cache": from_cache,
+            "searched_at": (row.created_at + BAKU_OFFSET).strftime("%d.%m.%Y %H:%M")}
+
+
+def _company_name(company: str) -> str:
+    return " ".join(company.split())[:200]
+
+
 @router.post("/tools/company/employees", dependencies=[Depends(verify_csrf)])
-def company_employees(company: str = Form(""), force: str = Form(""), me: User = Depends(REQUIRE["sales"])):
-    """JSON: şirkətin LinkedIn işçiləri (keşdə varsa Apify-a getmir; force=1 — yenidən axtar)."""
-    company = " ".join(company.split())[:200]
+def company_employees(company: str = Form(""), force: str = Form(""), limit: int = Form(employees.DEFAULT_MAX),
+                      me: User = Depends(REQUIRE["sales"])):
+    """JSON: keşdə təzə nəticə varsa dərhal {items}; yoxdursa (və ya force=1) Apify run başladılır → {run}.
+    Run Vercel-in 60 saniyəsindən uzun çəkə bilər — nəticəni panel /poll ilə götürür."""
+    company = _company_name(company)
+    if len(company) < 2:
+        return JSONResponse({"error": "Şirkətin adı yoxdur"}, status_code=400)
+    with security.SessionLocal() as db:
+        row = None if force == "1" else employees.fresh(db, company)
+        if row is not None:
+            return _employees_json(row, True)
+    try:
+        return {"run": employees.start(company, limit)}
+    except LeadersError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+@router.post("/tools/company/employees/poll", dependencies=[Depends(verify_csrf)])
+def company_employees_poll(company: str = Form(""), run: str = Form(""), limit: int = Form(employees.DEFAULT_MAX),
+                           me: User = Depends(REQUIRE["sales"])):
+    """JSON: {pending} — hələ işləyir; {items} — bitdi və saxlanıldı."""
+    company = _company_name(company)
     if len(company) < 2:
         return JSONResponse({"error": "Şirkətin adı yoxdur"}, status_code=400)
     with security.SessionLocal() as db:
         try:
-            row, from_cache = employees.find(db, company, force=force == "1", user_id=me.id)
+            row = employees.poll(db, run, company, limit, user_id=me.id)
         except LeadersError as exc:
             return JSONResponse({"error": str(exc)}, status_code=502)
-        return {"items": employees.items_of(row), "from_cache": from_cache, "searched_at": (row.created_at + BAKU_OFFSET).strftime("%d.%m.%Y %H:%M")}
+        return {"pending": True} if row is None else _employees_json(row, False)

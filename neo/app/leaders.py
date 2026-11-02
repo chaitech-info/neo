@@ -23,7 +23,6 @@ from app.db.models import LeadRecord, Opportunity, Organization
 log = structlog.get_logger()
 
 DEFAULT_ACTOR = "harvestapi~linkedin-company-employees"
-APIFY_TIMEOUT_S = 45
 DEFAULT_MAX = 8
 
 # Rəhbər / qərar verən vəzifələr (az/ru/en) — catering satışında kimə yazmaq lazımdır.

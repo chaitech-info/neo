@@ -68,7 +68,7 @@
 {% endmacro %}
 
 {# İşçilər (LinkedIn, app/employees.py): yalnız LinkedIn profili olan real nəticələr göstərilir, AI ad uydurmur.
-   Keşdə varsa dərhal, yoxdursa düymə ilə JS axtarır (analiz + Apify bir sorğuda Vercel-in 60 saniyəsinə sığmır). #}
+   Keşdə varsa dərhal, yoxdursa düymə ilə JS Apify run-ı başladır və /poll ilə nəticəni gözləyir (Vercel 60 san). #}
 {% macro employees_section(request, company, items, searched_at, ready, can_search=true) %}
   <section class="od-card" id="employees" data-emp-box>
     <h2>İşçilər <em data-emp-count>{{ items|length if searched_at else '' }}</em></h2>
@@ -100,16 +100,30 @@
       var box = document.querySelector('[data-emp-box]'), list = box.querySelector('[data-emp-list]'),
           st = box.querySelector('[data-emp-status]'), cnt = box.querySelector('[data-emp-count]'), b = f.querySelector('button');
       function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; }
+      var POLL_MS = 4000, MAX_POLLS = 90;  // Apify run-ı başladılır, nəticə /poll ilə gəlir (Vercel 60 san)
+      function post(url, fields) {
+        var data = new FormData(f);
+        Object.keys(fields || {}).forEach(function (k) { data.set(k, fields[k]); });
+        return fetch(url, { method: 'POST', body: data, credentials: 'same-origin' })
+          .then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error(d.error || 'Axtarış alınmadı'); return d; }); });
+      }
+      function wait(d, run, polls) {
+        if (d.items) return d;
+        if (polls >= MAX_POLLS) throw new Error('Axtarış çox uzun çəkdi — bir az sonra yenidən cəhd et');
+        run = d.run || run;
+        return new Promise(function (ok) { setTimeout(ok, POLL_MS); })
+          .then(function () { return post(f.action + '/poll', { run: run }); })
+          .then(function (next) { return wait(next, run, polls + 1); });
+      }
       f.addEventListener('submit', function (e) {
         e.preventDefault();
         var before = list.innerHTML;
-        b.disabled = true; st.textContent = 'LinkedIn-də axtarılır… (~30 san.)';
+        b.disabled = true; st.textContent = 'LinkedIn-də axtarılır… (1–3 dəq.)';
         list.innerHTML = '<li class="ct" aria-hidden="true"><div class="skel" style="flex:1"><i></i><i></i><i></i></div></li>';
-        fetch(f.action, { method: 'POST', body: new FormData(f), credentials: 'same-origin' })
-          .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
-          .then(function (res) {
-            if (!res.ok) throw new Error(res.d.error || 'Axtarış alınmadı');
-            var items = res.d.items || [];
+        post(f.action)
+          .then(function (d) { return wait(d, null, 0); })
+          .then(function (d) {
+            var items = d.items || [];
             list.innerHTML = '';
             items.forEach(function (p) {
               var li = el('li', 'ct'), m = el('div', 'ct-main');
@@ -121,7 +135,7 @@
               w.appendChild(a); m.appendChild(w); li.appendChild(m); list.appendChild(li);
             });
             cnt.textContent = items.length;
-            st.textContent = 'LinkedIn axtarışı · ' + res.d.searched_at + (res.d.from_cache ? ' (saxlanmış nəticə)' : '')
+            st.textContent = 'LinkedIn axtarışı · ' + d.searched_at + (d.from_cache ? ' (saxlanmış nəticə)' : '')
               + (items.length ? '' : ' — LinkedIn-də bu şirkətin işçisi tapılmadı.');
             f.querySelector('[name=force]').value = '1'; b.textContent = 'Yenidən axtar';
           })
