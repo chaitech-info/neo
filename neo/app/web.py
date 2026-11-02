@@ -677,7 +677,9 @@ def _with(url: str, **params: str) -> str:
 
 @app.post("/leads/{dedupe_key}/restore", dependencies=[Depends(verify_csrf)])
 def restore_lead_route(dedupe_key: str, next: str = Form("/leads/rejected"), user: User = Depends(REQUIRE["sales"])):
-    back = _back(next)
+    # Eyni tab/süzgəcə qayıt ("Geri al" ?tier=C-dən basılıbsa ora); köhnə msg/undo atılır.
+    back = _clean_back(next) if next.split("?", 1)[0] in ("/leads/pending_review", "/leads/rejected", "/leads") \
+        and "//" not in next else "/leads/rejected"
     if not dedupe_key or len(dedupe_key) != 64:
         return RedirectResponse(url=_with(back, err="Yanlış lead ID"), status_code=303)
 

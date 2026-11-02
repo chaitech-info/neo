@@ -98,7 +98,7 @@
         <div class="flash" role="status">{{ request.query_params.get('msg') }}{% if opp_link and opp_link.isdigit() %} · <a href="/opportunities/{{ opp_link }}">Fürsəti aç</a>{% endif %}
           {% if undo|length == 64 and undo.isalnum() and current and has_role(current, 'sales') %}
           <form class="flash-undo" style="display:inline;margin-left:.5rem" method="post" action="/leads/{{ undo }}/restore">
-            {{ csrf_field(request) }}<input type="hidden" name="next" value="/leads/pending_review">
+            {{ csrf_field(request) }}<input type="hidden" name="next" value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}">
             <button class="btn btn-sm" type="submit">Geri al</button>
           </form>
           {% endif %}

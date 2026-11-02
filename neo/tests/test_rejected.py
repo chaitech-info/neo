@@ -139,3 +139,13 @@ def test_form_carries_current_tab_into_reject(factory):
     _lead(factory, "https://tab3.az")
     page = TestClient(web.app).get("/leads/pending_review?tier=none").text
     assert 'name="next" value="/leads/pending_review?tier=none"' in page
+
+
+def test_undo_returns_to_same_tab(factory):
+    key = _lead(factory, "https://undo-tab.az")
+    client = TestClient(web.app)
+    page = client.post(f"/leads/{key}/reject", data={"next": "/leads/pending_review?tier=C"}).text
+    assert 'name="next" value="/leads/pending_review?tier=C&amp;msg=' in page  # "Geri al" formu cari ünvanı daşıyır
+    r = client.post(f"/leads/{key}/restore", follow_redirects=False,
+                    data={"next": f"/leads/pending_review?tier=C&msg=x&undo={key}"})
+    assert r.headers["location"].startswith("/leads/pending_review?tier=C&msg=") and "undo=" not in r.headers["location"]

@@ -223,16 +223,47 @@ def test_company_analysis_without_openai_is_a_clear_error(factory):
 # --- 4: Rəhbərlərin LinkedIn profilləri ------------------------------------------------
 
 
-def _apify(items, calls):
-    def handler(request: httpx.Request):
-        calls.append(request)
-        return httpx.Response(200, json=items)
-    return httpx.Client(transport=httpx.MockTransport(handler))
+class FakeApify:
+    """Apify asinxron API: POST /acts/.../runs → run id; GET /actor-runs/{id} → status; GET /datasets/{id}/items."""
+
+    def __init__(self, results, pending=0):
+        self.results, self.pending, self.started, self.polls = list(results), pending, [], 0
+
+    def handler(self, request: httpx.Request):
+        path = request.url.path
+        if path.endswith("/runs") and request.method == "POST":
+            self.started.append(json.loads(request.content)["companies"][0])
+            return httpx.Response(201, json={"data": {"id": f"run{len(self.started)}abcdEF"}})
+        if "/actor-runs/" in path:
+            self.polls += 1
+            if self.polls <= self.pending:
+                return httpx.Response(200, json={"data": {"status": "RUNNING"}})
+            n = path.rsplit("/", 1)[1][3:4]
+            return httpx.Response(200, json={"data": {"status": "SUCCEEDED", "defaultDatasetId": f"ds{n}"}})
+        if "/datasets/" in path:
+            n = int(path.split("/datasets/ds")[1].split("/")[0])
+            return httpx.Response(200, json=self.results[n - 1])
+        return httpx.Response(404)
+
+    def install(self, monkeypatch):
+        # Hər çağırış öz client-ini açıb bağlayır (leaders._call) — testdə də hər dəfə yenisi.
+        monkeypatch.setattr(leaders, "_http", lambda: httpx.Client(transport=httpx.MockTransport(self.handler)))
+
+
+def _poll_until_done(client, opp_id, first):
+    d = first
+    for _ in range(10):
+        if "run" not in d and "pending" not in d:
+            return d
+        if "run" in d:
+            run, variant = d["run"], d["variant"]
+        d = client.post(f"/opportunities/{opp_id}/leaders/poll", data={"run": run, "variant": variant}).json()
+    raise AssertionError(d)
 
 
 def test_leaders_saved_as_contacts_once(factory, opp_id, monkeypatch):
+    """Axtarış başladılır və dərhal qayıdır (Vercel 60 san), nəticə /poll ilə gəlir (E2E 2026-11-02: TIMED-OUT)."""
     monkeypatch.setenv("APIFY_TOKEN", "t")
-    calls = []
     items = [
         {"firstName": "Rauf", "lastName": "Əliyev", "headline": "Baş direktor — Sahil MMC",
          "linkedinUrl": "https://www.linkedin.com/in/rauf"},
@@ -240,19 +271,35 @@ def test_leaders_saved_as_contacts_once(factory, opp_id, monkeypatch):
         {"fullName": "Kamran", "headline": "Sürücü", "linkedinUrl": "https://www.linkedin.com/in/kamran"},  # rəhbər deyil
         {"fullName": "Rauf dublikat", "headline": "CEO", "linkedinUrl": "https://www.linkedin.com/in/rauf/"},
     ]
-    client = _apify(items, calls)
-    monkeypatch.setattr(leaders, "_http", lambda: client)
+    apify = FakeApify([items], pending=2)
+    apify.install(monkeypatch)
+    client = TestClient(web.app)
 
-    r = TestClient(web.app).post(f"/opportunities/{opp_id}/leaders")
-    assert r.status_code == 200 and r.json() == {"added": 2}
-    assert json.loads(calls[0].content)["companies"] == ["Sahil"]  # "MMC" atılır (search_names)
+    start = client.post(f"/opportunities/{opp_id}/leaders").json()
+    assert start == {"run": "run1abcdEF", "variant": 0, "company": "Sahil"}  # "MMC" atılır (search_names)
+    pending = client.post(f"/opportunities/{opp_id}/leaders/poll", data={"run": start["run"], "variant": 0}).json()
+    assert pending == {"pending": True}
+    assert _poll_until_done(client, opp_id, start) == {"added": 2}
     with factory() as s:
         rows = s.scalars(select(Contact).where(Contact.source == "enrichment")).all()
         assert {c.name for c in rows} == {"Rauf Əliyev", "Aysel Q."}
         assert s.get(Opportunity, opp_id).leaders_fetched_at is not None
 
-    again = TestClient(web.app).post(f"/opportunities/{opp_id}/leaders")  # avtomatik ikinci dəfə — Apify-a getmir
-    assert again.json()["skipped"] is True and len(calls) == 1
+    again = client.post(f"/opportunities/{opp_id}/leaders")  # avtomatik ikinci dəfə — Apify-a getmir
+    assert again.json()["skipped"] is True and apify.started == ["Sahil"]
+
+
+def test_leaders_poll_rejects_bad_run_id_and_reports_failed_run(factory, opp_id, monkeypatch):
+    monkeypatch.setenv("APIFY_TOKEN", "t")
+    client = TestClient(web.app)
+    bad = client.post(f"/opportunities/{opp_id}/leaders/poll", data={"run": "../../x", "variant": 0})
+    assert bad.status_code == 502 and "id" in bad.json()["error"]
+
+    def failed(request):
+        return httpx.Response(200, json={"data": {"status": "TIMED-OUT"}})
+    monkeypatch.setattr(leaders, "_http", lambda: httpx.Client(transport=httpx.MockTransport(failed)))
+    r = client.post(f"/opportunities/{opp_id}/leaders/poll", data={"run": "abcdEFGH12", "variant": 0})
+    assert r.status_code == 502 and "TIMED-OUT" in r.json()["error"]
 
 
 def test_leaders_skip_linkedin_author_as_company(factory, monkeypatch):
@@ -287,16 +334,10 @@ def test_leaders_fall_back_to_brand_when_full_name_finds_nobody(factory, monkeyp
     key = _lead(factory, "https://acwa.example", entity="ACWA Power")
     with factory() as s:
         opp = crm.convert_lead(s, key, user_id=1).opportunity
-    calls = []
-
-    def handler(request: httpx.Request):
-        calls.append(json.loads(request.content)["companies"][0])
-        items = [] if len(calls) == 1 else [{"fullName": "Leyla", "headline": "HR Director",
-                                             "linkedinUrl": "https://www.linkedin.com/in/leyla"}]
-        return httpx.Response(200, json=items)
-
-    # Hər axtarış öz client-ini açıb bağlayır (leaders.search) — testdə də hər dəfə yenisi.
-    monkeypatch.setattr(leaders, "_http", lambda: httpx.Client(transport=httpx.MockTransport(handler)))
-    r = TestClient(web.app).post(f"/opportunities/{opp.id}/leaders")
-    assert r.json() == {"added": 1}
-    assert calls == ["ACWA Power", "ACWA"]
+    apify = FakeApify([[], [{"fullName": "Leyla", "headline": "HR Director",
+                             "linkedinUrl": "https://www.linkedin.com/in/leyla"}]])
+    apify.install(monkeypatch)
+    client = TestClient(web.app)
+    start = client.post(f"/opportunities/{opp.id}/leaders").json()
+    assert _poll_until_done(client, opp.id, start) == {"added": 1}
+    assert apify.started == ["ACWA Power", "ACWA"]

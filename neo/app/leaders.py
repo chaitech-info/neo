@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import os
 import re
-import time
 from datetime import datetime
 
 import httpx
@@ -77,7 +76,6 @@ _TAIL_RE = re.compile(r"\s+(marketlər(?:i)? şəbəkəsi|mağazalar(?:ı)? şə
 
 _AZ_LOWER = str.maketrans({"İ": "i", "I": "ı"})  # str.lower() "İ"-ni "i̇" (nöqtəli) edir
 _SMALL_WORDS = {"və", "ve", "of", "and", "и"}
-FALLBACK_BUDGET_S = 15  # ikinci variant yalnız birinci tez qayıdıbsa (Vercel funksiyası 60 san)
 
 
 def search_names(name: str) -> list[str]:
@@ -110,43 +108,89 @@ def _item_to_found(item: dict) -> Found | None:
     return Found(name=name[:200], title=title[:200] or None, linkedin_url=url, source="enrichment")
 
 
-def search(company: str, *, client: httpx.Client | None = None, token: str | None = None) -> list[Found]:
-    token = token or os.environ.get("APIFY_TOKEN")
+# --- Apify asinxron run: başlat → yoxla (Vercel 60 san limiti; sinxron run 45 san-da TIMED-OUT olurdu) ---
+APIFY_API = "https://api.apify.com/v2"
+RUN_TIMEOUT_S = 300  # Apify tərəfində run-ın ən çox müddəti
+_RUN_ID_RE = re.compile(r"^[A-Za-z0-9]{8,32}$")
+_DONE_BAD = {"FAILED", "ABORTED", "TIMED-OUT", "TIMED_OUT"}
+
+
+def _token() -> str:
+    token = os.environ.get("APIFY_TOKEN")
     if not token:
         raise LeadersError("APIFY_TOKEN təyin edilməyib — LinkedIn profilləri axtarıla bilmir")
-    actor = os.environ.get("LEADERS_APIFY_ACTOR") or DEFAULT_ACTOR
-    limit = int(os.environ.get("LEADERS_MAX") or DEFAULT_MAX)
-    # Yalnız əsas sahələr: opsional sahələrin (profileScraperMode, locations) dəqiq dəyərləri actor-dan asılıdır —
-    # səhv dəyər bütün sorğunu 400 edir. Vəzifə süzgəci onsuz da aşağıda SENIOR_RE ilə edilir.
-    payload = {"companies": [company], "jobTitles": SEARCH_TITLES, "maxItems": limit * 3}
+    return token
+
+
+def _actor() -> str:
+    return os.environ.get("LEADERS_APIFY_ACTOR") or DEFAULT_ACTOR
+
+
+def _limit() -> int:
+    return int(os.environ.get("LEADERS_MAX") or DEFAULT_MAX)
+
+
+def _apify_error(exc: httpx.HTTPStatusError) -> LeadersError:
+    # Apify xətanı JSON-da izah edir ({"error": {"type", "message"}}) — səbəb paneldə görünsün.
+    try:
+        detail = (exc.response.json().get("error") or {}).get("message") or ""
+    except ValueError:
+        detail = ""
+    status = exc.response.status_code
+    log.warning("leaders_apify_failed", actor=_actor(), status=status, detail=detail[:300])
+    hint = {401: "APIFY_TOKEN yanlışdır", 402: "Apify balansı bitib", 403: "Apify-da bu actor-a icazə yoxdur",
+            404: f"Apify actor tapılmadı ({_actor()})"}.get(status, "")
+    return LeadersError(f"LinkedIn axtarışı alınmadı (Apify {status}" + (f": {hint}" if hint else "")
+                        + (f" — {detail[:200]}" if detail else "") + ")")
+
+
+def _call(method: str, url: str, *, client: httpx.Client | None = None, **kw) -> dict | list:
     http = client or _http()
     try:
-        resp = http.post(f"https://api.apify.com/v2/acts/{actor}/run-sync-get-dataset-items",
-                         params={"token": token, "timeout": APIFY_TIMEOUT_S}, json=payload,
-                         timeout=APIFY_TIMEOUT_S + 8)
+        resp = http.request(method, url, timeout=20, **kw)
         resp.raise_for_status()
-        items = resp.json()
-    except httpx.TimeoutException as exc:
-        raise LeadersError("LinkedIn axtarışı vaxtında bitmədi — bir az sonra yenidən cəhd et") from exc
+        return resp.json()
     except httpx.HTTPStatusError as exc:
-        # Apify xətanı JSON-da izah edir ({"error": {"type", "message"}}) — səbəb paneldə görünsün.
-        try:
-            detail = (exc.response.json().get("error") or {}).get("message") or ""
-        except ValueError:
-            detail = ""
-        status = exc.response.status_code
-        log.warning("leaders_search_failed", actor=actor, status=status, detail=detail[:300])
-        hint = {401: "APIFY_TOKEN yanlışdır", 402: "Apify balansı bitib", 403: "Apify-da bu actor-a icazə yoxdur",
-                404: f"Apify actor tapılmadı ({actor})"}.get(status, "")
-        raise LeadersError(f"LinkedIn axtarışı alınmadı (Apify {status}"
-                           + (f": {hint}" if hint else "") + (f" — {detail[:200]}" if detail else "") + ")") from exc
+        raise _apify_error(exc) from exc
     except (httpx.HTTPError, ValueError) as exc:
-        log.warning("leaders_search_failed", actor=actor, error=type(exc).__name__)
+        log.warning("leaders_apify_failed", error=type(exc).__name__)
         raise LeadersError(f"LinkedIn axtarışı alınmadı: {type(exc).__name__}") from exc
     finally:
         if client is None:
             http.close()
 
+
+def start_run(company: str, *, client: httpx.Client | None = None) -> str:
+    """Rəhbər axtarışını Apify-da başladır (gözləmir), run id qaytarır."""
+    # Yalnız əsas sahələr: opsional sahələrin (profileScraperMode, locations) dəqiq dəyərləri actor-dan asılıdır —
+    # səhv dəyər bütün sorğunu 400 edir. Vəzifə süzgəci onsuz da aşağıda SENIOR_RE ilə edilir.
+    payload = {"companies": [company], "jobTitles": SEARCH_TITLES, "maxItems": _limit() * 3}
+    data = _call("POST", f"{APIFY_API}/acts/{_actor()}/runs", client=client,
+                 params={"token": _token(), "timeout": RUN_TIMEOUT_S}, json=payload)
+    run_id = ((data or {}).get("data") or {}).get("id") if isinstance(data, dict) else None
+    if not run_id or not _RUN_ID_RE.match(run_id):
+        raise LeadersError("LinkedIn axtarışı başlamadı (Apify cavabında run id yoxdur)")
+    log.info("leaders_run_started", company=company, run=run_id)
+    return run_id
+
+
+def run_result(run_id: str, *, client: httpx.Client | None = None) -> list[Found] | None:
+    """None — hələ işləyir; siyahı — bitdi (rəhbərlər süzülüb). Uğursuz run → LeadersError."""
+    if not _RUN_ID_RE.match(run_id or ""):
+        raise LeadersError("Yanlış axtarış id-si")
+    token = _token()
+    run = (_call("GET", f"{APIFY_API}/actor-runs/{run_id}", client=client, params={"token": token}) or {}).get("data") or {}
+    status = (run.get("status") or "").upper()
+    if status in _DONE_BAD:
+        raise LeadersError(f"LinkedIn axtarışı alınmadı (Apify run: {status})")
+    if status != "SUCCEEDED":
+        return None
+    items = _call("GET", f"{APIFY_API}/datasets/{run.get('defaultDatasetId')}/items", client=client,
+                  params={"token": token, "clean": "true"})
+    return pick_leaders(items)
+
+
+def pick_leaders(items) -> list[Found]:
     found, seen = [], set()
     for item in items if isinstance(items, list) else []:
         f = _item_to_found(item) if isinstance(item, dict) else None
@@ -156,26 +200,22 @@ def search(company: str, *, client: httpx.Client | None = None, token: str | Non
             continue  # rəhbər / qərar verən deyil
         seen.add(f.linkedin_url.rstrip("/").lower())
         found.append(f)
-    log.info("leaders_found", company=company, items=len(items) if isinstance(items, list) else 0, kept=len(found))
-    return found[:limit]
+    log.info("leaders_found", items=len(items) if isinstance(items, list) else 0, kept=len(found))
+    return found[:_limit()]
 
 
-def fetch_for(session: Session, opp: Opportunity, *, client: httpx.Client | None = None) -> int:
-    """Fürsət üçün rəhbərləri tapıb kontakt kimi yazır, əlavə olunanların sayını qaytarır.
-    Uğurlu axtarışdan sonra (0 nəticə də) bir daha avtomatik çağırılmır."""
+def target(session: Session, opp: Opportunity) -> tuple[LeadRecord, list[str]]:
+    """Fürsətin lead-i və axtarış variantları (search_names)."""
     lead = session.get(LeadRecord, opp.lead_key) if opp.lead_key else None
     org = session.get(Organization, opp.organization_id) if opp.organization_id else None
     name = company_name(lead, org)
     if lead is None or not name:
         raise LeadersError("Şirkətin adı bilinmir — rəhbərləri axtarmaq üçün təşkilatı və ya kontaktı əl ilə əlavə et")
-    found: list[Found] = []
-    started = time.monotonic()
-    for i, variant in enumerate(search_names(name) or [name]):  # rəsmi ad 0 verirsə qısa variant
-        if i and time.monotonic() - started > FALLBACK_BUDGET_S:
-            break
-        found = search(variant, client=client)
-        if found:
-            break
+    return lead, search_names(name) or [name]
+
+
+def finish(session: Session, opp: Opportunity, lead: LeadRecord, found: list[Found]) -> int:
+    """Tapılanları kontakt kimi yazır; uğurlu axtarışdan sonra (0 nəticə də) bir daha avtomatik çağırılmır."""
     added = save_contacts(session, lead, found)
     opp.leaders_fetched_at = datetime.utcnow()
     session.commit()

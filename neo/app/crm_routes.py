@@ -495,7 +495,8 @@ def opportunity_linkedin_comment(opp_id: int, me: User = Depends(REQUIRE["sales"
 
 @router.post("/opportunities/{opp_id}/leaders", dependencies=[Depends(verify_csrf)])
 def opportunity_leaders(opp_id: int, force: str = Form(""), me: User = Depends(REQUIRE["sales"])):
-    """JSON: fürsət səhifəsi ilk açılanda JS özü çağırır; "Yenidən axtar" düyməsi force=1 göndərir."""
+    """JSON: axtarışı Apify-da başladır və dərhal qayıdır ({"run", "variant"}); nəticəni səhifə
+    /leaders/poll ilə yoxlayır. Fürsət ilk açılanda JS özü çağırır; "Yenidən axtar" force=1 göndərir."""
     with security.SessionLocal() as db:
         opp = db.get(Opportunity, opp_id)
         if opp is None:
@@ -503,10 +504,32 @@ def opportunity_leaders(opp_id: int, force: str = Form(""), me: User = Depends(R
         if opp.leaders_fetched_at is not None and force != "1":
             return {"added": 0, "skipped": True}
         try:
-            added = leaders.fetch_for(db, opp)
+            _lead, variants = leaders.target(db, opp)
+            return {"run": leaders.start_run(variants[0]), "variant": 0, "company": variants[0]}
         except leaders.LeadersError as exc:
             return JSONResponse({"error": str(exc)}, status_code=502)
-    return {"added": added}
+
+
+@router.post("/opportunities/{opp_id}/leaders/poll", dependencies=[Depends(verify_csrf)])
+def opportunity_leaders_poll(opp_id: int, run: str = Form(""), variant: int = Form(0),
+                             me: User = Depends(REQUIRE["sales"])):
+    """{"pending": true} — hələ işləyir; {"run", "variant"} — tapılmadı, növbəti ad variantı başladı;
+    {"added": n} — bitdi, kontaktlar yazıldı."""
+    with security.SessionLocal() as db:
+        opp = db.get(Opportunity, opp_id)
+        if opp is None:
+            return JSONResponse({"error": "Fürsət tapılmadı"}, status_code=404)
+        try:
+            lead, variants = leaders.target(db, opp)
+            found = leaders.run_result(run)
+            if found is None:
+                return {"pending": True}
+            if not found and variant + 1 < len(variants):  # rəsmi ad 0 verdi — qısa variant (məs. "OBA")
+                nxt = variant + 1
+                return {"run": leaders.start_run(variants[nxt]), "variant": nxt, "company": variants[nxt]}
+            return {"added": leaders.finish(db, opp, lead, found)}
+        except leaders.LeadersError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=502)
 
 
 # --- Kontaktlar ------------------------------------------------------------------
