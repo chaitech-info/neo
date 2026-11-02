@@ -174,7 +174,8 @@ def start_run(company: str, *, client: httpx.Client | None = None) -> str:
     return run_id
 
 
-def run_result(run_id: str, *, client: httpx.Client | None = None) -> list[Found] | None:
+def run_result(run_id: str, *, company: str = "", original: str | None = None,
+               client: httpx.Client | None = None) -> list[Found] | None:
     """None — hələ işləyir; siyahı — bitdi (rəhbərlər süzülüb). Uğursuz run → LeadersError."""
     if not _RUN_ID_RE.match(run_id or ""):
         raise LeadersError("Yanlış axtarış id-si")
@@ -187,10 +188,41 @@ def run_result(run_id: str, *, client: httpx.Client | None = None) -> list[Found
         return None
     items = _call("GET", f"{APIFY_API}/datasets/{run.get('defaultDatasetId')}/items", client=client,
                   params={"token": token, "clean": "true"})
-    return pick_leaders(items)
+    return pick_leaders(items, company, original)
 
 
-def pick_leaders(items) -> list[Found]:
+_AZ_PLACE_RE = re.compile(r"azerbaijan|azərbaycan|azerbaycan|baku|bakı|baki|sumqayıt|sumgait|gəncə|ganja|азербайджан|баку")
+_STOP = {"və", "ve", "and", "of", "the", "group", "company", "mmc", "asc", "qsc"}
+
+
+def _place(item: dict) -> str:
+    loc = item.get("location") or item.get("locationName") or item.get("geoLocationName") or ""
+    if isinstance(loc, dict):  # harvestapi: {"linkedinText": "Baku, Azerbaijan", "parsed": {...}}
+        loc = loc.get("linkedinText") or (loc.get("parsed") or {}).get("text") or ""
+    return str(loc)
+
+
+def _company_words(name: str) -> set[str]:
+    """Şirkət adının ayırd edici sözləri (folded, ≥3 hərf): "OBA marketlər şəbəkəsi" → {oba, marketlər, şəbəkəsi}."""
+    from app.scrapers.base import fold
+
+    return {w for w in re.findall(r"\w+", fold(name)) if len(w) >= 3 and w not in _STOP}
+
+
+def relevant(item: dict, f: Found, company: str, original: str | None = None) -> bool:
+    """Bu şirkətin işçisidirmi? Qısa ad ("OBA") başqa şirkətlərə də uyğun gəlir (OBA Makarnacılık, OBA Couture —
+    retest 2026-11-02). Qəbul: yeri Azərbaycandadır, və ya başlığında adın ən azı iki sözü / tam qısa adı var."""
+    from app.scrapers.base import fold
+
+    if _AZ_PLACE_RE.search(fold(_place(item))):
+        return True
+    head = fold(f.title or "")
+    words = _company_words(original or company)
+    hits = sum(1 for w in words if re.search(rf"(?<!\w){re.escape(w[:6])}", head))  # kök: "marketlər" ~ "market"
+    return hits >= min(2, len(words)) and bool(words)
+
+
+def pick_leaders(items, company: str = "", original: str | None = None) -> list[Found]:
     found, seen = [], set()
     for item in items if isinstance(items, list) else []:
         f = _item_to_found(item) if isinstance(item, dict) else None
@@ -198,20 +230,22 @@ def pick_leaders(items) -> list[Found]:
             continue
         if f.title and not SENIOR_RE.search(f.title):
             continue  # rəhbər / qərar verən deyil
+        if company and not relevant(item, f, company, original):
+            continue  # eyni adlı başqa şirkət / başqa ölkə
         seen.add(f.linkedin_url.rstrip("/").lower())
         found.append(f)
     log.info("leaders_found", items=len(items) if isinstance(items, list) else 0, kept=len(found))
     return found[:_limit()]
 
 
-def target(session: Session, opp: Opportunity) -> tuple[LeadRecord, list[str]]:
-    """Fürsətin lead-i və axtarış variantları (search_names)."""
+def target(session: Session, opp: Opportunity) -> tuple[LeadRecord, list[str], str]:
+    """Fürsətin lead-i, axtarış variantları (search_names) və orijinal ad."""
     lead = session.get(LeadRecord, opp.lead_key) if opp.lead_key else None
     org = session.get(Organization, opp.organization_id) if opp.organization_id else None
     name = company_name(lead, org)
     if lead is None or not name:
         raise LeadersError("Şirkətin adı bilinmir — rəhbərləri axtarmaq üçün təşkilatı və ya kontaktı əl ilə əlavə et")
-    return lead, search_names(name) or [name]
+    return lead, search_names(name) or [name], name
 
 
 def finish(session: Session, opp: Opportunity, lead: LeadRecord, found: list[Found]) -> int:

@@ -267,7 +267,8 @@ def test_leaders_saved_as_contacts_once(factory, opp_id, monkeypatch):
     items = [
         {"firstName": "Rauf", "lastName": "Əliyev", "headline": "Baş direktor — Sahil MMC",
          "linkedinUrl": "https://www.linkedin.com/in/rauf"},
-        {"fullName": "Aysel Q.", "headline": "HR Manager", "linkedinUrl": "https://www.linkedin.com/in/aysel/"},
+        {"fullName": "Aysel Q.", "headline": "HR Manager", "linkedinUrl": "https://www.linkedin.com/in/aysel/",
+         "location": {"linkedinText": "Baku, Azerbaijan"}},
         {"fullName": "Kamran", "headline": "Sürücü", "linkedinUrl": "https://www.linkedin.com/in/kamran"},  # rəhbər deyil
         {"fullName": "Rauf dublikat", "headline": "CEO", "linkedinUrl": "https://www.linkedin.com/in/rauf/"},
     ]
@@ -335,9 +336,24 @@ def test_leaders_fall_back_to_brand_when_full_name_finds_nobody(factory, monkeyp
     with factory() as s:
         opp = crm.convert_lead(s, key, user_id=1).opportunity
     apify = FakeApify([[], [{"fullName": "Leyla", "headline": "HR Director",
-                             "linkedinUrl": "https://www.linkedin.com/in/leyla"}]])
+                             "linkedinUrl": "https://www.linkedin.com/in/leyla", "location": "Bakı, Azərbaycan"}]])
     apify.install(monkeypatch)
     client = TestClient(web.app)
     start = client.post(f"/opportunities/{opp.id}/leaders").json()
     assert _poll_until_done(client, opp.id, start) == {"added": 1}
     assert apify.started == ["ACWA Power", "ACWA"]
+
+
+def test_leaders_keep_only_this_company_people():
+    """Retest 2026-11-02: "OBA" axtarışı OBA Makarnacılık (Türkiyə), OBA Couture (Nigeriya) və s. gətirdi."""
+    items = [
+        {"fullName": "Ahmad", "headline": "Managing Director (CEO) at OBA MAKARNACILIK SAN. ve TİC. A.Ş.",
+         "linkedinUrl": "https://www.linkedin.com/in/a", "location": {"linkedinText": "Gaziantep, Türkiye"}},
+        {"fullName": "Bukola", "headline": "CEO/Creative Director at OBA Couture",
+         "linkedinUrl": "https://www.linkedin.com/in/b", "location": "Lagos, Nigeria"},
+        {"fullName": "Vugar", "headline": "OBA Marketlər Şəbəkəsi şirketinde Head of Procurement Department",
+         "linkedinUrl": "https://www.linkedin.com/in/v"},
+        {"fullName": "Ilkin", "headline": "Import Procurement Manager | OBA Market",
+         "linkedinUrl": "https://www.linkedin.com/in/i", "location": {"linkedinText": "Baku, Azerbaijan"}},
+    ]
+    assert [f.name for f in leaders.pick_leaders(items, "OBA", "OBA marketlər şəbəkəsi")] == ["Vugar", "Ilkin"]

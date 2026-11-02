@@ -504,7 +504,7 @@ def opportunity_leaders(opp_id: int, force: str = Form(""), me: User = Depends(R
         if opp.leaders_fetched_at is not None and force != "1":
             return {"added": 0, "skipped": True}
         try:
-            _lead, variants = leaders.target(db, opp)
+            _lead, variants, _name = leaders.target(db, opp)
             return {"run": leaders.start_run(variants[0]), "variant": 0, "company": variants[0]}
         except leaders.LeadersError as exc:
             return JSONResponse({"error": str(exc)}, status_code=502)
@@ -520,8 +520,9 @@ def opportunity_leaders_poll(opp_id: int, run: str = Form(""), variant: int = Fo
         if opp is None:
             return JSONResponse({"error": "Fürsət tapılmadı"}, status_code=404)
         try:
-            lead, variants = leaders.target(db, opp)
-            found = leaders.run_result(run)
+            lead, variants, name = leaders.target(db, opp)
+            variant = min(max(variant, 0), len(variants) - 1)
+            found = leaders.run_result(run, company=variants[variant], original=name)
             if found is None:
                 return {"pending": True}
             if not found and variant + 1 < len(variants):  # rəsmi ad 0 verdi — qısa variant (məs. "OBA")
