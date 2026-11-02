@@ -45,7 +45,8 @@ class BpEdpScraper(BaseScraper):
         today = self.today()
 
         candidates = []
-        for row in soup.select("#table-body-tender-list > tr"):
+        rows = soup.select("#table-body-tender-list > tr")
+        for row in rows:
             cells = row.find_all("td", recursive=False)
             if len(cells) < 5:
                 continue
@@ -56,6 +57,9 @@ class BpEdpScraper(BaseScraper):
             if title and not (deadline and deadline < today):
                 candidates.append((bid_no, title, scope, deadline))
 
+        # Portalda neçə elan oxundu (bitmişlər daxil) — select_relevant yalnız açıqları sayır, açıq tender
+        # olmayanda dashboard bunu "selector sınıb" (0 elan) kimi göstərirdi (2026-11-02: 20 elanın hamısı bitib).
+        self.fetched = len(rows) - len(candidates)
         # Başlıq qısadır ("Provision of ... Services") — işin təsviri də yoxlanılır.
         keep = self.select_relevant([f"{t} {s}" for _, t, s, _ in candidates], KEYWORDS, kind="tender")
         leads: list[RawLead] = []

@@ -29,3 +29,12 @@ def test_bp_edp_filters_deadline_and_keywords_in_title_or_scope():
     assert "Son tarix: 15.10.2026" in leads[0].raw_text
     assert "platform crews" in leads[0].raw_text
     assert sent["data"] == {"count": 20, "page": 1}
+
+
+def test_bp_edp_counts_all_rows_even_when_every_tender_is_closed():
+    """E2E 2026-11-02: bütün tenderlər bitəndə items_fetched=0 olurdu — dashboard 'selector sınıb' sanırdı."""
+    scraper = BpEdpScraper()
+    scraper.today = lambda: date(2027, 1, 1)
+    scraper.post = lambda url, **kw: type("R", (), {"text": HTML})()
+    assert scraper.fetch_leads() == []
+    assert scraper.fetched == 4

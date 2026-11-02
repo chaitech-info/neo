@@ -27,10 +27,17 @@ class RobotsDisallowed(Exception):
     """URL robots.txt ilə qadağandır — sorğu göndərilmir."""
 
 
+class SiteUnreachable(RobotsDisallowed):
+    """robots.txt oxuna bilmədi (bağlantı rədd edildi / 5xx) — RFC 9309-a görə sorğu göndərmirik.
+    Ayrıca sinif: dashboard-da "robots qadağası" yox, "sayt əlçatmazdır" görünsün (2026-11-02:
+    afb, emlak, economy, minenergy Modal IP-lərindən bağlantını rədd edir — robots.txt-ləri icazə verir)."""
+
+
 @dataclass
 class RobotsRules:
     rules: list[tuple[bool, str]] = field(default_factory=list)  # (allow, pattern)
     disallow_all: bool = False
+    unreachable: bool = False  # robots.txt alınmadı (şəbəkə xətası / 5xx)
 
     def allows(self, path: str) -> bool:
         if self.disallow_all:
@@ -95,7 +102,7 @@ def rules_for(url: str, client: httpx.Client) -> RobotsRules:
             # Müvəqqəti server xətası (məs. etender 502) — bu run-da oxumuruq,
             # amma keşləmirik ki, bütün gün bloklanmasın.
             log.warning("robots_server_error", origin=origin, status=resp.status_code)
-            return RobotsRules(disallow_all=True)
+            return RobotsRules(disallow_all=True, unreachable=True)
         if resp.status_code >= 400:
             rules = RobotsRules()
         else:
@@ -103,7 +110,7 @@ def rules_for(url: str, client: httpx.Client) -> RobotsRules:
     except httpx.HTTPError:
         # Əlçatmazlıq müvəqqəti ola bilər — keşləmirik, növbəti run yenidən yoxlasın.
         log.warning("robots_fetch_failed", origin=origin)
-        return RobotsRules(disallow_all=True)
+        return RobotsRules(disallow_all=True, unreachable=True)
 
     _cache[origin] = (time.monotonic(), rules)
     return rules
@@ -112,6 +119,10 @@ def rules_for(url: str, client: httpx.Client) -> RobotsRules:
 def check_allowed(url: str, client: httpx.Client) -> None:
     parts = urlsplit(url)
     path = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
-    if not rules_for(url, client).allows(path):
+    rules = rules_for(url, client)
+    if rules.unreachable:
+        log.warning("site_unreachable", url=url)
+        raise SiteUnreachable(f"Sayt əlçatmazdır (robots.txt alınmadı, bağlantı rədd edildi və ya server xətası): {url}")
+    if not rules.allows(path):
         log.warning("robots_disallowed", url=url)
         raise RobotsDisallowed(url)

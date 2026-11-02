@@ -290,3 +290,9 @@ def test_pipeline_runs_local_only_source_through_proxy(monkeypatch, tmp_path):
         pipeline.run_pipeline(Etender, s, source_key="etender")
     assert seen["proxy"] == "http://u:p@proxy.example:8000"
     assert _PROXY.get() is None  # run bitəndən sonra kontekst təmizlənir
+
+
+def test_sites_refusing_modal_are_local_only():
+    """E2E 2026-11-02: afb, emlak, economy, minenergy Modal-ın bütün regionlarından bağlantını rədd edir."""
+    from app.sources import LOCAL_ONLY
+    assert {"afb", "emlak", "economy", "minenergy"} <= LOCAL_ONLY

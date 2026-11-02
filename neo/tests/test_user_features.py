@@ -245,7 +245,7 @@ def test_leaders_saved_as_contacts_once(factory, opp_id, monkeypatch):
 
     r = TestClient(web.app).post(f"/opportunities/{opp_id}/leaders")
     assert r.status_code == 200 and r.json() == {"added": 2}
-    assert json.loads(calls[0].content)["companies"] == ["Sahil MMC"]
+    assert json.loads(calls[0].content)["companies"] == ["Sahil"]  # "MMC" atılır (search_names)
     with factory() as s:
         rows = s.scalars(select(Contact).where(Contact.source == "enrichment")).all()
         assert {c.name for c in rows} == {"Rauf Əliyev", "Aysel Q."}
@@ -266,3 +266,37 @@ def test_leaders_skip_linkedin_author_as_company(factory, monkeypatch):
 def test_leaders_without_token_is_hidden(factory, opp_id):
     page = TestClient(web.app).get(f"/opportunities/{opp_id}").text
     assert "data-leaders" not in page
+
+
+@pytest.mark.parametrize("raw, expected", [
+    ("OBA marketlər şəbəkəsi", ["OBA"]),
+    ("Elba Chem QSC", ["Elba Chem"]),
+    ("AZƏRBAYCAN RESPUBLİKASININ DÖVLƏT TURİZM AGENTLİYİ", ["Dövlət Turizm Agentliyi"]),
+    ('"İNNOVASİYA VƏ RƏQƏMSAL İNKİŞAF AGENTLİYİ" PUBLİK HÜQUQİ ŞƏXSİ', ["İnnovasiya və Rəqəmsal İnkişaf Agentliyi"]),
+    ("Sosial Xidmətlər Agentliyi", ["Sosial Xidmətlər Agentliyi"]),
+    ("SOCAR", ["SOCAR"]),
+    ("ACWA Power", ["ACWA Power", "ACWA"]),
+])
+def test_leaders_search_names(raw, expected):
+    """E2E 2026-11-02: rəsmi/təsviri adlarla LinkedIn axtarışı 0 qaytarırdı."""
+    assert leaders.search_names(raw) == expected
+
+
+def test_leaders_fall_back_to_brand_when_full_name_finds_nobody(factory, monkeypatch):
+    monkeypatch.setenv("APIFY_TOKEN", "t")
+    key = _lead(factory, "https://acwa.example", entity="ACWA Power")
+    with factory() as s:
+        opp = crm.convert_lead(s, key, user_id=1).opportunity
+    calls = []
+
+    def handler(request: httpx.Request):
+        calls.append(json.loads(request.content)["companies"][0])
+        items = [] if len(calls) == 1 else [{"fullName": "Leyla", "headline": "HR Director",
+                                             "linkedinUrl": "https://www.linkedin.com/in/leyla"}]
+        return httpx.Response(200, json=items)
+
+    # Hər axtarış öz client-ini açıb bağlayır (leaders.search) — testdə də hər dəfə yenisi.
+    monkeypatch.setattr(leaders, "_http", lambda: httpx.Client(transport=httpx.MockTransport(handler)))
+    r = TestClient(web.app).post(f"/opportunities/{opp.id}/leaders")
+    assert r.json() == {"added": 1}
+    assert calls == ["ACWA Power", "ACWA"]

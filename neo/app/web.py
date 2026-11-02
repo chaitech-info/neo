@@ -659,6 +659,18 @@ def _back(next_url: str) -> str:
     return "/leads/rejected"
 
 
+def _clean_back(next_url: str) -> str:
+    """_back + köhnə msg/err/undo/opp parametrlərini at (yeni mesaj əlavə olunacaq)."""
+    from urllib.parse import parse_qsl, urlencode
+
+    allowed = ("/leads/pending_review", "/leads/rejected", "/leads")
+    if next_url.split("?", 1)[0] not in allowed or "//" in next_url or "\\" in next_url:
+        next_url = "/leads/pending_review"
+    path, _, query = next_url.partition("?")
+    keep = [(k, v) for k, v in parse_qsl(query) if k not in ("msg", "err", "undo", "opp")]
+    return path + (f"?{urlencode(keep)}" if keep else "")
+
+
 def _with(url: str, **params: str) -> str:
     return url + ("&" if "?" in url else "?") + "&".join(f"{k}={quote(v)}" for k, v in params.items())
 
@@ -681,7 +693,7 @@ def restore_lead_route(dedupe_key: str, next: str = Form("/leads/rejected"), use
 
 
 @app.post("/leads/{dedupe_key}/reject", dependencies=[Depends(verify_csrf)])
-def reject_lead_route(dedupe_key: str, user: User = Depends(REQUIRE["sales"])):
+def reject_lead_route(dedupe_key: str, next: str = Form("/leads/pending_review"), user: User = Depends(REQUIRE["sales"])):
     if not dedupe_key or len(dedupe_key) != 64:
         return RedirectResponse(url="/leads/pending_review?err=Yanlış lead ID", status_code=303)
 
@@ -697,4 +709,5 @@ def reject_lead_route(dedupe_key: str, user: User = Depends(REQUIRE["sales"])):
             status_code=303,
         )
     # undo=<key> → flash-da "Geri al" düyməsi (base.html), səhvən basılanı bir kliklə qaytarmaq üçün.
-    return RedirectResponse(url=f"/leads/pending_review?msg={quote('Lead rədd edildi')}&undo={dedupe_key}", status_code=303)
+    # Eyni tab/süzgəcə qayıt (?tier=C, mine, cat) — əvvəlki mesaj parametrləri atılır.
+    return RedirectResponse(url=_with(_clean_back(next), msg="Lead rədd edildi", undo=dedupe_key), status_code=303)

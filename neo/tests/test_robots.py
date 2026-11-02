@@ -80,3 +80,21 @@ def test_scraper_get_does_not_request_disallowed_url():
         scraper.get("https://fed.az/az/tenderler", params={"page": 2})
 
     assert calls == ["https://fed.az/robots.txt", "https://fed.az/az/tenderler/2"]  # robots 1 dəfə, keşdən
+
+
+def test_unreachable_robots_reports_site_unreachable_not_a_ban():
+    """E2E 2026-11-02: afb/economy/minenergy Modal-dan bağlantını rədd edir — dashboard 'RobotsDisallowed' göstərirdi."""
+    from app.scrapers.robots import SiteUnreachable
+
+    def refuse(request):
+        raise httpx.ConnectError("refused")
+
+    client = httpx.Client(transport=httpx.MockTransport(refuse))
+    with pytest.raises(SiteUnreachable, match="Sayt əlçatmazdır"):
+        check_allowed("https://c.test/x", client)
+    with pytest.raises(SiteUnreachable):
+        check_allowed("https://d.test/x", _client(503))
+    # Həqiqi qadağa hələ də adi RobotsDisallowed-dur (SiteUnreachable yox)
+    with pytest.raises(RobotsDisallowed) as exc:
+        check_allowed("https://fed.az/az/tenderler?page=2", _client(200, FED))
+    assert not isinstance(exc.value, SiteUnreachable)

@@ -81,7 +81,8 @@ SOURCES: list[SourceSpec] = [
     SourceSpec("etender_construction", "Etender.gov.az — tikinti tenderləri", EtenderConstructionScraper, "tender_portal",
                "20", "6", "https://etender.gov.az", local_only=True,
                notes="Faza 6: eyni API, CONSTRUCTION_KEYWORDS; etender ilə eyni tender dublikat sayılır (tenders.py)"),
-    SourceSpec("emlak", "Emlak.gov.az", EmlakScraper, "tender_portal", "30", "6", "https://emlak.gov.az"),
+    SourceSpec("emlak", "Emlak.gov.az", EmlakScraper, "tender_portal", "30", "6", "https://emlak.gov.az",
+               local_only=True, notes="Modal IP-lərindən bağlantı rədd edilir (2026-11-02 ölçüsü) — Azərbaycan IP-si lazımdır"),
     SourceSpec("corporate", "Şirkət/agentlik tenderləri", CorporateTenderScraper, "corporate", "10", "8,16"),
     SourceSpec("worldbank", "Dünya Bankı", WorldBankScraper, "intl_api", "0", "7", "https://search.worldbank.org"),
     SourceSpec("bp_edp", "bp EDP", BpEdpScraper, "corporate", "15", "7", "https://edp.az"),
@@ -127,7 +128,8 @@ SOURCES += [
                        "tender", "Bakı Beynəlxalq Dəniz Ticarət Limanı"),
           "20", "9,17", kind="corporate", local_only=True, notes="Modal-a 403 (2026-10-05)"),
     _list("economy", "İqtisadiyyat Nazirliyi — xəbərlər",
-          LinkListSite("economy", "https://economy.gov.az/az/page/media/news", r"/az/post/\d+"), "30", "9,13,17"),
+          LinkListSite("economy", "https://economy.gov.az/az/page/media/news", r"/az/post/\d+"), "30", "9,13,17",
+          local_only=True, notes="Modal IP-lərindən bağlantı rədd edilir (2026-11-02 ölçüsü) — Azərbaycan IP-si lazımdır"),
     _list("azpromo", "AZPROMO — xəbər və tədbirlər",
           LinkListSite("azpromo", "https://azpromo.az/az/page/media/xeberler-ve-tedbirler", r"/az/posts/\d+"),
           "40", "9,13,17", notes="İxracatçı missiyaları, biznes forumları"),
@@ -136,7 +138,7 @@ SOURCES += [
           notes="Zonaya gələn investorlar = yeni zavodlar"),
     _list("minenergy", "Energetika Nazirliyi — xəbərlər",
           LinkListSite("minenergy", "https://minenergy.gov.az/az/xeberler-arxivi", r"/az/xeberler-arxivi/\d+"),
-          "10", "10,16"),
+          "10", "10,16", local_only=True, notes="Modal IP-lərindən bağlantı rədd edilir (2026-11-02 ölçüsü) — Azərbaycan IP-si lazımdır"),
     # --- Faza 3 (2026-10-07): dövlət və bank satınalma siyahıları (scripts/probe_sources ilə tapılıb) ---
     # Sınanıb, QOŞULMAYIB: justice.gov.az/az/announcements və mfa.gov.az/category/elanlar — elanların ~75%-i
     # kadr qəbulu/vətəndaş qəbuludur ("qəbul" açar sözünə düşür), satınalma elanları isə 2021-dən qalıb.
@@ -151,7 +153,7 @@ SOURCES += [
     _list("afb", "AFB Bank — tender elanları",
           LinkListSite("afb", "https://afb.az/tender-elanlari", r"afb\.az/(?:afb-bank-)?tender-elani[\w-]*",
                        "tender", "AFB Bank ASC"),
-          "55", "9,17", kind="corporate"),
+          "55", "9,17", kind="corporate", local_only=True, notes="Modal IP-lərindən bağlantı rədd edilir (2026-11-02 ölçüsü) — Azərbaycan IP-si lazımdır"),
 ]
 # --- Phase 2: iş elanı saytları — işçilərinə nahar verən şirkətlər ---------------------------
 # jobsearch.az 2026-10-20-də mənbələrdən çıxarılıb (Askar-ın qərarı). Scraper kodu (app/scrapers/jobsearch.py)

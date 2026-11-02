@@ -121,3 +121,21 @@ def test_linkedin_links_rendered_on_lead_card(factory):
     page = TestClient(web.app).get("/leads/pending_review").text
     assert 'href="https://www.linkedin.com/posts/x-1"' in page and "LinkedIn-də aç" in page
     assert 'href="https://www.linkedin.com/in/aysel"' in page and "HR Manager at VUMES" in page
+
+
+def test_reject_returns_to_same_tab_without_old_messages(factory):
+    """E2E 2026-11-02: C tabında rədd edəndə "Hamısı"-na qayıdırdı."""
+    key = _lead(factory, "https://tab.az")
+    r = TestClient(web.app).post(f"/leads/{key}/reject", follow_redirects=False,
+                                 data={"next": "/leads/pending_review?tier=C&msg=k%C3%B6hn%C9%99&undo=x"})
+    loc = r.headers["location"]
+    assert loc.startswith("/leads/pending_review?tier=C&msg=") and f"undo={key}" in loc and "k%C3%B6hn" not in loc
+    evil = TestClient(web.app).post(f"/leads/{_lead(factory, 'https://tab2.az')}/reject", follow_redirects=False,
+                                    data={"next": "https://evil.example/leads/pending_review"})
+    assert evil.headers["location"].startswith("/leads/pending_review?msg=")
+
+
+def test_form_carries_current_tab_into_reject(factory):
+    _lead(factory, "https://tab3.az")
+    page = TestClient(web.app).get("/leads/pending_review?tier=none").text
+    assert 'name="next" value="/leads/pending_review?tier=none"' in page

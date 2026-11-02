@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from datetime import datetime
 
 import httpx
@@ -60,6 +61,40 @@ def company_name(lead: LeadRecord | None, org: Organization | None) -> str | Non
     if lead.entity_name == lead.author_name:
         return None
     return lead.entity_name
+
+
+# LinkedIn şirkət adları qısadır ("OBA", "Elba Chem") — rəsmi/təsviri əlavələrlə axtarış 0 nəticə verirdi
+# (2026-11-02: "OBA marketlər şəbəkəsi", "Elba Chem QSC", "... PUBLİK HÜQUQİ ŞƏXSİ" → 0; "Sosial Xidmətlər Agentliyi" → 8).
+_LEGAL_RE = re.compile(
+    r"\b(mmc|asc|qsc|ascs|phş|phs|llc|ltd|limited|inc|corp|ojsc|cjsc|jsc|llp|gmbh|ooo|оао|зао|ооо|пао|"
+    r"publik hüquqi şəxs[iə]?|açıq səhmdar cəmiyyəti|qapalı səhmdar cəmiyyəti|məhdud məsuliyyətli cəmiyyət[i]?)\b\.?",
+    re.I,
+)
+_PREFIX_RE = re.compile(r"^(azərbaycan respublikasının|azerbaijan republic(?: of)?)\s+", re.I)
+_TAIL_RE = re.compile(r"\s+(marketlər(?:i)? şəbəkəsi|mağazalar(?:ı)? şəbəkəsi|şəbəkəsi|şirkətlər qrupu|"
+                      r"şirkəti|şirkətləri|holdinqi|group of companies)$", re.I)
+
+
+_AZ_LOWER = str.maketrans({"İ": "i", "I": "ı"})  # str.lower() "İ"-ni "i̇" (nöqtəli) edir
+_SMALL_WORDS = {"və", "ve", "of", "and", "и"}
+FALLBACK_BUDGET_S = 15  # ikinci variant yalnız birinci tez qayıdıbsa (Vercel funksiyası 60 san)
+
+
+def search_names(name: str) -> list[str]:
+    """Axtarış variantları: təmizlənmiş ad, lazım olsa onun əsası (ilk söz). Dublikatsız, sıra ilə."""
+    clean = re.sub(r"[\"“”«»'„]", " ", name or "")
+    clean = _LEGAL_RE.sub(" ", clean)
+    clean = " ".join(clean.split()).strip(" ,.-—")
+    clean = _PREFIX_RE.sub("", clean)
+    clean = _TAIL_RE.sub("", clean).strip(" ,.-—")
+    if clean.isupper() and len(clean.split()) > 1:  # "DÖVLƏT TURİZM AGENTLİYİ" → "Dövlət Turizm Agentliyi"; "SOCAR" qalır
+        clean = " ".join(w.translate(_AZ_LOWER).lower() if w.lower() in _SMALL_WORDS
+                         else w[0] + w[1:].translate(_AZ_LOWER).lower() for w in clean.split())
+    names = [clean] if clean else []
+    first = clean.split()[0] if clean else ""
+    if len(clean.split()) > 1 and len(first) >= 3 and first.isupper():  # "OBA Market" → "OBA" (brend qısaltması)
+        names.append(first)
+    return list(dict.fromkeys(n for n in names if len(n) >= 2))
 
 
 def _item_to_found(item: dict) -> Found | None:
@@ -133,7 +168,14 @@ def fetch_for(session: Session, opp: Opportunity, *, client: httpx.Client | None
     name = company_name(lead, org)
     if lead is None or not name:
         raise LeadersError("Şirkətin adı bilinmir — rəhbərləri axtarmaq üçün təşkilatı və ya kontaktı əl ilə əlavə et")
-    found = search(name, client=client)
+    found: list[Found] = []
+    started = time.monotonic()
+    for i, variant in enumerate(search_names(name) or [name]):  # rəsmi ad 0 verirsə qısa variant
+        if i and time.monotonic() - started > FALLBACK_BUDGET_S:
+            break
+        found = search(variant, client=client)
+        if found:
+            break
     added = save_contacts(session, lead, found)
     opp.leaders_fetched_at = datetime.utcnow()
     session.commit()

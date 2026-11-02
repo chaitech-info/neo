@@ -147,7 +147,7 @@
         </form>
         <a class="mc-btn" href="/tools/offers?lead={{ lead.dedupe_key|urlencode }}">Qiymət təklifi yarat</a>
         <form method="post" action="/leads/{{ lead.dedupe_key }}/reject">
-          {{ csrf_field(request) }}
+          {{ csrf_field(request) }}<input type="hidden" name="next" value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}">
           <button class="mc-btn mc-btn-no" type="submit"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg>Uyğun deyil</button>
         </form>
       </div>
