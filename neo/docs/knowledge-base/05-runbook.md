@@ -167,3 +167,11 @@ Dəyişənlər `.env.example`-dadır. Hər üç yerdə eyni olmalıdır: lokal `
 - Ölçü (Modal us-east, eu-west, eu-north, ap-south): etender.gov.az hər yerdən timeout, oxu.az və portofbaku.com hər yerdən 403; fed/report/caliber regiondan və IP-dən asılı olaraq gah açılır, gah yox. Yəni cloud regionu seçmək kifayət deyil — Azərbaycan IP-si lazımdır.
 - Həll: `AZ_PROXY_URL` (Azərbaycan çıxışlı residential proxy) Modal secret `neo-secrets`-ə. Varsa `runs_here` LOCAL_ONLY mənbələri Modal-da işlədir, pipeline yalnız onların scraper-ini proxy ilə yaradır (`app/sources.py::proxy_for`, `app/scrapers/base.py::use_proxy`); kontakt crawler-i və digər mənbələr birbaşa gedir (proxy trafiki pulludur). Yoxdursa köhnə qayda: Mac worker.
 - Secret-ə əlavə: `modal secret create neo-secrets --force --from-dotenv <fayl>` (bütün açarlar faylda olmalıdır — `--force` secret-i tam əvəz edir).
+
+## Mac worker (launchd, Redis/Celery-siz) — 2026-11-02
+Azərbaycan IP-si tələb edən 15 mənbə (`sources.LOCAL_ONLY`) Modal-dan açılmır; VPS (Azərbaycan) alınana qədər bu Mac işlədir.
+- Qoşmaq: `bash scripts/install_mac_worker.sh` (söndürmək: `... uninstall`). launchd hər 10 dəq `python -m scripts.local_tick` işə salır, girişdə özü başlayır.
+- Hər işləmə: son işləmədən bəri (≤24 saat, Mac yuxuda olubsa) cədvəli düşən LOCAL_ONLY mənbələr + paneldən "Scrape indi" sorğuları (Modal Queue `neo-local-requests`).
+- Açarlar: `~/.neo-worker.env` (chmod 600, repoda yox): `DATABASE_URL` (Neon pooled), `OPENAI_API_KEY`, `NEO_SCRAPE_ROLE=local`. Açar dəyişəndə bu faylı yenilə.
+- Jurnal: `tail -f ~/Library/Logs/neo-worker.log`; vəziyyət `~/.neo-local-tick.json`. Bir mənbəni indi işlətmək: `.venv/bin/python -m scripts.local_tick --only etender`.
+- Mac sönülü/yuxudadırsa bu mənbələr gözləyir; açılanda son 24 saatı tutur. VPS-də eyni skript systemd timer ilə işləyəcək.
