@@ -179,6 +179,48 @@ def test_agreement_manage_on_company_card(factory):
     assert "Nahar xidməti 2027" in card and "Ləğv edilib" in card
 
 
+def test_contracts_register_filters_search_and_menu(factory):
+    client = TestClient(web.app)
+    later = date.today().replace(year=date.today().year + 2)
+    client.post("/tools/contracts", data={
+        "company_name": "Azersun MMC", "title": ["Nahar xidməti", "Tədbir", "Köhnə müqavilə"],
+        "starts_on": ["", "", "2020-01-01"], "ends_on": [later.isoformat(), "", "2021-01-01"],
+        "status": ["active", "draft", "active"], "contact": ["Aynur", "", ""], "remind": ""})
+    client.post("/tools/contracts", data={"company_name": "Sahil MMC", "title": ["Su"],
+                                          "status": ["terminated"], "remind": ""})
+
+    page = client.get("/contracts")
+    assert page.status_code == 200
+    assert 'href="/contracts"' in page.text and "Müqavilələr" in page.text  # menyuda
+    assert all(t in page.text for t in ("Nahar xidməti", "Tədbir", "Köhnə müqavilə", "Sahil MMC"))
+
+    def titles(**params):
+        text = client.get("/contracts", params=params).text
+        return {t for t in ("Nahar xidməti", "Tədbir", "Köhnə müqavilə", "Sahil MMC") if t in text}
+
+    assert titles(show="active") == {"Nahar xidməti"}
+    assert titles(show="expired") == {"Köhnə müqavilə"}  # "Qüvvədə", amma bitmə tarixi keçib
+    assert titles(show="draft") == {"Tədbir"}
+    assert titles(show="terminated") == {"Sahil MMC"}
+    assert titles(q="aynur") == {"Nahar xidməti"}
+    assert titles(show="bogus") == titles()
+
+    # Siyahıdan silmək və xatırlatma qurmaq "Müqavilələr" səhifəsinə qaytarır.
+    with factory() as s:
+        aid = s.scalars(select(ClientContract.id).where(ClientContract.title == "Tədbir")).one()
+    resp = client.post(f"/agreements/{aid}/delete", data={"back": "/contracts?show=draft"}, follow_redirects=False)
+    assert resp.headers["location"].startswith("/contracts?show=draft")
+    resp = client.post(f"/agreements/{aid}/delete", data={"back": "//evil.example"}, follow_redirects=False)
+    assert not resp.headers["location"].startswith("//")
+
+
+def test_contract_page_back_check():
+    assert companies.contract_page("/contracts") and companies.contract_page("/contracts?show=all&q=a")
+    assert companies.contract_page("/tools/contracts?show=soon")
+    assert not companies.contract_page("//contracts") and not companies.contract_page("/contractsX")
+    assert not companies.contract_page("https://evil.example/contracts")
+
+
 def test_shown_status_marks_past_active_as_expired():
     row = ClientContract(status="active", contract_end=date(2026, 1, 1))
     assert companies.shown_status(row, date(2026, 6, 1)) == "expired"

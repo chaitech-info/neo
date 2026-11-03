@@ -18,7 +18,7 @@ from sqlalchemy import select
 from starlette.concurrency import run_in_threadpool
 
 from app import offer_client as agent
-from app import offer_pdf
+from app import dishes, offer_pdf
 from app.auth import security
 from app.auth.security import REQUIRE, csrf_token
 from app.db.models import LeadRecord, OfferRecord, User
@@ -65,22 +65,41 @@ def _to_decimal(value: Any) -> Decimal | None:
         return None
 
 
-def record_offer(db, data: dict, body: dict, user: User, lead_id: str | None) -> OfferRecord:
+def record_offer(db, data: dict, body: dict, user: User, lead_id: str | None,
+                 pictures: bool = False) -> OfferRecord:
     totals = data.get("totals") or {}
     record = OfferRecord(
         offer_id=str(data["offer_id"]), brand=body["brand"],
         customer_name=(data.get("customer_name") or body.get("customer_name") or None),
         total=_to_decimal(totals.get("total")), currency=totals.get("currency"),
-        sample=bool(data.get("sample")), created_by_id=user.id, lead_id=lead_id,
+        sample=bool(data.get("sample")), created_by_id=user.id, lead_id=lead_id, pictures=pictures,
     )
     db.add(record)
     db.commit()
     return record
 
 
-def _render_base64(data: dict) -> str:
+def render_pdf(snapshot: dict, pictures: bool = False) -> bytes:
+    """Neo dizaynında PDF. Şəkilli təklifdə yeməklərin şəkilləri kataloqdan (app/dishes.py) götürülür;
+    kataloqda olmayan yeməklər şəkilsiz əlavə olunur ki, "Yemək şəkilləri"ndə şəkli gözləyən kimi görünsün."""
+    if not pictures:
+        return offer_pdf.render(snapshot)
+    items = offer_pdf.menu_items(snapshot)
+    names = [name for name, _ in items]
+    with security.SessionLocal() as db:
+        try:
+            if snapshot.get("language", "az") == "az" and dishes.remember(db, names, {name: dishes.category_name(cat) for name, cat in items}):
+                db.commit()
+        except Exception:
+            db.rollback()
+            log.exception("dish_remember_failed")
+        photos = dishes.photos_for(db, names)
+    return offer_pdf.render(snapshot, photos)
+
+
+def _render_base64(data: dict, pictures: bool = False) -> str:
     snapshot = data if data.get("lines") else agent.get_offer(str(data["offer_id"]))
-    return base64.b64encode(offer_pdf.render(snapshot)).decode()
+    return base64.b64encode(render_pdf(snapshot, pictures)).decode()
 
 
 @router.post("/api/offers")
@@ -93,6 +112,7 @@ async def offers_create(request: Request, me: User = Depends(REQUIRE["sales"]),
     except ValueError as exc:
         return _error(str(exc), 422)
     lead_id = raw.get("lead_id") if isinstance(raw.get("lead_id"), str) else None
+    pictures = raw.get("pictures") is True
 
     # Agent çağırışı (60 s-ə qədər) və DB sinxrondur — threadpool-da, yoxsa async route bütün paneli dondururdu.
     try:
@@ -103,7 +123,7 @@ async def offers_create(request: Request, me: User = Depends(REQUIRE["sales"]),
         return JSONResponse(data)
     # Önizləmə/yükləmə də Neo-nun dizaynında olsun (agentin pdf_base64-ü əvəzinə; alınmasa agentinki qalır).
     try:
-        data["pdf_base64"] = await run_in_threadpool(_render_base64, data)
+        data["pdf_base64"] = await run_in_threadpool(_render_base64, data, pictures)
     except Exception:
         log.exception("offer_pdf_render_failed", offer_id=data.get("offer_id"))
 
@@ -113,7 +133,7 @@ async def offers_create(request: Request, me: User = Depends(REQUIRE["sales"]),
             if lead_id and db.get(LeadRecord, lead_id) is None:
                 lead_id = None
             if db.scalar(select(OfferRecord.id).where(OfferRecord.offer_id == str(data["offer_id"]))) is None:
-                record_offer(db, data, body, me, lead_id)
+                record_offer(db, data, body, me, lead_id, pictures)
 
     try:
         await run_in_threadpool(save)
@@ -121,25 +141,33 @@ async def offers_create(request: Request, me: User = Depends(REQUIRE["sales"]),
         # Təklif agentdə artıq yaranıb — istifadəçi onu görsün, yalnız tarixçəyə düşmədiyi loglansın.
         log.exception("offer_record_failed", offer_id=data.get("offer_id"))
     log.info("offer_created", offer_id=data["offer_id"], brand=body["brand"], user=me.email,
-             total=(data.get("totals") or {}).get("total"), sample=bool(data.get("sample")), lead=lead_id)
+             total=(data.get("totals") or {}).get("total"), sample=bool(data.get("sample")), lead=lead_id,
+             pictures=pictures)
     return JSONResponse(data)
 
 
-def _known_offer(offer_id: str) -> bool:
+def _offer_record(offer_id: str) -> OfferRecord | None:
     if not agent.OFFER_ID_RE.match(offer_id):
-        return False
+        return None
     with security.SessionLocal() as db:
-        return db.scalar(select(OfferRecord.id).where(OfferRecord.offer_id == offer_id)) is not None
+        return db.scalar(select(OfferRecord).where(OfferRecord.offer_id == offer_id))
+
+
+def _known_offer(offer_id: str) -> bool:
+    return _offer_record(offer_id) is not None
 
 
 @router.get("/api/offers/{offer_id}/pdf")
-def offers_pdf(offer_id: str, me: User = Depends(REQUIRE["sales"])):
-    if not _known_offer(offer_id):
+def offers_pdf(offer_id: str, pictures: str = "", me: User = Depends(REQUIRE["sales"])):
+    record = _offer_record(offer_id)
+    if record is None:
         return _error("Təklif tapılmadı", 404)
+    # Şəkilli/şəkilsiz: təklif necə yaradılıbsa elə; ?pictures=1/0 ilə o biri variantı da almaq olar.
+    with_pictures = pictures == "1" if pictures in ("0", "1") else bool(record.pictures)
     # PDF Neo-da qurulur (Seaport korporativ menyu dizaynı, app/offer_pdf.py) — agentin snapshot-undan.
     # Qurmaq alınmasa, agentin öz PDF-i verilir ki, istifadəçi boş qalmasın.
     try:
-        pdf = offer_pdf.render(agent.get_offer(offer_id))
+        pdf = render_pdf(agent.get_offer(offer_id), with_pictures)
     except agent.OfferAgentError as exc:
         return _agent_error(exc)
     except Exception:
@@ -171,7 +199,8 @@ def _history(db) -> list[dict]:
         .order_by(OfferRecord.created_at.desc(), OfferRecord.id.desc()).limit(HISTORY_LIMIT)).all()
     return [{"offer_id": o.offer_id, "brand": o.brand, "customer_name": o.customer_name,
              "total": o.total, "currency": o.currency or "AZN", "sample": o.sample,
-             "created_by": name or "—", "created_at": o.created_at, "lead_id": o.lead_id}
+             "created_by": name or "—", "created_at": o.created_at, "lead_id": o.lead_id,
+             "pictures": bool(o.pictures)}
             for o, name in rows]
 
 

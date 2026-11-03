@@ -42,6 +42,7 @@
       <a href="/leads/pending_review" class="{{ 'active' if active == 'validation' else '' }}">Validasiya{% if navc.pending %}<span class="count hot">{{ navc.pending }}</span>{% endif %}</a>
       <a href="/opportunities" class="{{ 'active' if active == 'opportunities' else '' }}">Fürsətlər</a>
       <a href="/tasks" class="{{ 'active' if active == 'tasks' else '' }}">CRM{% if navc.tasks %}<span class="count">{{ navc.tasks }}</span>{% endif %}</a>
+      {% if has_role(current, 'sales') %}<a href="/contracts" class="{{ 'active' if active == 'contracts_register' else '' }}">Müqavilələr</a>{% endif %}
     </div>
     {% if has_role(current, 'sales') %}
     <div class="nav-group">
@@ -51,6 +52,7 @@
       <a href="/companies" class="{{ 'active' if active == 'company_db' else '' }}">Şirkət bazası</a>
       <a href="/tools/employees" class="{{ 'active' if active == 'employees' else '' }}">Şirkətin işçiləri</a>
       <a href="/tools/contracts" class="{{ 'active' if active == 'contracts' else '' }}">Şirkət əlavə et</a>
+      <a href="/tools/dishes" class="{{ 'active' if active == 'dishes' else '' }}">Yemək şəkilləri</a>
       {% if has_role(current, 'admin') %}<a href="/tools/packages" class="{{ 'active' if active == 'packages' else '' }}">Paketlər</a>{% endif %}
     </div>
     {% endif %}

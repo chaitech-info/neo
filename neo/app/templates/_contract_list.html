@@ -1,0 +1,42 @@
+{# Razılaşmalar siyahısı: "Şirkət əlavə et" və "Müqavilələr" səhifələri. `back` — əməliyyatdan sonra qayıdılan ünvan. #}
+  <ul class="tk-list">
+    {% for c in rows %}
+    {% set st = shown_status(c, today) %}
+    {% set left = (c.contract_end - today).days if c.contract_end else none %}
+    <li class="tk {{ 'is-late' if left is not none and left < 0 and c.status == 'active' else '' }}" id="c{{ c.id }}">
+      <div class="tk-main">
+        <b>{% if c.organization_id %}<a class="cd-name" href="/companies/{{ c.organization_id }}#a{{ c.id }}">{{ c.company_name }}</a>{% else %}{{ c.company_name }}{% endif %}</b>
+        <small>{{ c.title or 'Müqavilə' }} · <span class="ag ag-{{ st }}">{{ status_names[st] }}</span>{% if c.starts_on %} · {{ c.starts_on|day }} →{% endif %}</small>
+        {% if c.contact %}<small>{{ c.contact }}</small>{% endif %}
+        {% if c.note %}<details class="od-more"><summary>Təsvir</summary>{{ c.note }}</details>{% endif %}
+        {% for r in mine.get(c.id, []) %}
+        <small class="ct-ok">Xatırlatma: {{ r.remind_at|baku_time }} ({{ describe(r.remind_before_min) }}){% if r.notified_at %} · göndərilib{% endif %}</small>
+        {% endfor %}
+        {% if c.contract_end %}
+        <details class="od-add">
+          <summary>+ Xatırlatma qur</summary>
+          <form method="post" action="/me/reminders" class="kw-row">
+            {{ csrf_field(request) }}
+            <input type="hidden" name="back" value="{{ back }}"><input type="hidden" name="contract_id" value="{{ c.id }}">
+            <input type="hidden" name="title" value="Müqavilə bitir: {{ c.company_name }}{% if c.title %} — {{ c.title }}{% endif %}">
+            <label class="kw-f">Nə vaxta (Bakı)<input type="datetime-local" name="due_at" required value="{{ c.contract_end.isoformat() }}T{{ '%02d'|format(remind_hour) }}:00"></label>
+            <label class="kw-f">Neçə əvvəl<input type="number" name="before" min="0" max="525600" value="30" inputmode="numeric"></label>
+            <label class="kw-f">&nbsp;<select name="unit" aria-label="Vahid">{% for k, v in units.items() %}<option value="{{ k }}" {% if k == 'day' %}selected{% endif %}>{{ v }} əvvəl</option>{% endfor %}</select></label>
+            <button class="mc-btn mc-btn-sm mc-btn-hero" type="submit">Qur</button>
+          </form>
+        </details>
+        {% endif %}
+      </div>
+      <div class="tk-side">
+        {% if c.contract_end %}
+        <span class="tk-when {{ 'late' if left <= 30 else '' }}">{{ c.contract_end|day }} · {% if left < 0 %}{{ -left }} gün əvvəl bitib{% elif left == 0 %}bu gün bitir{% else %}{{ left }} gün qalıb{% endif %}</span>
+        {% else %}<span class="tk-when">müddətsiz</span>{% endif %}
+        <span class="tk-who">{{ authors.get(c.created_by_id, '—') }}</span>
+      </div>
+      <div class="tk-act">
+        <a class="mc-btn mc-btn-sm" href="/tools/company?name={{ c.company_name|urlencode }}">Analiz</a>
+        <form method="post" action="/agreements/{{ c.id }}/delete" onsubmit="return confirm('Razılaşma və onun xatırlatmaları silinsin?')">{{ csrf_field(request) }}<input type="hidden" name="back" value="{{ back }}"><button class="mc-btn mc-btn-sm kw-del" type="submit">Sil</button></form>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>

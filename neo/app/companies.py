@@ -249,6 +249,13 @@ def agreements_of(session: Session, org_id: int) -> list[ClientContract]:
                                           ClientContract.id.desc())))
 
 
+def contract_page(back: str) -> bool:
+    """Razılaşma siyahısı olan səhifəyə qayıtmaq olar ("Şirkət əlavə et", "Müqavilələr"; süzgəclə birgə)."""
+    if back.startswith("//") or "\\" in back:
+        return False
+    return any(back == p or back.startswith(p + "?") for p in ("/tools/contracts", "/contracts"))
+
+
 def shown_status(row: ClientContract, today: date) -> str:
     """"Qüvvədə" olan, amma bitmə tarixi keçmiş razılaşma "Bitib" görünür."""
     if row.status == "active" and row.contract_end and row.contract_end < today:

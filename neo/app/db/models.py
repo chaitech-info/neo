@@ -24,6 +24,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -355,6 +356,7 @@ class OfferRecord(Base):
     total: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)  # ƏDV daxil; miqdar bilinmirsə boş
     currency: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
     sample: Mapped[bool] = mapped_column(Boolean, default=False)
+    pictures: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())  # şəkilli PDF (0014)
     created_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), index=True, nullable=True)
     lead_id: Mapped[Optional[str]] = mapped_column(ForeignKey("leads.dedupe_key"), index=True, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
@@ -586,4 +588,26 @@ class EmployeeSearch(Base):
     company_key: Mapped[str] = mapped_column(String(200), index=True)
     items: Mapped[str] = mapped_column(Text)  # JSON siyahı: [{name, title, linkedin_url, location}]
     user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+# --- Yemək kataloqu (0014) ------------------------------------------------------
+
+
+class Dish(Base):
+    """Yemək və onun şəkli — şəkilli qiymət təklifi üçün (app/dishes.py). Təklifdəki maddə `key` ilə
+    (adın normal forması, app/dishes.py::dish_key) uyğunlaşdırılır; şəkil JPEG baytları kimi bazadadır."""
+
+    __tablename__ = "dishes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key: Mapped[str] = mapped_column(String(200), unique=True)
+    name: Mapped[str] = mapped_column(Text)
+    name_en: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    name_ru: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    category: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
+    image: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True, deferred=True)
+    image_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    image_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    updated_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

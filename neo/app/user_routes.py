@@ -17,6 +17,7 @@ from app import lead_filters as lf
 from app import notify as nt
 from app.auth import security
 from app.auth.security import REQUIRE, verify_csrf
+from app.companies import contract_page
 from app.crm_routes import BAKU_OFFSET, _parse_local_datetime
 from app.crm import CrmError
 from app.db.models import LetterTemplate, Notification, Reminder, User, UserCategory
@@ -216,7 +217,7 @@ def reminders_page(request: Request, show: str = "open", me: User = Depends(REQU
 def reminders_add(title: str = Form(""), note: str = Form(""), due_at: str = Form(""), before: str = Form("0"),
                   unit: str = Form("min"), back: str = Form("/me/reminders"), contract_id: str = Form(""),
                   me: User = Depends(REQUIRE["viewer"])):
-    back = back if back in ("/me/reminders", "/tools/contracts") else "/me/reminders"
+    back = back if back == "/me/reminders" or contract_page(back) else "/me/reminders"
     try:
         due = _parse_local_datetime(due_at)
         if due is None:
@@ -237,7 +238,7 @@ def reminders_add(title: str = Form(""), note: str = Form(""), due_at: str = For
 
 @router.post("/me/reminders/{rid}/done", dependencies=[Depends(verify_csrf)])
 def reminders_done(rid: int, back: str = Form("/me/reminders"), me: User = Depends(REQUIRE["viewer"])):
-    back = back if back in ("/me/reminders", "/tools/contracts") else "/me/reminders"
+    back = back if back == "/me/reminders" or contract_page(back) else "/me/reminders"
     with security.SessionLocal() as db:
         row = db.get(Reminder, rid)
         if row is None or row.user_id != me.id:
@@ -249,7 +250,7 @@ def reminders_done(rid: int, back: str = Form("/me/reminders"), me: User = Depen
 
 @router.post("/me/reminders/{rid}/delete", dependencies=[Depends(verify_csrf)])
 def reminders_delete(rid: int, back: str = Form("/me/reminders"), me: User = Depends(REQUIRE["viewer"])):
-    back = back if back in ("/me/reminders", "/tools/contracts") else "/me/reminders"
+    back = back if back == "/me/reminders" or contract_page(back) else "/me/reminders"
     with security.SessionLocal() as db:
         row = db.get(Reminder, rid)
         if row is None or row.user_id != me.id:

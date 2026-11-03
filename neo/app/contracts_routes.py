@@ -7,9 +7,10 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Form, Request
-from sqlalchemy import delete, func, select
+from sqlalchemy import and_, delete, func, or_, select
 
 from app import companies
 from app import notify as nt
@@ -52,6 +53,65 @@ def contracts_page(request: Request, show: str = "soon", me: User = Depends(REQU
         "mine": mine, "authors": authors, "units": nt.UNIT_NAMES, "describe": nt.describe_before,
         "remind_hour": REMIND_HOUR, "status_names": companies.AGREEMENT_STATUS_NAMES,
         "shown_status": companies.shown_status,
+    })
+
+
+REGISTER_FILTERS = {"all": "Hamısı", "active": "Qüvvədə", "soon": f"Bitməyə yaxın ({SOON_DAYS} gün)",
+                    "expired": "Bitib", "draft": "Layihə", "terminated": "Ləğv edilib"}
+
+
+def _register_where(key: str, today: date):
+    """"Müqavilələr" süzgəci; "Qüvvədə"/"Bitib" görünən statusa uyğundur (companies.shown_status)."""
+    c = ClientContract
+    live = or_(c.status == "active", c.status.is_(None))
+    return {
+        "active": and_(live, or_(c.contract_end.is_(None), c.contract_end >= today)),
+        "soon": and_(c.status.in_(("active", "draft")), c.contract_end <= today + timedelta(days=SOON_DAYS)),
+        "expired": or_(c.status == "expired", and_(live, c.contract_end < today)),
+        "draft": c.status == "draft",
+        "terminated": c.status == "terminated",
+    }.get(key)
+
+
+@router.get("/contracts")
+def contracts_register(request: Request, show: str = "all", q: str = "", me: User = Depends(REQUIRE["sales"])):
+    """Satış → Müqavilələr: bütün əməkdaşlıq razılaşmalarının reyestri (süzgəc + axtarış)."""
+    show = show if show in REGISTER_FILTERS else "all"
+    q = q.strip()[:200]
+    today = _today()
+    with security.SessionLocal() as db:
+        nt.fire_due(db, me.id)
+        search = None
+        if q:
+            like = f"%{q}%"
+            search = or_(ClientContract.company_name.ilike(like), ClientContract.title.ilike(like),
+                         ClientContract.contact.ilike(like))
+        counts = {}
+        for key in REGISTER_FILTERS:
+            cq = select(func.count()).select_from(ClientContract)
+            for cond in (_register_where(key, today), search):
+                if cond is not None:
+                    cq = cq.where(cond)
+            counts[key] = db.scalar(cq) or 0
+        rq = select(ClientContract).order_by(ClientContract.contract_end.is_(None), ClientContract.contract_end,
+                                             ClientContract.id.desc())
+        for cond in (_register_where(show, today), search):
+            if cond is not None:
+                rq = rq.where(cond)
+        rows = list(db.scalars(rq))
+        mine: dict[int, list[Reminder]] = {}
+        if rows:
+            for r in db.scalars(select(Reminder).where(Reminder.user_id == me.id, Reminder.done_at.is_(None),
+                                                       Reminder.contract_id.in_([c.id for c in rows]))
+                                .order_by(Reminder.remind_at)):
+                mine.setdefault(r.contract_id, []).append(r)
+        authors = {u.id: u.full_name for u in db.scalars(select(User))}
+    back = "/contracts?" + urlencode({k: v for k, v in (("show", show), ("q", q)) if v})
+    return _render(request, "contracts_register.html", {
+        "active": "contracts_register", "rows": rows, "show": show, "q": q, "filters": REGISTER_FILTERS,
+        "counts": counts, "today": today, "mine": mine, "authors": authors, "units": nt.UNIT_NAMES,
+        "describe": nt.describe_before, "remind_hour": REMIND_HOUR, "back": back,
+        "status_names": companies.AGREEMENT_STATUS_NAMES, "shown_status": companies.shown_status,
     })
 
 

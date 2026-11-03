@@ -9,6 +9,7 @@ from sqlalchemy import delete, select
 from app import companies, company_analysis, employees
 from app.auth import security
 from app.auth.security import REQUIRE, verify_csrf
+from app.companies import contract_page
 from app.contacts import EMAIL_RE
 from app.crm import BAKU_OFFSET, STAGE_NAMES, today
 from app.crm_routes import _go, _render
@@ -139,7 +140,7 @@ def _own(db, aid: int, me: User) -> tuple[ClientContract | None, str | None]:
 
 
 def _back(row: ClientContract | None, back: str) -> str:
-    if back.startswith("/tools/contracts"):
+    if contract_page(back):
         return back
     return f"/companies/{row.organization_id}" if row is not None and row.organization_id else "/companies"
 

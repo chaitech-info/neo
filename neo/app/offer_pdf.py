@@ -8,6 +8,9 @@ Menyu iki cür ola bilər (Alətlər → Paketlər):
   "Kateqoriya: yemək" şəklində ("Şorba: Mərcimək şorbası") — gün bloku kateqoriya sütunlarına bölünür;
 - sadə: bölmələr kateqoriyadır ("Şorba", "Əsas yemək", …) — bir blok kimi göstərilir.
 
+Şəkilli təklif (`render(snapshot, photos)`): kataloqdakı yeməyin şəkli (app/dishes.py) maddənin yanında
+kiçik kart kimi çıxır; şəkli olmayan maddə adi sətir kimi qalır.
+
 Şrift Caladea-dır (nümunə PDF-dəki kimi); onda olmayan hərflər (ə, Ə, kiril) Noto Serif ilə yazılır.
 """
 from __future__ import annotations
@@ -33,6 +36,9 @@ COL2, COL3 = 198.0, 391.0           # sağ sütunlar (üz qabığı / bölmə ba
 DAY_COLS = (LEFT, 223.5, 391.0)
 FOOTER_RULE, BODY_BOTTOM = 779.0, 760.0
 LEAD = 15.8                         # menyu maddələrinin sətir aralığı
+PHOTO_W, PHOTO_H = 40.0, 30.0       # şəkilli təklifdə maddənin şəkli (pt)
+PHOTO_GAP = 7.0
+PHOTO_LEAD = 12.5
 
 NAVY = HexColor("#1a365d")
 TEAL = HexColor("#00a0b2")
@@ -200,6 +206,40 @@ def _package(line: dict, lang: str, currency: str) -> Package:
                    description=_tr(line.get("description"), lang), days_span=span)
 
 
+def menu_items(snapshot: dict) -> list[tuple[str, str]]:
+    """Təklifdəki bütün menyu maddələri: [(yemək, kateqoriya)] — şəkilləri tapmaq üçün."""
+    lang = snapshot.get("language") if snapshot.get("language") in ("az", "en", "ru") else "az"
+    out: list[tuple[str, str]] = []
+    for line in snapshot.get("lines") or []:
+        if isinstance(line, dict):
+            for b in _package(line, lang, "AZN").blocks:
+                out.extend((item, g.label) for g in b.groups for item in g.items)
+    return out
+
+
+def _thumb(data: bytes) -> ImageReader | None:
+    """Şəkli PHOTO_W:PHOTO_H nisbətində mərkəzdən kəsib kiçildir (PDF yüngül qalsın)."""
+    from PIL import Image
+
+    try:
+        img = Image.open(io.BytesIO(data)).convert("RGB")
+    except Exception:
+        return None
+    ratio = PHOTO_W / PHOTO_H
+    w, h = img.size
+    if w / h > ratio:
+        nw = int(h * ratio)
+        img = img.crop(((w - nw) // 2, 0, (w - nw) // 2 + nw, h))
+    else:
+        nh = int(w / ratio)
+        img = img.crop((0, (h - nh) // 2, w, (h - nh) // 2 + nh))
+    img = img.resize((int(PHOTO_W * 5), int(PHOTO_H * 5)), Image.LANCZOS)
+    out = io.BytesIO()
+    img.save(out, "JPEG", quality=80, optimize=True)
+    out.seek(0)
+    return ImageReader(out)
+
+
 def _money(value: Any, currency: str = "AZN") -> str:
     try:
         d = Decimal(str(value))
@@ -247,9 +287,11 @@ def summary_line(pkg: Package) -> str:
 
 
 class Doc:
-    def __init__(self, snapshot: dict, total: int = 0):
+    def __init__(self, snapshot: dict, total: int = 0, photos: dict[str, bytes] | None = None):
         _register_fonts()
         self.snap, self.total = snapshot, total
+        self.photos = photos or {}
+        self._thumbs: dict[str, ImageReader | None] = {}
         self.lang = snapshot.get("language") if snapshot.get("language") in ("az", "en", "ru") else "az"
         self.brand = snapshot.get("brand") or "seaport"
         totals = snapshot.get("totals") or {}
@@ -409,14 +451,40 @@ class Doc:
         cols[2].extend(groups[i:])
         return cols
 
-    def group_lines(self, g: Group) -> list[str]:
-        lines: list[str] = []
+    def photo(self, item: str) -> ImageReader | None:
+        if not self.photos:
+            return None
+        from app.dishes import dish_key
+
+        key = dish_key(item)
+        if key not in self._thumbs:
+            self._thumbs[key] = _thumb(self.photos[key]) if key in self.photos else None
+        return self._thumbs[key]
+
+    def item_rows(self, g: Group) -> list[tuple[ImageReader | None, list[str], float]]:
+        """Hər maddə: (şəkil, sətirlər, hündürlük). Şəkilli maddə — şəkil + yanında daha dar mətn."""
+        rows = []
         for item in g.items:
-            lines.extend(self.t.wrap(item, 11, 150))
-        return lines
+            img = self.photo(item)
+            if img is not None:
+                lines = self.t.wrap(item, 10, 150 - PHOTO_W - PHOTO_GAP)[:3]
+                rows.append((img, lines, max(PHOTO_H, PHOTO_LEAD * len(lines)) + 4))
+            else:
+                lines = self.t.wrap(item, 11, 150)
+                rows.append((None, lines, LEAD * len(lines)))
+        return rows
 
     def group_height(self, g: Group) -> float:
-        return (15 if g.label else 0) + LEAD * len(self.group_lines(g)) + 5
+        return (15 if g.label else 0) + sum(h for _, _, h in self.item_rows(g)) + 5
+
+    def draw_photo(self, img: ImageReader, x: float, top: float) -> None:
+        c = self.c
+        c.saveState()
+        path = c.beginPath()
+        path.roundRect(x, H - top - PHOTO_H, PHOTO_W, PHOTO_H, 4)
+        c.clipPath(path, stroke=0, fill=0)
+        c.drawImage(img, x, H - top - PHOTO_H, PHOTO_W, PHOTO_H)
+        c.restoreState()
 
     def day_block(self, b: Block) -> None:
         self.ensure(self.block_height(b))
@@ -433,9 +501,19 @@ class Doc:
                 if g.label:
                     t.draw(x, yy, g.label, 8.5, GREY, italic=True)
                     yy += 15
-                for line in self.group_lines(g):
-                    t.draw(x, yy, line, 11, NAVY)
-                    yy += LEAD
+                for img, lines, h in self.item_rows(g):
+                    if img is None:
+                        for line in lines:
+                            t.draw(x, yy, line, 11, NAVY)
+                            yy += LEAD
+                        continue
+                    ptop = yy - 9                      # şəklin yuxarısı — sətrin böyük hərf hündürlüyündə
+                    self.draw_photo(img, x, ptop)
+                    ty = ptop + max(0.0, (PHOTO_H - PHOTO_LEAD * len(lines)) / 2) + 9.5
+                    for line in lines:
+                        t.draw(x + PHOTO_W + PHOTO_GAP, ty, line, 10, NAVY)
+                        ty += PHOTO_LEAD
+                    yy += h
                 yy += 5
             bottom = max(bottom, yy)
         self.y = bottom + 5          # son maddənin bazası + 26pt (nümunədəki kimi)
@@ -536,8 +614,9 @@ class Doc:
         return self.buf.getvalue()
 
 
-def render(snapshot: dict) -> bytes:
-    """Agentin təklif snapshot-u → PDF baytları. Footer-də "02 / 03" üçün iki keçid: birinci səhifələri sayır."""
-    first = Doc(snapshot)
+def render(snapshot: dict, photos: dict[str, bytes] | None = None) -> bytes:
+    """Agentin təklif snapshot-u → PDF baytları. `photos` — {dish_key: JPEG} (şəkilli təklif; app/dishes.py).
+    Footer-də "02 / 03" üçün iki keçid: birinci səhifələri sayır."""
+    first = Doc(snapshot, photos=photos)
     first.build()
-    return Doc(snapshot, total=len(first.pages)).build()
+    return Doc(snapshot, total=len(first.pages), photos=photos).build()

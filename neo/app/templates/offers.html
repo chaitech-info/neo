@@ -33,6 +33,7 @@
           <label class="kw-f">Müştəri şirkəti (ixtiyari)<input id="of-customer" name="customer_name" maxlength="200" autocomplete="off"></label>
           <label class="kw-f">Əlaqədar şəxs (ixtiyari)<input id="of-contact" name="contact_person" maxlength="200" autocomplete="off"></label>
         </div>
+        <label class="kw-chk of-pics"><input type="checkbox" id="of-pictures" name="pictures">Şəkilli təklif (yeməklərin şəkli ilə)</label>
         <button class="mc-btn mc-btn-hero" id="of-submit" type="submit">PDF yarat</button>
       </form>
     </section>
@@ -99,7 +100,7 @@
         <tbody id="of-hist">
           {% for h in history %}
           <tr>
-            <td>{{ h.customer_name or '—' }}{% if h.sample %} <span class="of-badge warn">Nümunə</span>{% endif %}{% if h.lead_id %} <a class="of-lead" href="/leads?lead={{ h.lead_id|urlencode }}" title="Lead-dən yaradılıb">lead</a>{% endif %}</td>
+            <td>{{ h.customer_name or '—' }}{% if h.sample %} <span class="of-badge warn">Nümunə</span>{% endif %}{% if h.pictures %} <span class="of-badge">Şəkilli</span>{% endif %}{% if h.lead_id %} <a class="of-lead" href="/leads?lead={{ h.lead_id|urlencode }}" title="Lead-dən yaradılıb">lead</a>{% endif %}</td>
             <td>{{ brands.get(h.brand, h.brand) }}</td>
             <td class="num" data-money="{{ h.total if h.total is not none else '' }}" data-cur="{{ h.currency }}">{{ h.total if h.total is not none else '—' }}</td>
             <td>{{ h.created_by }}</td>
@@ -181,7 +182,8 @@
     }
 
     function baseBody() {
-      var b = { brand: $('of-brand').value, customer_name: $('of-customer').value, contact_person: $('of-contact').value };
+      var b = { brand: $('of-brand').value, customer_name: $('of-customer').value, contact_person: $('of-contact').value,
+                pictures: $('of-pictures').checked };
       if (leadId) b.lead_id = leadId;
       var pk = $('of-package');
       if (pk.value) { b.package_id = pk.value; b.package_name = pk.options[pk.selectedIndex].dataset.name || ''; }

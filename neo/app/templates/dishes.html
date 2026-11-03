@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Yemək şəkilləri — Neo{% endblock %}
+{% block main_class %}mc mc-kw{% endblock %}
+{% block content %}
+  <header class="ld-head">
+    <h1 class="mc-title">Yemək şəkilləri</h1>
+    <p class="ld-sub">Şəkilli qiymət təklifində yeməyin yanında bu şəkil çıxır. Təklifdəki yemək adı burdakı adla (və ya ingiliscə/rusca adla) eyni olmalıdır. Təklifdə görünən yeni yeməklər bura özü düşür — şəklini yükləmək kifayətdir.</p>
+  </header>
+
+  <section class="kw-sec">
+    <details class="kw-new">
+      <summary>+ Yemək əlavə et</summary>
+      <form method="post" action="/tools/dishes" enctype="multipart/form-data">
+        {{ csrf_field(request) }}
+        <div class="kw-row" style="margin-top:0">
+          <label class="kw-f kw-g">Ad (az)<input name="name" required minlength="2" maxlength="300" placeholder="məs. Mərcimək şorbası"></label>
+          <label class="kw-f">Kateqoriya<input name="category" list="dz-cats" maxlength="60"></label>
+        </div>
+        <div class="kw-row">
+          <label class="kw-f kw-g">Ad (en, istəyə görə)<input name="name_en" maxlength="300"></label>
+          <label class="kw-f kw-g">Ad (ru, istəyə görə)<input name="name_ru" maxlength="300"></label>
+        </div>
+        <label class="kw-f">Şəkil (istəyə görə)<input type="file" name="image" accept="image/jpeg,image/png,image/webp"></label>
+        <button class="mc-btn mc-btn-hero" type="submit">Əlavə et</button>
+      </form>
+    </details>
+    <datalist id="dz-cats">{% for c in categories %}<option value="{{ c }}">{% endfor %}</datalist>
+  </section>
+
+  <form class="kw-row" method="get" action="/tools/dishes" role="search">
+    <input type="hidden" name="show" value="{{ show }}">
+    <label class="kw-f kw-g"><span class="sr">Axtar</span><input type="search" name="q" value="{{ q }}" maxlength="200" placeholder="Yeməyin adı" aria-label="Axtar"></label>
+    <button class="mc-btn mc-btn-sm" type="submit">Axtar</button>
+    {% if q %}<a class="mc-btn mc-btn-sm" href="/tools/dishes?show={{ show }}">Təmizlə</a>{% endif %}
+  </form>
+
+  <div class="ld-filter" role="group" aria-label="Hansı yeməklər">
+    {% for key, name in filters.items() %}
+    <a class="{{ 'on' if show == key else '' }}" href="/tools/dishes?show={{ key }}{% if q %}&q={{ q|urlencode }}{% endif %}">{{ name }} <i>{{ counts[key] }}</i></a>
+    {% endfor %}
+  </div>
+
+  {% for cat, items in groups.items() %}
+  <h2 class="dz-cat">{{ cat }} <small>{{ items|length }}</small></h2>
+  <ul class="dz-grid">
+    {% for d in items %}
+    {% set has = d.id in with_image %}
+    <li class="dz-card" id="d{{ d.id }}">
+      <div class="dz-img">
+        {% if has %}<img src="/dishes/{{ d.id }}/image?v={{ d.image_updated_at.timestamp()|int if d.image_updated_at else 0 }}" alt="{{ d.name }}" loading="lazy">
+        {% else %}<span>Şəkil yoxdur</span>{% endif %}
+      </div>
+      <b class="dz-name">{{ d.name }}</b>
+      {% if d.name_en or d.name_ru %}<small class="dz-alt">{{ [d.name_en, d.name_ru]|select|join(' · ') }}</small>{% endif %}
+      <form method="post" action="/tools/dishes/{{ d.id }}/image" enctype="multipart/form-data" class="dz-up">
+        {{ csrf_field(request) }}<input type="hidden" name="show" value="{{ show }}"><input type="hidden" name="q" value="{{ q }}">
+        <label class="mc-btn mc-btn-sm">{{ 'Şəkli dəyiş' if has else 'Şəkil yüklə' }}<input type="file" name="image" accept="image/jpeg,image/png,image/webp" required data-autosubmit hidden></label>
+        <noscript><button class="mc-btn mc-btn-sm" type="submit">Göndər</button></noscript>
+      </form>
+      <details class="dz-more">
+        <summary>Düzəliş</summary>
+        <form method="post" action="/tools/dishes/{{ d.id }}">
+          {{ csrf_field(request) }}<input type="hidden" name="show" value="{{ show }}"><input type="hidden" name="q" value="{{ q }}">
+          <label class="kw-f">Ad (az)<input name="name" value="{{ d.name }}" required minlength="2" maxlength="300"></label>
+          <label class="kw-f">Kateqoriya<input name="category" value="{{ d.category or '' }}" list="dz-cats" maxlength="60"></label>
+          <label class="kw-f">Ad (en)<input name="name_en" value="{{ d.name_en or '' }}" maxlength="300"></label>
+          <label class="kw-f">Ad (ru)<input name="name_ru" value="{{ d.name_ru or '' }}" maxlength="300"></label>
+          <button class="mc-btn mc-btn-sm" type="submit">Saxla</button>
+        </form>
+        <div class="dz-acts">
+          {% if has %}<form method="post" action="/tools/dishes/{{ d.id }}/image/delete" onsubmit="return confirm('Şəkil silinsin?')">{{ csrf_field(request) }}<input type="hidden" name="show" value="{{ show }}"><input type="hidden" name="q" value="{{ q }}"><button class="mc-btn mc-btn-sm kw-del" type="submit">Şəkli sil</button></form>{% endif %}
+          {% if can_delete %}<form method="post" action="/tools/dishes/{{ d.id }}/delete" onsubmit="return confirm('Yemək kataloqdan silinsin?')">{{ csrf_field(request) }}<input type="hidden" name="show" value="{{ show }}"><input type="hidden" name="q" value="{{ q }}"><button class="mc-btn mc-btn-sm kw-del" type="submit">Yeməyi sil</button></form>{% endif %}
+        </div>
+      </details>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+    <div class="empty"><b>{% if q %}«{{ q }}» üzrə yemək tapılmadı{% elif counts['all'] %}Bu süzgəcdə yemək yoxdur{% else %}Kataloq boşdur{% endif %}</b>{% if counts['all'] %}<a href="/tools/dishes">Hamısına bax</a>{% endif %}</div>
+  {% endfor %}
+
+  <script>
+    /* Fayl seçilən kimi göndərilir — ayrıca "Göndər" düyməsinə ehtiyac yoxdur. */
+    document.querySelectorAll('[data-autosubmit]').forEach(function (input) {
+      input.addEventListener('change', function () {
+        if (!input.files.length) return;
+        var label = input.closest('label');
+        if (label && label.firstChild) label.firstChild.textContent = 'Yüklənir…';
+        input.form.submit();
+      });
+    });
+  </script>
+{% endblock %}

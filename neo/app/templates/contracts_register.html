@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Müqavilələr — Neo{% endblock %}
+{% block main_class %}mc mc-kw{% endblock %}
+{% block content %}
+  <header class="ld-head">
+    <h1 class="mc-title">Müqavilələr</h1>
+    <p class="ld-sub">Müştəri şirkətləri ilə bütün əməkdaşlıq razılaşmaları. Razılaşmanı dəyişmək üçün şirkətin adına bas — şirkət kartında açılır. Yenisini <a href="/tools/contracts">Şirkət əlavə et</a> səhifəsindən əlavə et.</p>
+  </header>
+
+  <form class="kw-row" method="get" action="/contracts" role="search">
+    <input type="hidden" name="show" value="{{ show }}">
+    <label class="kw-f kw-g"><span class="sr">Axtar</span><input type="search" name="q" value="{{ q }}" maxlength="200" placeholder="Şirkət, razılaşma və ya əlaqə şəxsi" aria-label="Axtar"></label>
+    <button class="mc-btn mc-btn-sm" type="submit">Axtar</button>
+    {% if q %}<a class="mc-btn mc-btn-sm" href="/contracts?show={{ show }}">Təmizlə</a>{% endif %}
+    <a class="mc-btn mc-btn-hero" href="/tools/contracts">+ Yeni müqavilə</a>
+  </form>
+
+  <div class="ld-filter" role="group" aria-label="Hansı müqavilələr">
+    {% for key, name in filters.items() %}
+    <a class="{{ 'on' if show == key else '' }}" href="/contracts?show={{ key }}{% if q %}&q={{ q|urlencode }}{% endif %}">{{ name }} <i>{{ counts[key] }}</i></a>
+    {% endfor %}
+  </div>
+
+  {% if rows %}
+  {% include "_contract_list.html" %}
+  {% else %}
+    <div class="empty"><b>{% if q %}«{{ q }}» üzrə müqavilə tapılmadı{% elif counts['all'] %}Bu süzgəcdə müqavilə yoxdur{% else %}Hələ müqavilə əlavə edilməyib{% endif %}</b>{% if counts['all'] %}<a href="/contracts">Hamısına bax</a>{% else %}<a href="/tools/contracts">Müqavilə əlavə et</a>{% endif %}</div>
+  {% endif %}
+{% endblock %}

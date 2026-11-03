@@ -45,6 +45,7 @@ from app.company_routes import router as company_router
 from app.company_db_routes import router as company_db_router
 from app.approval_routes import router as approval_router
 from app.contracts_routes import router as contracts_router
+from app.dish_routes import router as dish_router
 from app.employee_routes import router as employee_router
 from app.mailbox_routes import router as mailbox_router
 from app.user_routes import router as user_router
@@ -124,6 +125,7 @@ app.include_router(company_router)
 app.include_router(company_db_router)
 app.include_router(approval_router)
 app.include_router(contracts_router)
+app.include_router(dish_router)
 app.include_router(employee_router)
 app.include_router(mailbox_router)
 app.include_router(user_router)
