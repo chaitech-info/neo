@@ -13,6 +13,8 @@
       <span class="stg s-{{ opp.stage }}"><i></i>{{ stage_names[opp.stage] }}</span>
       {% if opp.reply_status %}<a class="rs rs-{{ opp.reply_status }}" href="#replies" title="Məktuba cavab vəziyyəti">{{ reply_status_names[opp.reply_status] }}</a>{% endif %}
       {% if tender %}<span class="tag">Tender</span>{% endif %}
+      {% set source_link = (lead.origin_url or lead.source_url) if lead else none %}
+      {% if source_link %}<a class="mc-btn mc-btn-sm od-src" href="{{ source_link }}" target="_blank" rel="noopener">{{ 'Tenderi aç' if tender else 'Elanı aç' }} ↗</a>{% endif %}
       {% if opp.stage == 'lost' and opp.lost_reason_code %}<span class="od-lost">{{ lost_reasons[opp.lost_reason_code] }}{% if opp.lost_reason_note %}: {{ opp.lost_reason_note }}{% endif %}</span>{% endif %}
     </p>
     {% if emails %}
@@ -168,7 +170,7 @@
       {% endif %}
       {% if tender %}
       <dl class="od-kv od-tender">
-        <dt>Tender</dt><dd>{{ tender.title }}</dd>
+        <dt>Tender</dt><dd>{% if source_link %}<a href="{{ source_link }}" target="_blank" rel="noopener">{{ tender.title }} ↗</a>{% else %}{{ tender.title }}{% endif %}</dd>
         {% if tender.reference_no %}<dt>Nömrə</dt><dd>{{ tender.reference_no }}</dd>{% endif %}
         <dt>Son tarix</dt><dd>{{ tender.deadline_at|baku_time if tender.deadline_at else '—' }}</dd>
       </dl>

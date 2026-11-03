@@ -73,8 +73,10 @@ def opportunities_page(request: Request, owner: str = "all", reply: str = "", me
         contact_email = (select(Contact.email).where(Contact.lead_key == Opportunity.lead_key, Contact.email.is_not(None))
                          .order_by(Contact.id).limit(1).correlate(Opportunity).scalar_subquery())
         email = func.coalesce(Organization.email, LeadRecord.contact_email, contact_email)
+        # Kartdakı ↗: tenderin / elanın öz səhifəsi (yeni vərəqdə açılır).
+        link = func.coalesce(LeadRecord.origin_url, LeadRecord.source_url)
         q = (
-            select(Opportunity, Organization, User, email)
+            select(Opportunity, Organization, User, email, link)
             .outerjoin(Organization, Organization.id == Opportunity.organization_id)
             .outerjoin(LeadRecord, LeadRecord.dedupe_key == Opportunity.lead_key)
             .outerjoin(User, User.id == Opportunity.owner_id)

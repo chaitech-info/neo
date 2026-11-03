@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -113,6 +114,8 @@ app.add_middleware(
 )
 app.include_router(auth_router)
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
+# app.css?v=<hash>: hər deploy-da brauzer yeni CSS-i götürür (köhnə keşdən yarımçıq görünüş olmasın).
+CSS_VERSION = hashlib.sha1((Path(__file__).parent / "static" / "app.css").read_bytes()).hexdigest()[:10]
 app.include_router(crm_router)
 app.include_router(keyword_router)
 app.include_router(offer_router)
@@ -234,6 +237,7 @@ def _day(value) -> str:
 
 templates.env.filters["baku_time"] = _baku_time
 templates.env.filters["day"] = _day
+templates.env.globals["css_version"] = CSS_VERSION
 templates.env.globals["utcnow"] = datetime.utcnow  # son tarixin keçib-keçmədiyi üçün
 
 

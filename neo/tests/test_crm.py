@@ -11,7 +11,7 @@ from app import crm, web
 from app.auth import security
 from app.auth.users import create_user
 from app.db.migrate import upgrade_to_head
-from app.db.models import LeadRecord, Opportunity, Organization, Task
+from app.db.models import LeadRecord, Opportunity, Organization, Task, Tender
 from app.db.repository import LeadRepository
 from app.models import LeadCategory, RawLead
 
@@ -107,6 +107,28 @@ def test_stage_rules(factory):
         opp.tender_id = 1  # tender fürsəti
         with pytest.raises(crm.CrmError):
             crm.change_stage(s, opp, "negotiation")
+
+
+def test_tender_link_opens_in_new_tab_from_opportunity(factory):
+    """Validasiyadan fürsətə keçəndə tenderin öz səhifəsinə link olmalıdır (yeni vərəqdə)."""
+    url = "https://etender.gov.az/main/competition/detail/361142"
+    key = _lead(factory, url, source="etender", category=LeadCategory.tender, deadline=NOW + timedelta(days=9),
+                entity="SOFAZ")
+    with factory() as s:
+        tender = Tender(title="Hazır yemək xidməti")
+        s.add(tender)
+        s.flush()
+        s.get(LeadRecord, key).tender_id = tender.id
+        s.commit()
+    client = TestClient(web.app)
+    assert client.post(f"/leads/{key}/approve", follow_redirects=False).status_code == 303
+    with factory() as s:
+        opp = s.scalars(select(Opportunity)).one()
+    link = f'href="{url}" target="_blank" rel="noopener"'
+    detail = client.get(f"/opportunities/{opp.id}").text
+    assert f'class="mc-btn mc-btn-sm od-src" {link}' in detail
+    assert detail.count(link) >= 3  # başlıq, "Haradan gəldi", tender bloku
+    assert f'class="op-ext" {link}' in client.get("/opportunities").text
 
 
 def test_web_approve_and_screens(factory):
