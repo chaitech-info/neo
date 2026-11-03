@@ -17,6 +17,7 @@ from sqlalchemy import select
 from starlette.concurrency import run_in_threadpool
 
 from app import offer_client as agent
+from app import offer_pdf
 from app.auth import security
 from app.auth.security import REQUIRE, csrf_token
 from app.db.models import LeadRecord, OfferRecord, User
@@ -124,10 +125,18 @@ def _known_offer(offer_id: str) -> bool:
 def offers_pdf(offer_id: str, me: User = Depends(REQUIRE["sales"])):
     if not _known_offer(offer_id):
         return _error("Təklif tapılmadı", 404)
+    # PDF Neo-da qurulur (Seaport korporativ menyu dizaynı, app/offer_pdf.py) — agentin snapshot-undan.
+    # Qurmaq alınmasa, agentin öz PDF-i verilir ki, istifadəçi boş qalmasın.
     try:
-        pdf = agent.get_offer_pdf(offer_id)
+        pdf = offer_pdf.render(agent.get_offer(offer_id))
     except agent.OfferAgentError as exc:
         return _agent_error(exc)
+    except Exception:
+        log.exception("offer_pdf_render_failed", offer_id=offer_id)
+        try:
+            pdf = agent.get_offer_pdf(offer_id)
+        except agent.OfferAgentError as exc:
+            return _agent_error(exc)
     return Response(pdf, media_type="application/pdf",
                     headers={"Content-Disposition": f'inline; filename="{offer_id}.pdf"'})
 

@@ -1,4 +1,6 @@
 """Qiymət təklifi aləti: giriş yoxlaması, agent xəta xəritəsi, proxy route-ları, rol məhdudiyyəti."""
+import re
+
 import httpx
 import pytest
 from fastapi.testclient import TestClient
@@ -6,6 +8,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app import offer_client as agent
+from app import offer_pdf
 from app import offer_routes, web
 from app.auth import security
 from app.auth.passwords import hash_password
@@ -154,15 +157,82 @@ def test_create_offer_validation_and_agent_error(app_db, monkeypatch):
     assert r.status_code == 409 and "Paketlər" in r.json()["error"]
 
 
+WEEK = {
+    "Bazar ertəsi": ["Şorba: Mərcimək şorbası", "Əsas yemək: Çoban qovurması", "Əsas yemək: Toyuq tabaka",
+                     "Qarnir: Südlü kartof püresi", "Qarnir: Qril tərəvəzlər", "Salatlar: Kələm və kök salatı",
+                     "Salatlar: Pomidor-xiyar salatı", "Çörək: Çörək assortisi"],
+    "Çərşənbə axşamı": ["Şorba: Tərəvəz şorbası", "Əsas yemək: Pomidorla təqdim olunan qril kotlet",
+                        "Əsas yemək: Toyuq şnitseli", "Qarnir: Sobada bişmiş kartof", "Qarnir: Qarabaşaq sıyığı",
+                        "Salatlar: Çuğundur salatı", "Salatlar: Paytaxt salatı", "Çörək: Çörək assortisi"],
+    "Çərşənbə": ["Şorba: Düyü şorbası", "Əsas yemək: Mal əti ilə tərəvəz sotesi", "Əsas yemək: Pendirli burger",
+                 "Qarnir: Şüyüdlü plov", "Qarnir: Qril tərəvəzlər", "Salatlar: Vineqret salatı",
+                 "Salatlar: Kələm və kök salatı", "Çörək: Çörək assortisi"],
+    "Cümə axşamı": ["Şorba: Yarım noxud şorbası", "Əsas yemək: Adana lülə kababı", "Əsas yemək: Toyuq kordon-blyu",
+                    "Qarnir: Kartof püresi", "Qarnir: Sobada bişmiş kartof", "Salatlar: Pomidor-xiyar salatı",
+                    "Salatlar: Çuğundur salatı", "Çörək: Çörək assortisi"],
+    "Cümə": ["Şorba: Göbələk krem-şorbası", "Əsas yemək: Yarpaq dolması", "Əsas yemək: Langet",
+             "Qarnir: Qarabaşaq sıyığı", "Qarnir: Qril tərəvəzlər", "Salatlar: Paytaxt salatı",
+             "Salatlar: Vineqret salatı", "Çörək: Çörək assortisi"],
+}
+
+
+def _snapshot(menu, price="6.00"):
+    return {"id": "SP-20261016-003", "brand": "seaport", "language": "az", "customer_name": "Azersun",
+            "lines": [{"package_id": "standart", "name": {"az": "Standart", "en": "Standard"}, "menu": menu,
+                       "unit": {"az": "porsiya"}, "unit_price": price}],
+            "totals": {"total": None}, "assumptions": [], "example": False}
+
+
+WEEKLY = _snapshot([{"title": {"az": d}, "items": [{"az": i} for i in items]} for d, items in WEEK.items()])
+FLAT = _snapshot([{"title": {"az": "Şorba"}, "items": [{"az": "Mərci şorbası"}]},
+                  {"title": {"az": "Əsas yemək"}, "items": [{"az": "Toyuq əti"}, {"az": "Düyü"}]},
+                  {"title": {"az": "Digər", "en": "Other"}, "items": [{"az": "Salat"}, {"az": "Çörək"}]}], "4.90")
+
+
+def _pages(pdf: bytes) -> int:
+    return len(re.findall(rb"/Type /Page\b", pdf))
+
+
+def test_weekly_menu_pdf_matches_the_three_page_design():
+    """Nümunə: SeaPort_Catering_Standard_Lunch_Menu_6AZN.pdf — üz qabığı + 2 menyu səhifəsi."""
+    doc = offer_pdf.Doc(WEEKLY)
+    pkg = doc.packages[0]
+    assert pkg.weekly and [b.accent for b in pkg.blocks] == ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+    assert [g.label for g in pkg.blocks[0].groups] == ["Şorba", "Əsas yemək", "Qarnir", "Salatlar", "Çörək"]
+    assert offer_pdf.daily_selection(pkg) == [(1, "şorba"), (2, "əsas yemək"), (2, "qarnir"), (2, "salat"),
+                                              (None, "Çörək assortisi")]
+    assert offer_pdf.summary_line(pkg) == "Hər gün 1 şorba, 2 əsas yemək, 2 qarnir, 2 salat, çörək assortisi."
+    assert pkg.price == "6 AZN" and doc.title() == "Standard Corporate Lunch Menu"
+    pdf = offer_pdf.render(WEEKLY)
+    assert pdf.startswith(b"%PDF") and _pages(pdf) == 3
+    assert b"Caladea" in pdf and b"NotoSerif" in pdf  # ə Caladea-da yoxdur — Noto Serif ilə
+
+
+def test_flat_menu_pdf_and_text_fallback():
+    doc = offer_pdf.Doc(FLAT)
+    pkg = doc.packages[0]
+    assert not pkg.weekly and len(pkg.blocks) == 1 and pkg.price == "4.90 AZN"
+    assert offer_pdf.daily_selection(pkg) == [(1, "şorba"), (2, "əsas yemək"), (None, "Salat"), (None, "Çörək")]
+    assert _pages(offer_pdf.render(FLAT)) == 2
+    assert _pages(offer_pdf.render({"brand": "nafa", "lines": []})) == 2  # boş təklif də sınmır
+
+
 def test_pdf_only_for_known_offers(app_db, monkeypatch):
-    monkeypatch.setattr(agent, "get_offer_pdf", lambda oid, client=None: b"%PDF-1.4")
+    monkeypatch.setattr(agent, "get_offer", lambda oid, client=None: WEEKLY)
+    monkeypatch.setattr(agent, "get_offer_pdf", lambda oid, client=None: b"%PDF-1.4 agent")
     c = TestClient(web.app)
     assert c.get("/api/offers/SP-1-001/pdf").status_code == 404
     monkeypatch.setattr(agent, "create_offer", lambda body, client=None: dict(OK))
     c.post("/api/offers", json={"brand": "seaport", "message": "a"})
     r = c.get("/api/offers/SP-20261016-003/pdf")
-    assert r.status_code == 200 and r.headers["content-type"] == "application/pdf" and r.content == b"%PDF-1.4"
+    assert r.status_code == 200 and r.headers["content-type"] == "application/pdf"
+    assert r.content.startswith(b"%PDF") and _pages(r.content) == 3  # Neo-nun öz dizaynı
     assert c.get("/api/offers/..%2Fx/pdf").status_code == 404
+
+    def broken(snapshot):
+        raise ValueError("bad snapshot")
+    monkeypatch.setattr(offer_pdf, "render", broken)
+    assert c.get("/api/offers/SP-20261016-003/pdf").content == b"%PDF-1.4 agent"  # ehtiyat: agentin PDF-i
 
 
 def test_pages_render_and_prefill(app_db, monkeypatch):

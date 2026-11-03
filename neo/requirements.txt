@@ -16,4 +16,5 @@ eval_type_backport>=0.2  # yalnız Python 3.9-da lazımdır; 3.10+-da çıxarıl
 fastapi>=0.111
 uvicorn[standard]>=0.30
 jinja2>=3.1
+reportlab>=4.2  # qiymət təklifinin PDF-i (app/offer_pdf.py)
 python-multipart>=0.0.9
