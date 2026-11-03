@@ -313,3 +313,13 @@ def test_roles_and_csrf(tmp_path, monkeypatch):
     assert page.status_code == 200 and "/tools/packages" in page.text
     assert admin.get("/tools/packages").status_code == 200
     engine.dispose()
+
+
+def test_created_offer_preview_uses_neo_design(app_db, monkeypatch):
+    """Yaradanda önizləmə/yükləmə (pdf_base64) də Neo-nun PDF-idir, agentinki yox."""
+    import base64
+    monkeypatch.setattr(agent, "create_offer", lambda body, client=None: {**OK, **WEEKLY, "status": "ok",
+                                                                          "offer_id": OK["offer_id"]})
+    d = TestClient(web.app).post("/api/offers", json={"brand": "seaport", "message": "a"}).json()
+    pdf = base64.b64decode(d["pdf_base64"])
+    assert pdf.startswith(b"%PDF") and _pages(pdf) == 3 and b"Caladea" in pdf

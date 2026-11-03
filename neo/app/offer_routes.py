@@ -6,6 +6,7 @@ JSON çağırışlarında CSRF tokeni `X-CSRF-Token` başlığı ilə gəlir.
 """
 from __future__ import annotations
 
+import base64
 import hmac
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -77,6 +78,11 @@ def record_offer(db, data: dict, body: dict, user: User, lead_id: str | None) ->
     return record
 
 
+def _render_base64(data: dict) -> str:
+    snapshot = data if data.get("lines") else agent.get_offer(str(data["offer_id"]))
+    return base64.b64encode(offer_pdf.render(snapshot)).decode()
+
+
 @router.post("/api/offers")
 async def offers_create(request: Request, me: User = Depends(REQUIRE["sales"]),
                   _csrf: None = Depends(verify_csrf_header)):
@@ -95,6 +101,11 @@ async def offers_create(request: Request, me: User = Depends(REQUIRE["sales"]),
         return _agent_error(exc)
     if data["status"] != "ok":
         return JSONResponse(data)
+    # Önizləmə/yükləmə də Neo-nun dizaynında olsun (agentin pdf_base64-ü əvəzinə; alınmasa agentinki qalır).
+    try:
+        data["pdf_base64"] = await run_in_threadpool(_render_base64, data)
+    except Exception:
+        log.exception("offer_pdf_render_failed", offer_id=data.get("offer_id"))
 
     def save() -> None:
         nonlocal lead_id
