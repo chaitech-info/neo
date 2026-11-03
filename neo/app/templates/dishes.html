@@ -46,15 +46,15 @@
     {% for d in items %}
     {% set has = d.id in with_image %}
     <li class="dz-card" id="d{{ d.id }}">
-      <div class="dz-img">
+      <label class="dz-img" for="up{{ d.id }}" title="{{ 'Şəkli dəyiş' if has else 'Şəkil yüklə' }}">
         {% if has %}<img src="/dishes/{{ d.id }}/image?v={{ d.image_updated_at.timestamp()|int if d.image_updated_at else 0 }}" alt="{{ d.name }}" loading="lazy">
-        {% else %}<span>Şəkil yoxdur</span>{% endif %}
-      </div>
+        {% else %}<span><b aria-hidden="true">+</b>Şəkil yoxdur</span>{% endif %}
+      </label>
       <b class="dz-name">{{ d.name }}</b>
       {% if d.name_en or d.name_ru %}<small class="dz-alt">{{ [d.name_en, d.name_ru]|select|join(' · ') }}</small>{% endif %}
       <form method="post" action="/tools/dishes/{{ d.id }}/image" enctype="multipart/form-data" class="dz-up">
         {{ csrf_field(request) }}<input type="hidden" name="show" value="{{ show }}"><input type="hidden" name="q" value="{{ q }}">
-        <label class="mc-btn mc-btn-sm">{{ 'Şəkli dəyiş' if has else 'Şəkil yüklə' }}<input type="file" name="image" accept="image/jpeg,image/png,image/webp" required data-autosubmit hidden></label>
+        <label class="mc-btn mc-btn-sm">{{ 'Şəkli dəyiş' if has else 'Şəkil yüklə' }}<input type="file" id="up{{ d.id }}" name="image" accept="image/jpeg,image/png,image/webp" required data-autosubmit hidden></label>
         <noscript><button class="mc-btn mc-btn-sm" type="submit">Göndər</button></noscript>
       </form>
       <details class="dz-more">

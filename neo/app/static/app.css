@@ -480,7 +480,8 @@ details[open] summary { margin-bottom: 6px; }
 @media (max-width: 700px) {
   .tk { grid-template-columns: 1fr; padding: 14px 14px 14px 18px; }
   .tk-side { align-items: flex-start; text-align: left; flex-direction: row; flex-wrap: wrap; gap: 4px 12px; }
-  .mc .tk-done { min-height: 44px; width: 100%; }
+  .tk-act { justify-content: stretch; }
+  .tk-act > a, .tk-act > button, .tk-act form > button { flex: 1 1 0; min-height: 44px; justify-content: center; }
 }
 
 /* --- Loglar -------------------------------------------------------------------- */
@@ -538,6 +539,8 @@ details[open] summary { margin-bottom: 6px; }
 .kw-hint { margin: 0 0 14px 2px; font-size: 14px; color: var(--tx2); max-width: 62ch; }
 .kw-f { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 500; color: var(--tx2); flex: 1 1 180px; min-width: 0; }
 .kw-g { flex: 2 1 260px; } .kw-s { flex: 0 0 110px; }
+/* Sütun formlarda (alt-alta sahələr) flex-basis hündürlüyə çevrilir — sahə öz ölçüsündə qalsın */
+.kw-edit form > .kw-f, .kw-new form > .kw-f, .od-add form > .kw-f, .ag-set > .kw-f, .dz-more form > .kw-f { flex: 0 0 auto; }
 .kw-row { display: flex; gap: 12px 14px; flex-wrap: wrap; align-items: flex-end; margin: 12px 0; }
 .kw-chk { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--tx); cursor: pointer; min-height: 40px; }
 .kw-chk input { width: 16px; height: 16px; accent-color: var(--go); }
@@ -1063,16 +1066,25 @@ a.cd-name:hover { text-decoration: underline; }
 /* Yemək şəkilləri (/tools/dishes) */
 .dz-cat { font-size: 15px; font-weight: 600; margin: 26px 0 10px; color: var(--ink); }
 .dz-cat small { color: var(--ink-3); font-weight: 500; margin-left: 6px; }
-.dz-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+.dz-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
 .dz-card { display: flex; flex-direction: column; gap: 6px; background: var(--s1); border: 1px solid var(--line); border-radius: 12px; padding: 10px; min-width: 0; }
 .dz-img { aspect-ratio: 4 / 3; border-radius: 8px; overflow: hidden; background: var(--sheet); border: 1px dashed var(--steel); display: flex; align-items: center; justify-content: center; }
 .dz-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.dz-img span { color: var(--ink-3); font-size: 12px; }
+.dz-img { cursor: pointer; transition: border-color 150ms ease; }
+.dz-img span { display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--ink-3); font-size: 12px; }
+.dz-img span b { font-size: 22px; font-weight: 400; line-height: 1; }
+@media (hover: hover) and (pointer: fine) { .dz-img:hover { border-color: var(--run); } }
 .dz-card:has(img) .dz-img { border-style: solid; border-color: var(--line); }
 .dz-name { font-size: 14px; line-height: 1.3; overflow-wrap: anywhere; }
 .dz-alt { color: var(--ink-3); font-size: 12px; overflow-wrap: anywhere; }
+.dz-up { margin-top: auto; }
 .dz-up label { cursor: pointer; width: 100%; }
 .dz-up label:focus-within { outline: 2px solid var(--run); outline-offset: 2px; }
 .dz-more summary { cursor: pointer; color: var(--ink-3); font-size: 12px; }
 .dz-more form { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .dz-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+@media (max-width: 560px) {
+  .dz-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .dz-card { padding: 8px; }
+  .dz-name { font-size: 13px; }
+}
