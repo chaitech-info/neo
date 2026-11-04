@@ -89,6 +89,17 @@ def test_only_pending_leads_can_be_converted(factory):
         crm.convert_lead(s, rejected, 1)
 
 
+def test_open_tasks_come_first(factory):
+    key = _lead(factory, "https://order.az")
+    with factory() as s:
+        opp = crm.convert_lead(s, key, 1).opportunity
+        first = crm.opp_tasks(s, opp.id)[0]
+        crm.add_task(s, opp, "Zəng et", None, 1, 1)
+        first.status = "done"
+        s.flush()
+        assert [t.title for t in crm.opp_tasks(s, opp.id)][0] == "Zəng et"  # bitmiş tapşırıq altda
+
+
 def test_stage_rules(factory):
     key = _lead(factory, "https://sahil.az")
     with factory() as s:

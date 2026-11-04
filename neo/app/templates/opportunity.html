@@ -28,7 +28,7 @@
   </header>
 
   <section class="od-card">
-    <h2>Növbəti addımlar <em>{{ tasks|length }}</em></h2>
+    <h2>Növbəti addımlar <em>{{ tasks|selectattr('status', 'in', ['open', 'in_progress'])|list|length }}</em></h2>
     {% if tasks %}
     <ul class="tk-list">
       {% for t in tasks %}

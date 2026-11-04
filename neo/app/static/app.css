@@ -289,7 +289,7 @@ details[open] summary { margin-bottom: 6px; }
 .mc-btn[disabled] { opacity: .45; cursor: not-allowed; transform: none; }
 .mc a.mc-btn, .mc button.mc-btn { color: var(--tx); }
 .mc-btn-hero, .mc-btn-yes { background: var(--go); border-color: var(--go); color: var(--go-d); font-weight: 600; min-height: 46px; padding: 0 22px; font-size: 15px; }
-.mc a.mc-btn-hero, .mc button.mc-btn-yes { color: var(--go-d); }
+.mc a.mc-btn-hero, .mc button.mc-btn-hero, .mc button.mc-btn-yes { color: var(--go-d); }
 .mc-btn-no { background: transparent; color: var(--tx2); min-height: 46px; padding: 0 20px; font-size: 15px; }
 .mc a.mc-btn-no, .mc button.mc-btn-no { color: var(--tx2); }
 .mc-btn-sm { min-height: 34px; padding: 0 12px; font-size: 13px; background: transparent; }
@@ -1088,3 +1088,6 @@ a.cd-name:hover { text-decoration: underline; }
   .dz-card { padding: 8px; }
   .dz-name { font-size: 13px; }
 }
+/* Hələ sayılmayan say (məs. işçilər axtarılmayıb) boş həb kimi görünməsin */
+h2 em:empty { display: none; }
+.kw-sec + .ld-filter { margin-top: 18px; }

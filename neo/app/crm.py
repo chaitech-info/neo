@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
-from sqlalchemy import select, update
+from sqlalchemy import case, select, update
 from sqlalchemy.orm import Session
 
 from app.db.models import LOST_REASONS, Contact, LeadRecord, Opportunity, Outreach, Task
@@ -271,4 +271,7 @@ def set_task_status(session: Session, task: Task, status: str) -> None:
 
 
 def opp_tasks(session: Session, opp_id: int) -> list[Task]:
-    return list(session.scalars(select(Task).where(Task.opportunity_id == opp_id).order_by(Task.created_at, Task.id)))
+    # Açıq tapşırıqlar yuxarıda, bitmiş/ləğv edilmişlər altda — "Növbəti addımlar" həqiqətən növbəti olsun
+    done_last = case((Task.status.in_(("open", "in_progress")), 0), else_=1)
+    return list(session.scalars(select(Task).where(Task.opportunity_id == opp_id)
+                                .order_by(done_last, Task.created_at, Task.id)))
