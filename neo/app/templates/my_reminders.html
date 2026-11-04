@@ -14,7 +14,7 @@
       <div class="kw-row">
         <label class="kw-f">Tarix və saat (Bakı vaxtı)<input type="datetime-local" name="due_at" required></label>
         <label class="kw-f">Neçə əvvəl xatırladım?<input type="number" name="before" min="0" max="525600" value="30" inputmode="numeric"></label>
-        <label class="kw-f">&nbsp;<select name="unit" aria-label="Vahid">{% for k, v in units.items() %}<option value="{{ k }}">{{ v }} əvvəl</option>{% endfor %}</select></label>
+        <label class="kw-f">Vahid<select name="unit">{% for k, v in units.items() %}<option value="{{ k }}">{{ v }} əvvəl</option>{% endfor %}</select></label>
       </div>
       <label class="kw-f">Qeyd (istəyə görə)<textarea name="note" rows="2" maxlength="2000"></textarea></label>
       <button class="mc-btn mc-btn-hero" type="submit">Xatırlatma qur</button>

@@ -29,7 +29,7 @@
         </div>
         <button class="mc-btn mc-btn-sm" type="button" data-agreement-add>+ Daha bir razılaşma</button>
 
-        <div class="kw-row">
+        <div class="kw-row ct-remind">
           <label class="kw-chk"><input type="checkbox" name="remind" value="1" checked>Bitmə tarixindən əvvəl mənə xatırlat</label>
           <label class="kw-f"><span class="sr">Neçə</span><input type="number" name="before" min="0" max="365" value="30" inputmode="numeric" aria-label="Neçə əvvəl"></label>
           <label class="kw-f"><span class="sr">Vahid</span><select name="unit" aria-label="Vahid">{% for k, v in units.items() %}<option value="{{ k }}" {% if k == 'day' %}selected{% endif %}>{{ v }} əvvəl</option>{% endfor %}</select></label>

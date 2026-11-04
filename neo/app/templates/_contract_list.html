@@ -21,7 +21,7 @@
             <input type="hidden" name="title" value="Müqavilə bitir: {{ c.company_name }}{% if c.title %} — {{ c.title }}{% endif %}">
             <label class="kw-f">Nə vaxta (Bakı)<input type="datetime-local" name="due_at" required value="{{ c.contract_end.isoformat() }}T{{ '%02d'|format(remind_hour) }}:00"></label>
             <label class="kw-f">Neçə əvvəl<input type="number" name="before" min="0" max="525600" value="30" inputmode="numeric"></label>
-            <label class="kw-f">&nbsp;<select name="unit" aria-label="Vahid">{% for k, v in units.items() %}<option value="{{ k }}" {% if k == 'day' %}selected{% endif %}>{{ v }} əvvəl</option>{% endfor %}</select></label>
+            <label class="kw-f">Vahid<select name="unit">{% for k, v in units.items() %}<option value="{{ k }}" {% if k == 'day' %}selected{% endif %}>{{ v }} əvvəl</option>{% endfor %}</select></label>
             <button class="mc-btn mc-btn-sm mc-btn-hero" type="submit">Qur</button>
           </form>
         </details>

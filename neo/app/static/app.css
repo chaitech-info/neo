@@ -21,24 +21,24 @@
 :root, :root[data-theme="dark"] {
   color-scheme: dark;
   --bg: #0F1115; --s1: #171A21; --s2: #1D212A; --line: #232834; --line2: #1D222C; --hov: #262B36; --bd2: #323948;
-  --tx: #E8EAED; --tx2: #8B93A1; --tx3: #6B7385; --inv: #0F1115;
+  --tx: #E8EAED; --tx2: #969EAC; --tx3: #828B9C; --inv: #0F1115;
   --go: #4ADE80; --go-d: #052E16; --go-h: #6EE79A; --go-w: rgba(74,222,128,.12);
   --warn: #FBBF24; --warn-w: rgba(251,191,36,.12);
   --err: #F87171; --err-w: rgba(248,113,113,.12);
   --run: #60A5FA; --run-w: rgba(96,165,250,.12);
   --k-tender: #FB923C; --k-employer: #60A5FA; --k-news: #A78BFA;
   --st-new: #A78BFA; --st-contacted: #60A5FA; --st-qualified: #2DD4BF; --st-proposal: #FB923C; --st-negotiation: #F472B6; --st-won: #4ADE80; --st-lost: #F87171;
-  --rail-bg: #0B0D11; --rail-tx: #AEB5C2; --rail-tx2: #6B7385; --rail-line: #1B1F28; --rail-hov: #171A21; --rail-brand: #F3F4F6; --rail-cnt: #232834;
+  --rail-bg: #0B0D11; --rail-tx: #AEB5C2; --rail-tx2: #828B9C; --rail-line: #1B1F28; --rail-hov: #171A21; --rail-brand: #F3F4F6; --rail-cnt: #232834;
 }
 :root[data-theme="light"] {
   color-scheme: light;
   --bg: #F5F6F8; --s1: #FFFFFF; --s2: #F0F2F5; --line: #E2E5EA; --line2: #ECEEF2; --hov: #E8EBF0; --bd2: #C9CED7;
-  --tx: #111827; --tx2: #566070; --tx3: #6B7280; --inv: #FFFFFF;
-  --go: #15803D; --go-d: #FFFFFF; --go-h: #166534; --go-w: rgba(21,128,61,.10);
-  --warn: #B45309; --warn-w: rgba(217,119,6,.13);
+  --tx: #111827; --tx2: #566070; --tx3: #646B78; --inv: #FFFFFF;
+  --go: #166534; --go-d: #FFFFFF; --go-h: #14532D; --go-w: rgba(21,128,61,.10);
+  --warn: #92400E; --warn-w: rgba(217,119,6,.13);
   --err: #B91C1C; --err-w: rgba(220,38,38,.09);
   --run: #1D4ED8; --run-w: rgba(37,99,235,.09);
-  --k-tender: #C2410C; --k-employer: #1D4ED8; --k-news: #6D28D9;
+  --k-tender: #9A3412; --k-employer: #1D4ED8; --k-news: #6D28D9;
   --st-new: #6D28D9; --st-contacted: #1D4ED8; --st-qualified: #0F766E; --st-proposal: #C2410C; --st-negotiation: #BE185D; --st-won: #15803D; --st-lost: #B91C1C;
   --rail-bg: #FFFFFF; --rail-tx: #374151; --rail-tx2: #6B7280; --rail-line: #E2E5EA; --rail-hov: #F0F2F5; --rail-brand: #111827; --rail-cnt: #E8EBF0;
 }
@@ -293,6 +293,7 @@ details[open] summary { margin-bottom: 6px; }
 .mc-btn-no { background: transparent; color: var(--tx2); min-height: 46px; padding: 0 20px; font-size: 15px; }
 .mc a.mc-btn-no, .mc button.mc-btn-no { color: var(--tx2); }
 .mc-btn-sm { min-height: 34px; padding: 0 12px; font-size: 13px; background: transparent; }
+.mc-btn-sm.mc-btn-hero { background: var(--go); }   /* kiçik yaşıl düymə də yaşıl qalsın — yoxsa tünd yazı tünd fonda itir */
 @media (hover: hover) and (pointer: fine) {
   .mc-btn:not([disabled]):hover { background: var(--hov); border-color: var(--bd2); }
   .mc-btn-hero:not([disabled]):hover, .mc-btn-yes:not([disabled]):hover { background: var(--go-h); border-color: var(--go-h); }
@@ -528,7 +529,8 @@ details[open] summary { margin-bottom: 6px; }
 
 /* --- Açar sözlər ---------------------------------------------------------------- */
 
-.mc-kw input[type="text"], .mc-kw input:not([type]), .mc-kw input[type="search"], .mc-kw select, .mc-kw textarea {
+.mc-kw input[type="text"], .mc-kw input:not([type]), .mc-kw input[type="search"], .mc-kw select, .mc-kw textarea,
+.mc-kw input:where([type="email"], [type="tel"], [type="url"], [type="number"], [type="date"], [type="datetime-local"], [type="time"], [type="password"]) {
   width: 100%; min-height: 40px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--tx); font: 400 14.5px var(--font); padding: 9px 12px; transition: border-color 150ms ease; }
 .mc-kw textarea { resize: vertical; line-height: 1.5; }
 .mc-kw ::placeholder { color: var(--tx3); }
@@ -658,6 +660,10 @@ details[open] summary { margin-bottom: 6px; }
 .od-add summary { cursor: pointer; padding: 10px 0; font-weight: 500; font-size: 14.5px; color: var(--tx); }
 .od-add form { display: flex; flex-direction: column; gap: 6px; padding-bottom: 6px; }
 .od-add .mc-btn-hero { align-self: flex-start; margin-top: 10px; }
+/* Xatırlatma forması (müqavilə siyahısı) — sətir, sağa sıxılmış pilləkən yox */
+.od-add form.kw-row { flex-direction: row; align-items: flex-end; gap: 10px 12px; }
+.od-add form.kw-row > .kw-f { flex: 1 1 150px; }
+.od-add form.kw-row > .mc-btn-hero { align-self: flex-end; margin-top: 0; }
 .od-card form > .mc-btn-hero { margin-top: 14px; }
 .od-lost-box { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
 .od-lost-box[hidden] { display: none; }
@@ -1091,3 +1097,17 @@ a.cd-name:hover { text-decoration: underline; }
 /* Hələ sayılmayan say (məs. işçilər axtarılmayıb) boş həb kimi görünməsin */
 h2 em:empty { display: none; }
 .kw-sec + .ld-filter { margin-top: 18px; }
+
+/* Bloklar arasında boşluq: cədvəl → düymə, "əlavə et" paneli → boş vəziyyət, jurnal başlığı → status (telefonda) */
+.mc .table-wrap + .mc-btn { margin-top: 14px; }
+.kw-new + .empty { margin-top: 14px; }
+.mc-logs .lg-head > form { margin-bottom: 14px; }
+
+/* Sütun formlarda sahələr arası məsafə hər yerdə eyni (12px) — kw-row-un öz margin-i form gap-ına əlavə olunmasın */
+.kw-edit form, .kw-new form, .od-add form, .of-card form, .dz-more form, .ag-set { gap: 12px; }
+.kw-edit form > .kw-row, .kw-new form > .kw-row, .od-add form > .kw-row, .of-card form > .kw-row, .dz-more form > .kw-row, .ag-set > .kw-row { margin: 0; }
+/* Razılaşma blokunun başlığı iki sətrə düşəndə çərçivənin xəttini kəsməsin — başlıq blokun içində */
+.ag-set legend { float: left; width: 100%; padding: 0; margin-bottom: 2px; }
+/* "Xatırlat": say və vahid telefonda da yan-yana, checkbox-un altında */
+.ct-remind > .kw-chk { flex: 1 0 100%; min-height: 32px; }
+.ct-remind > .kw-f { flex: 0 1 120px; }
