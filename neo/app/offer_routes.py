@@ -18,10 +18,10 @@ from sqlalchemy import select
 from starlette.concurrency import run_in_threadpool
 
 from app import offer_client as agent
-from app import dishes, offer_pdf
+from app import dishes, offer_pdf, package_menus
 from app.auth import security
 from app.auth.security import REQUIRE, csrf_token
-from app.db.models import LeadRecord, OfferRecord, User
+from app.db.models import Dish, LeadRecord, OfferRecord, User
 
 log = structlog.get_logger()
 router = APIRouter()
@@ -82,8 +82,10 @@ def record_offer(db, data: dict, body: dict, user: User, lead_id: str | None,
 def render_pdf(snapshot: dict, pictures: bool = False) -> bytes:
     """Neo dizaynında PDF. Şəkilli təklifdə yeməklərin şəkilləri kataloqdan (app/dishes.py) götürülür;
     kataloqda olmayan yeməklər şəkilsiz əlavə olunur ki, "Yemək şəkilləri"ndə şəkli gözləyən kimi görünsün."""
+    with security.SessionLocal() as db:
+        plans = package_menus.plans_for_snapshot(db, snapshot)   # menyu planı olan paket: vaxtlar, əlavə sahələr
     if not pictures:
-        return offer_pdf.render(snapshot)
+        return offer_pdf.render(snapshot, plans=plans)
     items = offer_pdf.menu_items(snapshot)
     names = [name for name, _ in items]
     with security.SessionLocal() as db:
@@ -93,8 +95,8 @@ def render_pdf(snapshot: dict, pictures: bool = False) -> bytes:
         except Exception:
             db.rollback()
             log.exception("dish_remember_failed")
-        photos = dishes.photos_for(db, names)
-    return offer_pdf.render(snapshot, photos)
+        photos = dishes.photos_for(db, names + [i for p in plans.values() for b in p.blocks for g in b.groups for i in g.items])
+    return offer_pdf.render(snapshot, photos, plans)
 
 
 def _render_base64(data: dict, pictures: bool = False) -> str:
@@ -314,11 +316,24 @@ async def packages_update(brand: str, package_id: str, request: Request, me: Use
         return _error(str(exc), 422)
     if not isinstance(raw, dict) or raw.get("id") != package_id:
         return _error("Paketin məlumatı yanlışdır", 422)
+    # Menyu planı ilə: agentə gedən mətn menyusu plandan yaradılır, plan Neo-nun bazasında saxlanılır
+    plan = None
+    if "plan" in raw:
+        with security.SessionLocal() as db:
+            try:
+                plan = package_menus.clean(raw.pop("plan"), db)
+            except package_menus.PlanError as exc:
+                return _error(str(exc), 422)
+            raw["menu"] = package_menus.agent_menu(plan, package_menus.dish_map(db, plan))
     try:
         result = await run_in_threadpool(agent.update_package, brand, package_id, raw)
     except agent.OfferAgentError as exc:
         return _agent_error(exc)
-    log.info("offer_package_saved", brand=brand, package=package_id, user=me.email)
+    if plan is not None:
+        with security.SessionLocal() as db:
+            package_menus.save(db, brand, package_id, plan, me.id)
+            db.commit()
+    log.info("offer_package_saved", brand=brand, package=package_id, user=me.email, plan=plan is not None)
     return JSONResponse(result)
 
 
@@ -334,5 +349,127 @@ def packages_delete(brand: str, package_id: str, me: User = Depends(REQUIRE["adm
         return _error(str(exc), 422)
     except agent.OfferAgentError as exc:
         return _agent_error(exc)
+    with security.SessionLocal() as db:
+        package_menus.delete(db, brand, package_id)
+        db.commit()
     log.info("offer_package_deleted", brand=brand, package=package_id, user=me.email)
     return JSONResponse({"ok": True})
+
+
+# --- Menyu planı (paket redaktorunda) ------------------------------------------------
+
+
+def _dish_json(d: Dish, has_image: bool) -> dict:
+    return {"id": d.id, "name": d.name, "name_en": d.name_en or "", "name_ru": d.name_ru or "",
+            "category": d.category or "",
+            "img": f"/dishes/{d.id}/image?v={int(d.image_updated_at.timestamp()) if d.image_updated_at else 0}" if has_image else None}
+
+
+@router.get("/api/dish-catalog")
+def dish_catalog(me: User = Depends(REQUIRE["sales"])):
+    """Menyu planının yemək seçicisi üçün kataloq (şəkil özü yox, yalnız ünvanı)."""
+    with security.SessionLocal() as db:
+        with_image = set(db.scalars(select(Dish.id).where(Dish.image.is_not(None))))
+        rows = db.scalars(select(Dish).order_by(Dish.name)).all()
+        return JSONResponse({"dishes": [_dish_json(d, d.id in with_image) for d in rows],
+                             "categories": dishes.CATEGORIES})
+
+
+@router.post("/api/dish-catalog")
+async def dish_catalog_add(request: Request, me: User = Depends(REQUIRE["sales"]),
+                           _csrf: None = Depends(verify_csrf_header)):
+    raw = await _body(request)
+    if not isinstance(raw, dict):
+        return _error("Sorğu yanlışdır", 422)
+    with security.SessionLocal() as db:
+        try:
+            d = dishes.add_dish(db, str(raw.get("name") or ""), str(raw.get("category") or ""), user_id=me.id)
+        except dishes.DishError as exc:
+            return _error(str(exc), 422)
+        db.commit()
+        return JSONResponse({"dish": _dish_json(d, False)})
+
+
+def _find_package(brand: str, package_id: str) -> dict | None:
+    data = agent.list_packages(brand)
+    items = data if isinstance(data, list) else (data.get("packages") if isinstance(data, dict) else None) or []
+    return next((p for p in items if isinstance(p, dict) and p.get("id") == package_id), None)
+
+
+@router.get("/api/offer-packages/{brand}/plans")
+def package_plan_ids(brand: str, me: User = Depends(REQUIRE["admin"])):
+    if (bad := _brand_or_error(brand)):
+        return bad
+    with security.SessionLocal() as db:
+        return JSONResponse({"ids": sorted(package_menus.load_all(db, brand))})
+
+
+@router.get("/api/offer-packages/{brand}/{package_id}/plan")
+def package_plan(brand: str, package_id: str, me: User = Depends(REQUIRE["admin"])):
+    """Saxlanmış plan; yoxdursa — agentdəki mətn menyusundan çevrilmiş (hələ saxlanmayıb, `imported`)."""
+    if (bad := _brand_or_error(brand)):
+        return bad
+    with security.SessionLocal() as db:
+        plan = package_menus.load(db, brand, package_id)
+        menu = None
+        if package_id != "_new":
+            try:
+                found = _find_package(brand, package_id)
+            except agent.OfferAgentError as exc:
+                if plan is None:
+                    return _agent_error(exc)
+                found = None          # agent cavab vermir — saxlanmış plan yenə də açılsın
+            menu = (found or {}).get("menu")
+        # Saxlanmış plan agentdəki menyu ilə eynidirsə — plan; menyu kənardan (JSON yükləmə) dəyişibsə — mətndən yenidən
+        if plan is not None and (not menu or package_menus.same_menu(package_menus.agent_menu(plan, package_menus.dish_map(db, plan)), menu)):
+            return JSONResponse({"plan": plan, "imported": False, "presets": package_menus.FIELD_PRESETS})
+        plan = package_menus.from_agent_menu(db, menu) if menu else package_menus.default_plan()
+        db.commit()   # çevirmədə kataloqa düşən yeni yeməklər
+        return JSONResponse({"plan": plan, "imported": bool(menu), "presets": package_menus.FIELD_PRESETS})
+
+
+def _menu_pdf(package: dict, plan: dict, brand: str, schedule: bool) -> bytes:
+    with security.SessionLocal() as db:
+        dish_rows = package_menus.dish_map(db, plan)
+        pkg = package_menus.pdf_package(plan, dish_rows, package)
+        photos = dishes.photos_for(db, [i for b in pkg.blocks for g in b.groups for i in g.items])
+    return offer_pdf.render_menu(pkg, photos, brand, plan.get("note") or "", schedule)
+
+
+def _pdf_response(pdf: bytes, name: str) -> Response:
+    safe = "".join(ch for ch in name if ch.isalnum() or ch in "-_") or "menu"
+    return Response(pdf, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{safe}.pdf"'})
+
+
+@router.post("/api/offer-packages/{brand}/{package_id}/menu.pdf")
+async def package_menu_preview(brand: str, package_id: str, request: Request, me: User = Depends(REQUIRE["admin"]),
+                               _csrf: None = Depends(verify_csrf_header)):
+    """Redaktordakı (hələ saxlanmamış) planın PDF-i — "PDF-ə bax"."""
+    if (bad := _brand_or_error(brand)):
+        return bad
+    raw = await _body(request)
+    if not isinstance(raw, dict) or not isinstance(raw.get("package"), dict):
+        return _error("Sorğu yanlışdır", 422)
+    with security.SessionLocal() as db:
+        try:
+            plan = package_menus.clean(raw.get("plan"), db)
+        except package_menus.PlanError as exc:
+            return _error(str(exc), 422)
+    pdf = await run_in_threadpool(_menu_pdf, raw["package"], plan, brand, raw.get("schedule") is not False)
+    return _pdf_response(pdf, f"{package_id}-menu")
+
+
+@router.get("/tools/packages/{brand}/{package_id}/menu.pdf")
+def package_menu_pdf(brand: str, package_id: str, schedule: str = "1", me: User = Depends(REQUIRE["sales"])):
+    """Saxlanmış planın PDF-i (müştəriyə göndərmək üçün): üz qabığı, həftəlik menyu, yemək şəkilləri."""
+    if (bad := _brand_or_error(brand)):
+        return bad
+    with security.SessionLocal() as db:
+        plan = package_menus.load(db, brand, package_id)
+    if plan is None:
+        return _error("Bu paketin menyu planı yoxdur", 404)
+    try:
+        package = _find_package(brand, package_id) or {"id": package_id, "name": {"az": package_id}}
+    except agent.OfferAgentError as exc:
+        return _agent_error(exc)
+    return _pdf_response(_menu_pdf(package, plan, brand, schedule != "0"), f"{package_id}-menu")

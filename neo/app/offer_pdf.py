@@ -8,8 +8,12 @@ Menyu iki cür ola bilər (Alətlər → Paketlər):
   "Kateqoriya: yemək" şəklində ("Şorba: Mərcimək şorbası") — gün bloku kateqoriya sütunlarına bölünür;
 - sadə: bölmələr kateqoriyadır ("Şorba", "Əsas yemək", …) — bir blok kimi göstərilir.
 
-Şəkilli təklif (`render(snapshot, photos)`): kataloqdakı yeməyin şəkli (app/dishes.py) maddənin yanında
-kiçik kart kimi çıxır; şəkli olmayan maddə adi sətir kimi qalır.
+Şəkilli təklif (`render(snapshot, photos)`): sonda "Yemək şəkilləri" səhifələri — nümunə
+SeaPort_MediumPlus_Menu_Dish_Photos.pdf kimi, kateqoriya-kateqoriya, iki sütunda böyük şəkil və altında ad.
+Şəkli olmayan yemək bu səhifələrə düşmür (menyuda mətnlə qalır).
+
+Paketin menyu planı varsa (app/package_menus.py), menyu plandan qurulur: yemək vaxtları, rotasiya həftələri
+və yeməyin əlavə sahələri (porsiya, kalori …) adın altında kiçik yazı ilə.
 
 Şrift Caladea-dır (nümunə PDF-dəki kimi); onda olmayan hərflər (ə, Ə, kiril) Noto Serif ilə yazılır.
 """
@@ -36,9 +40,9 @@ COL2, COL3 = 198.0, 391.0           # sağ sütunlar (üz qabığı / bölmə ba
 DAY_COLS = (LEFT, 223.5, 391.0)
 FOOTER_RULE, BODY_BOTTOM = 779.0, 760.0
 LEAD = 15.8                         # menyu maddələrinin sətir aralığı
-PHOTO_W, PHOTO_H = 40.0, 30.0       # şəkilli təklifdə maddənin şəkli (pt)
-PHOTO_GAP = 7.0
-PHOTO_LEAD = 12.5
+GAL_W, GAL_H, GAL_GAP = 232.0, 173.0, 18.0   # "Yemək şəkilləri": 2 sütun, şəkil 232×173 pt (nümunədəki kimi)
+GAL_ROW = 204.0                              # şəkil + ad + boşluq
+NOTE_LEAD = 11.0                             # yeməyin əlavə sahələri sətri
 
 NAVY = HexColor("#1a365d")
 TEAL = HexColor("#00a0b2")
@@ -139,7 +143,9 @@ def _en(value: Any) -> str:
 
 
 def _weekday(title: Any) -> int | None:
-    names = {v.casefold() for v in (title.values() if isinstance(title, dict) else [title]) if isinstance(v, str)}
+    """Bölmə adı həftənin günüdürsə — günün indeksi. "Bazar ertəsi · 2-ci həftə" (rotasiya) da gün sayılır."""
+    names = {v.split(" · ")[0].strip().casefold()
+             for v in (title.values() if isinstance(title, dict) else [title]) if isinstance(v, str)}
     for i, day in enumerate(WEEKDAYS):
         if any(d.casefold() in names for d in day):
             return i
@@ -150,6 +156,7 @@ def _weekday(title: Any) -> int | None:
 class Group:
     label: str            # "Şorba"; boş — kateqoriyasız
     items: list[str] = field(default_factory=list)
+    notes: dict[str, str] = field(default_factory=dict)   # yemək → "250 q · 420 kkal" (menyu planından)
 
 
 @dataclass
@@ -169,6 +176,7 @@ class Package:
     unit: str
     description: str
     days_span: tuple[str, str] | None   # ("Bazar ertəsi – Cümə", "Monday – Friday")
+    daily: bool = True                  # "Gündəlik seçim" bloku (bir neçə yemək vaxtında qarışıq olur — göstərilmir)
 
 
 _CAT_RE = re.compile(r"^\s*([^:]{2,40}):\s*(.+)$")
@@ -192,7 +200,9 @@ def _package(line: dict, lang: str, currency: str) -> Package:
                     groups.append(g := Group(label))
                 g.items.append(dish)
             day = WEEKDAYS[d]
-            blocks.append(Block(day[2] if lang == "ru" else day[0], day[1], groups))
+            suffix = _tr(sec.get("title"), lang).partition(" · ")[2]
+            title = (day[2] if lang == "ru" else day[0]) + (f" · {suffix}" if suffix else "")
+            blocks.append(Block(title, day[1], groups))
     else:
         groups = [Group(_tr(s.get("title"), lang), [_tr(it, lang) for it in s.get("items") or [] if _tr(it, lang)])
                   for s in menu]
@@ -217,27 +227,41 @@ def menu_items(snapshot: dict) -> list[tuple[str, str]]:
     return out
 
 
-def _thumb(data: bytes) -> ImageReader | None:
-    """Şəkli PHOTO_W:PHOTO_H nisbətində mərkəzdən kəsib kiçildir (PDF yüngül qalsın)."""
+def _cover_crop(data: bytes, w: float, h: float) -> ImageReader | None:
+    """Şəkli w:h nisbətində mərkəzdən kəsib kiçildir (PDF yüngül qalsın)."""
     from PIL import Image
 
     try:
         img = Image.open(io.BytesIO(data)).convert("RGB")
     except Exception:
         return None
-    ratio = PHOTO_W / PHOTO_H
-    w, h = img.size
-    if w / h > ratio:
-        nw = int(h * ratio)
-        img = img.crop(((w - nw) // 2, 0, (w - nw) // 2 + nw, h))
+    ratio = w / h
+    iw, ih = img.size
+    if iw / ih > ratio:
+        nw = int(ih * ratio)
+        img = img.crop(((iw - nw) // 2, 0, (iw - nw) // 2 + nw, ih))
     else:
-        nh = int(w / ratio)
-        img = img.crop((0, (h - nh) // 2, w, (h - nh) // 2 + nh))
-    img = img.resize((int(PHOTO_W * 5), int(PHOTO_H * 5)), Image.LANCZOS)
+        nh = int(iw / ratio)
+        img = img.crop((0, (ih - nh) // 2, iw, (ih - nh) // 2 + nh))
+    img = img.resize((int(w * 2.6), int(h * 2.6)), Image.LANCZOS)
     out = io.BytesIO()
     img.save(out, "JPEG", quality=80, optimize=True)
     out.seek(0)
     return ImageReader(out)
+
+
+# Kateqoriya → "Yemək şəkilləri" bölməsinin adı (cəm) və ingiliscəsi
+SECTION_NAMES = {
+    "Şorba": ("Şorbalar", "Soups"), "Əsas yemək": ("Əsas yeməklər", "Main courses"), "Qarnir": ("Qarnirlər", "Side dishes"),
+    "Salat": ("Salatlar", "Salads"), "Desert": ("Desertlər", "Desserts"), "İçki": ("İçkilər", "Drinks"),
+    "Çörək": ("Çörək", "Bread"),
+}
+
+
+def section_name(label: str) -> tuple[str, str]:
+    from app.dishes import category_name
+
+    return SECTION_NAMES.get(category_name(label), (label or "Digər", ""))
 
 
 def _money(value: Any, currency: str = "AZN") -> str:
@@ -287,16 +311,18 @@ def summary_line(pkg: Package) -> str:
 
 
 class Doc:
-    def __init__(self, snapshot: dict, total: int = 0, photos: dict[str, bytes] | None = None):
+    def __init__(self, snapshot: dict, total: int = 0, photos: dict[str, bytes] | None = None,
+                 plans: dict[int, Package] | None = None):
+        """`plans` — {snapshot-dakı sətrin indeksi: menyu planından qurulmuş paket} (app/package_menus.py)."""
         _register_fonts()
         self.snap, self.total = snapshot, total
         self.photos = photos or {}
-        self._thumbs: dict[str, ImageReader | None] = {}
         self.lang = snapshot.get("language") if snapshot.get("language") in ("az", "en", "ru") else "az"
         self.brand = snapshot.get("brand") or "seaport"
         totals = snapshot.get("totals") or {}
         self.currency = totals.get("currency") or "AZN"
-        self.packages = [_package(l, self.lang, self.currency) for l in snapshot.get("lines") or [] if isinstance(l, dict)]
+        lines = [l for l in snapshot.get("lines") or [] if isinstance(l, dict)]
+        self.packages = [(plans or {}).get(i) or _package(l, self.lang, self.currency) for i, l in enumerate(lines)]
         self.weekly = bool(self.packages) and all(p.weekly for p in self.packages)
         self.buf = io.BytesIO()
         self.c = Canvas(self.buf, pagesize=A4)
@@ -451,40 +477,18 @@ class Doc:
         cols[2].extend(groups[i:])
         return cols
 
-    def photo(self, item: str) -> ImageReader | None:
-        if not self.photos:
-            return None
-        from app.dishes import dish_key
-
-        key = dish_key(item)
-        if key not in self._thumbs:
-            self._thumbs[key] = _thumb(self.photos[key]) if key in self.photos else None
-        return self._thumbs[key]
-
-    def item_rows(self, g: Group) -> list[tuple[ImageReader | None, list[str], float]]:
-        """Hər maddə: (şəkil, sətirlər, hündürlük). Şəkilli maddə — şəkil + yanında daha dar mətn."""
+    def item_rows(self, g: Group) -> list[tuple[list[str], list[str], float]]:
+        """Hər maddə: (ad sətirləri, əlavə sahə sətirləri, hündürlük)."""
         rows = []
         for item in g.items:
-            img = self.photo(item)
-            if img is not None:
-                lines = self.t.wrap(item, 10, 150 - PHOTO_W - PHOTO_GAP)[:3]
-                rows.append((img, lines, max(PHOTO_H, PHOTO_LEAD * len(lines)) + 4))
-            else:
-                lines = self.t.wrap(item, 11, 150)
-                rows.append((None, lines, LEAD * len(lines)))
+            lines = self.t.wrap(item, 11, 150)
+            note = g.notes.get(item, "")
+            notes = self.t.wrap(note, 8.5, 150)[:2] if note else []
+            rows.append((lines, notes, LEAD * len(lines) + NOTE_LEAD * len(notes)))
         return rows
 
     def group_height(self, g: Group) -> float:
         return (15 if g.label else 0) + sum(h for _, _, h in self.item_rows(g)) + 5
-
-    def draw_photo(self, img: ImageReader, x: float, top: float) -> None:
-        c = self.c
-        c.saveState()
-        path = c.beginPath()
-        path.roundRect(x, H - top - PHOTO_H, PHOTO_W, PHOTO_H, 4)
-        c.clipPath(path, stroke=0, fill=0)
-        c.drawImage(img, x, H - top - PHOTO_H, PHOTO_W, PHOTO_H)
-        c.restoreState()
 
     def day_block(self, b: Block) -> None:
         self.ensure(self.block_height(b))
@@ -501,26 +505,87 @@ class Doc:
                 if g.label:
                     t.draw(x, yy, g.label, 8.5, GREY, italic=True)
                     yy += 15
-                for img, lines, h in self.item_rows(g):
-                    if img is None:
-                        for line in lines:
-                            t.draw(x, yy, line, 11, NAVY)
-                            yy += LEAD
-                        continue
-                    ptop = yy - 9                      # şəklin yuxarısı — sətrin böyük hərf hündürlüyündə
-                    self.draw_photo(img, x, ptop)
-                    ty = ptop + max(0.0, (PHOTO_H - PHOTO_LEAD * len(lines)) / 2) + 9.5
+                for lines, notes, _ in self.item_rows(g):
                     for line in lines:
-                        t.draw(x + PHOTO_W + PHOTO_GAP, ty, line, 10, NAVY)
-                        ty += PHOTO_LEAD
-                    yy += h
+                        t.draw(x, yy, line, 11, NAVY)
+                        yy += LEAD
+                    for line in notes:
+                        t.draw(x, yy - 3, line, 8.5, GREY)
+                        yy += NOTE_LEAD
                 yy += 5
             bottom = max(bottom, yy)
         self.y = bottom + 5          # son maddənin bazası + 26pt (nümunədəki kimi)
         self.rule(self.y)
 
+    # "Yemək şəkilləri" (nümunə: SeaPort_MediumPlus_Menu_Dish_Photos.pdf)
+    def gallery_sections(self) -> list[tuple[str, str, list[tuple[str, bytes, str]]]]:
+        """[(bölmə, ingiliscəsi, [(yemək, şəkil, əlavə sahələr)])] — yalnız şəkli olan yeməklər, menyudakı sırada."""
+        from app.dishes import dish_key
+
+        out: dict[str, tuple[str, str, list]] = {}
+        seen: set[str] = set()
+        for p in self.packages:
+            for b in p.blocks:
+                for g in b.groups:
+                    az, en = section_name(g.label)
+                    for item in g.items:
+                        k = dish_key(item)
+                        if k in seen or k not in self.photos:
+                            continue
+                        seen.add(k)
+                        out.setdefault(az, (az, en, []))[2].append((item, self.photos[k], g.notes.get(item, "")))
+        # Menyudakı sıra: şorba, əsas yemək, qarnir, salat …; tanınmayan kateqoriyalar sonda
+        order = [v[0] for v in SECTION_NAMES.values()]
+        return sorted(out.values(), key=lambda sec: order.index(sec[0]) if sec[0] in order else len(order))
+
+    def gallery(self, header: str = "Yemək şəkilləri", close_current: bool = True) -> None:
+        sections = self.gallery_sections()
+        if not sections:
+            return
+        t = self.t
+        running = self.running_head
+
+        def page() -> None:
+            self.logo(LEFT, 45, 50, small=True)
+            t.draw(RIGHT, 66, header, 8.5, GREY, italic=True, align="right")
+            self.rule(83, NAVY, 0.7)
+            self.y = 100.0
+
+        self.running_head = lambda: header     # type: ignore[method-assign]
+        if close_current:
+            self.finish_page(self.body_footer())
+        page()
+        first = True
+        for az, en, dishes in sections:
+            if not first and self.y + 46 + GAL_ROW > BODY_BOTTOM:
+                self.finish_page(self.body_footer())
+                page()
+            head = self.y + (6 if first or self.y <= 100 else 10)
+            w = t.draw(LEFT, head + 17.5, az, 17.5, NAVY)
+            if en:
+                t.draw(LEFT + w + 9, head + 17.5, en, 9.5, TEAL, italic=True)
+            self.rule(head + 27)
+            self.y = head + 46
+            first = False
+            for i in range(0, len(dishes), 2):
+                if self.y + GAL_ROW - 20 > BODY_BOTTOM + 6:
+                    self.finish_page(self.body_footer())
+                    page()
+                for j, (name, data, note) in enumerate(dishes[i:i + 2]):
+                    x = LEFT + j * (GAL_W + GAL_GAP)
+                    img = _cover_crop(data, GAL_W, GAL_H)
+                    if img is not None:
+                        self.c.drawImage(img, x, H - self.y - GAL_H, GAL_W, GAL_H)
+                    line = t.wrap(name, 10.8, GAL_W)[0]
+                    t.draw(x, self.y + GAL_H + 15, line, 10.8, NAVY)
+                    if note:
+                        t.draw(x, self.y + GAL_H + 27, t.wrap(note, 8.5, GAL_W)[0], 8.5, GREY)
+                self.y += GAL_ROW
+            self.y -= 4
+        self.running_head = running             # type: ignore[method-assign]
+
     def daily(self, pkg: Package) -> None:
-        sel = daily_selection(pkg)
+        sel = daily_selection(pkg) if pkg.daily else []
         if not sel:
             return
         rows = (len(sel) + 2) // 3
@@ -609,14 +674,111 @@ class Doc:
                 self.day_block(b)
             self.daily(p)
         self.proposal()
+        if self.photos:
+            self.gallery()
         self.finish_page(self.body_footer())
         self.c.save()
         return self.buf.getvalue()
 
 
-def render(snapshot: dict, photos: dict[str, bytes] | None = None) -> bytes:
-    """Agentin təklif snapshot-u → PDF baytları. `photos` — {dish_key: JPEG} (şəkilli təklif; app/dishes.py).
-    Footer-də "02 / 03" üçün iki keçid: birinci səhifələri sayır."""
-    first = Doc(snapshot, photos=photos)
+def render(snapshot: dict, photos: dict[str, bytes] | None = None, plans: dict[int, Package] | None = None) -> bytes:
+    """Agentin təklif snapshot-u → PDF baytları. `photos` — {dish_key: JPEG} (şəkilli təklif; app/dishes.py),
+    `plans` — menyu planından qurulmuş paketlər (app/package_menus.py). Footer-də "02 / 03" üçün iki keçid."""
+    first = Doc(snapshot, photos=photos, plans=plans)
     first.build()
-    return Doc(snapshot, total=len(first.pages), photos=photos).build()
+    return Doc(snapshot, total=len(first.pages), photos=photos, plans=plans).build()
+
+
+# --- Paketin menyu kitabçası (Alətlər → Paketlər → "PDF-ə bax") -----------------------------------
+
+
+class MenuDoc(Doc):
+    """Nümunə SeaPort_MediumPlus_Menu_Dish_Photos.pdf: üz qabığı, (istəyə görə) həftəlik menyu, yemək şəkilləri."""
+
+    def __init__(self, pkg: Package, photos: dict[str, bytes], brand: str = "seaport", note: str = "",
+                 schedule: bool = True, total: int = 0):
+        super().__init__({"brand": brand, "language": "az", "lines": [{}]}, total=total, photos=photos, plans={0: pkg})
+        self.note, self.schedule = note, schedule
+        self.weekly = True
+
+    def title(self) -> str:
+        p = self.packages[0]
+        return f"{p.name_en or p.name} Corporate Lunch Menu"
+
+    def running_head(self) -> str:
+        return "Həftəlik menyu" if self.schedule else "Yemək şəkilləri"
+
+    def cover(self) -> None:
+        t, p = self.t, self.packages[0]
+        self.logo(LEFT, 61, 129, small=False)
+        if self.brand == "seaport":
+            t.draw(LEFT + 64, 222, "Dadlı Həyatın Fəlsəfəsi", 12.5, LOGO_NAVY, align="center")
+        self.rule(351, TEAL, 2, LEFT, LEFT + 51)
+        y = 402
+        for line in t.wrap(self.title().upper(), 40, RIGHT - LEFT)[:3]:
+            t.draw(LEFT, y, line, 40, NAVY)
+            y += 44.5
+        has_photos = bool(self.gallery_sections())
+        en = ("Weekly Menu & Dish Photography" if self.schedule and has_photos else
+              "Weekly Menu" if self.schedule else "Dish Photography")
+        az = ("Həftəlik menyu və yemək şəkilləri" if self.schedule and has_photos else
+              "Həftəlik menyu" if self.schedule else "Yemək şəkilləri")
+        t.draw(LEFT, y - 2, en, 14, NAVY, italic=True)
+        t.draw(LEFT, y + 19, az, 14, GREY, italic=True)
+        self.rule(647.5)
+        t.draw(LEFT, 677, f"{p.name} paket", 13, TEAL)
+        sections = [section_name(g.label)[0].lower() for g in _unique_groups(p)]
+        desc = p.description or (f"{p.name} menyusunda təqdim olunan yeməklər" +
+                                 (": " + ", ".join(sections[:-1]) + (" və " if len(sections) > 1 else "") + sections[-1] + "."
+                                  if sections else "."))
+        yy = 678
+        for line in t.wrap(desc, 10, 300)[:4]:
+            t.draw(COL2, yy, line, 10, NAVY)
+            yy += 15
+        summary = summary_line(p)
+        if summary:
+            for line in t.wrap(summary, 8.5, 300)[:2]:
+                t.draw(COL2, yy + 6, line, 8.5, GREY)
+                yy += 12
+        if self.note:
+            t.draw(COL2, max(yy + 18, 731), t.wrap(self.note, 8, 300)[0], 8, GREY)
+        span = p.days_span
+
+        def footer(n: int, total: int) -> None:
+            t.draw(LEFT, 795, self.running_head(), 7.5, GREY)
+            if span:
+                t.draw(RIGHT, 795, span[0], 7.5, GREY, align="right")
+        self.finish_page(footer)
+
+    def build(self) -> bytes:
+        self.cover()
+        p = self.packages[0]
+        if self.schedule and p.blocks:
+            self.page_header()
+            self.section_title("Weekly menu", "Həftəlik menyu", p.days_span[0] if p.days_span else "")
+            for b in p.blocks:
+                self.day_block(b)
+            self.daily(p)
+            self.gallery()
+            self.finish_page(self.body_footer())
+        elif self.gallery_sections():
+            self.gallery(close_current=False)
+            self.finish_page(self.body_footer())
+        self.c.save()
+        return self.buf.getvalue()
+
+
+def _unique_groups(p: Package) -> list[Group]:
+    out: list[Group] = []
+    for b in p.blocks:
+        for g in b.groups:
+            if all(section_name(x.label) != section_name(g.label) for x in out):
+                out.append(g)
+    return out
+
+
+def render_menu(pkg: Package, photos: dict[str, bytes], brand: str = "seaport", note: str = "",
+                schedule: bool = True) -> bytes:
+    first = MenuDoc(pkg, photos, brand, note, schedule)
+    first.build()
+    return MenuDoc(pkg, photos, brand, note, schedule, total=len(first.pages)).build()

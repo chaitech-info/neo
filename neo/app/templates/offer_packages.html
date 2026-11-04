@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Paketlər — Neo{% endblock %}
-{% block main_class %}mc mc-kw mc-offers{% endblock %}
+{% block main_class %}mc mc-kw mc-offers mc-pk{% endblock %}
 {% block content %}
   <header class="ld-head">
     <h1 class="mc-title">Paketlər</h1>
-    <p class="ld-sub">Qiymət təklifi agentinin seçdiyi hazır paketlər. Qiymətlər AZN, ƏDV xaric.
-      <br><b>Həftəlik menyu PDF-i üçün:</b> bölmə adı — gün (“Bazar ertəsi”, “Çərşənbə axşamı” … “Cümə”), maddə — “Kateqoriya: yemək” (məs. “Şorba: Mərcimək şorbası”, “Əsas yemək: Toyuq tabaka”). Hər gün eyni olan maddə (“Çörək: Çörək assortisi”) gündəlik seçimdə mətnlə göstərilir.</p>
+    <p class="ld-sub">Qiymət təklifi agentinin seçdiyi hazır paketlər və onların menyusu. Qiymətlər AZN, ƏDV xaric.
+      Menyunu həftəlik cədvəldə qur: hansı yemək hansı gün və hansı yemək vaxtında verilir. Şəkilli menyu PDF-i buradan çıxır.</p>
   </header>
 
   <div class="kw-filter">
@@ -44,20 +44,60 @@
     </form>
   </dialog>
 
+  {# Yemək seçicisi: axtarış, kataloqdan seçmək, yeni yemək əlavə etmək #}
+  <dialog id="mp-pick" class="pk-dialog mp-pick" aria-labelledby="mp-pick-t">
+    <div class="mp-pick-head">
+      <div><h3 id="mp-pick-t">Yemək seç</h3><small id="mp-pick-sub"></small></div>
+      <button class="mc-btn mc-btn-sm" type="button" data-close aria-label="Bağla">✕</button>
+    </div>
+    <label class="kw-f"><span class="sr">Axtar</span><input id="mp-pick-q" type="search" placeholder="Yeməyin adı (az, en və ya ru)" autocomplete="off"></label>
+    <label class="kw-chk mp-pick-all"><input type="checkbox" id="mp-pick-all">Bütün kateqoriyalar</label>
+    <ul id="mp-pick-list" class="mp-pick-list" role="listbox" aria-multiselectable="true"></ul>
+    <div class="mp-pick-foot">
+      <button class="mc-btn" type="button" id="mp-pick-add" hidden></button>
+      <button class="mc-btn mc-btn-hero" type="button" data-close>Hazır</button>
+    </div>
+  </dialog>
+
+  {# Kiçik forma: yemək vaxtı, kateqoriya, əlavə sahə, yeməyin əlavə sahələri #}
+  <dialog id="mp-form" class="pk-dialog" aria-labelledby="mp-form-t">
+    <form method="dialog" id="mp-form-f">
+      <h3 id="mp-form-t"></h3>
+      <div id="mp-form-body" class="mp-form-body"></div>
+      <div class="pk-dlg-act mp-form-act">
+        <button class="mc-btn kw-del" type="button" id="mp-form-del" hidden>Sil</button>
+        <span class="mp-grow"></span>
+        <button class="mc-btn" value="cancel" formnovalidate>Ləğv et</button>
+        <button class="mc-btn mc-btn-hero" value="ok" id="mp-form-ok">Yadda saxla</button>
+      </div>
+    </form>
+  </dialog>
+
+  <datalist id="mp-meal-names"><option value="Səhər yeməyi"><option value="Nahar"><option value="Şam yeməyi"><option value="Ara yemək"><option value="Kofe-brejk"></datalist>
+  <datalist id="mp-course-names"></datalist>
+
   <script>
   (function () {
     var CSRF = {{ csrf|tojson }};
     var $ = function (id) { return document.getElementById(id); };
-    var packages = [], cur = null, isNew = false;
+    var packages = [], planIds = [], cur = null, isNew = false;
+    var plan = null, presets = [], catalog = null, imported = false, dirty = false;
+    var ui = { week: 1, meal: null, day: null };
     var ID_RE = /^[a-z0-9][a-z0-9_-]{1,40}$/;
+    var DAYS = ['Bazar ertəsi', 'Çərşənbə axşamı', 'Çərşənbə', 'Cümə axşamı', 'Cümə', 'Şənbə', 'Bazar'];
+    var DAYS_S = ['B.e.', 'Ç.a.', 'Çər.', 'C.a.', 'Cümə', 'Şən.', 'Bazar'];
+    var narrow = window.matchMedia('(max-width: 899px)');
+    var MEAL_ORDER = ['Səhər yeməyi', 'Kofe-brejk', 'Nahar', 'Ara yemək', 'Şam yeməyi'];
 
     function h(tag, attrs, kids) {
       var n = document.createElement(tag);
       Object.keys(attrs || {}).forEach(function (k) {
-        if (k === 'text') n.textContent = attrs[k]; else if (k === 'class') n.className = attrs[k];
-        else if (k.slice(0, 2) === 'on') n.addEventListener(k.slice(2), attrs[k]); else n.setAttribute(k, attrs[k]);
+        var v = attrs[k];
+        if (v === null || v === undefined || v === false) return;
+        if (k === 'text') n.textContent = v; else if (k === 'class') n.className = v;
+        else if (k.slice(0, 2) === 'on') n.addEventListener(k.slice(2), v); else n.setAttribute(k, v === true ? '' : v);
       });
-      (kids || []).forEach(function (c) { if (c) n.appendChild(c); });
+      (kids || []).forEach(function (c) { if (c) n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
       return n;
     }
     function api(method, url, body) {
@@ -69,24 +109,27 @@
           return j; }); });
     }
     function brand() { return $('pk-brand').value; }
-    function say(text, err) { var m = $('pk-msg'); m.textContent = text; m.className = 'flash' + (err ? ' error' : ''); m.hidden = !text; if (err) m.setAttribute('role', 'alert'); else m.setAttribute('role', 'status'); }
-    function money(v) { var p = Number(v).toFixed(2).split('.'); return p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ') + ',' + p[1] + ' AZN'; }
+    function say(text, err) { var m = $('pk-msg'); m.textContent = text; m.className = 'flash' + (err ? ' error' : ''); m.hidden = !text; m.setAttribute('role', err ? 'alert' : 'status'); }
+    function money(v) { var p = Number(v).toFixed(2).split('.'); return p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ') + ',' + p[1] + ' AZN'; }
     function confirmDialog(title, text, okLabel) {
       return new Promise(function (resolve) {
         var d = $('pk-dialog'); $('pk-dlg-t').textContent = title; $('pk-dlg-p').textContent = text; $('pk-dlg-ok').textContent = okLabel || 'Təsdiqlə';
         d.addEventListener('close', function once() { d.removeEventListener('close', once); resolve(d.returnValue === 'ok'); });
-        // Esc ilə bağlananda returnValue dəyişmir — əvvəlki "ok" qalmasın.
-        d.returnValue = '';
+        d.returnValue = '';   // Esc ilə bağlananda əvvəlki "ok" qalmasın
         d.showModal();
       });
     }
 
+    /* ---------- Paketlər cədvəli ---------- */
+
     function load(note) {
       $('pk-editor').hidden = true; $('pk-wrap').hidden = true; $('pk-empty').hidden = true; $('pk-loading').hidden = false; say(note || '');
-      api('GET', '/api/offer-packages/' + brand()).then(function (j) {
-        packages = (Array.isArray(j) ? j : (j.packages || [])).slice().sort(function (a, b) { return (a.sort_order || 0) - (b.sort_order || 0); });
-        $('pk-loading').hidden = true; renderTable();
-      }).catch(function (e) { $('pk-loading').hidden = true; packages = []; renderTable(); say(e.message, true); });
+      Promise.all([api('GET', '/api/offer-packages/' + brand()), api('GET', '/api/offer-packages/' + brand() + '/plans').catch(function () { return { ids: [] }; })])
+        .then(function (r) {
+          var j = r[0]; planIds = r[1].ids || [];
+          packages = (Array.isArray(j) ? j : (j.packages || [])).slice().sort(function (a, b) { return (a.sort_order || 0) - (b.sort_order || 0); });
+          $('pk-loading').hidden = true; renderTable();
+        }).catch(function (e) { $('pk-loading').hidden = true; packages = []; renderTable(); say(e.message, true); });
     }
 
     function renderTable() {
@@ -94,18 +137,17 @@
       packages.forEach(function (p) {
         var name = (p.name && p.name.az) || p.id;
         var st = [h('span', { class: 'kw-chip ' + (p.active ? 'on' : ''), text: p.active ? 'Aktiv' : 'Passiv' })];
-        if (p.example) st.push(document.createTextNode(' ')), st.push(h('span', { class: 'of-badge warn', text: 'Nümunə' }));
-        var tr = h('tr', {}, [
+        if (p.example) st.push(document.createTextNode(' '), h('span', { class: 'of-badge warn', text: 'Nümunə' }));
+        var acts = [h('button', { class: 'mc-btn mc-btn-sm', type: 'button', text: 'Redaktə', onclick: function () { edit(p, false); } })];
+        if (planIds.indexOf(p.id) >= 0) acts.push(h('a', { class: 'mc-btn mc-btn-sm', href: '/tools/packages/' + brand() + '/' + encodeURIComponent(p.id) + '/menu.pdf', target: '_blank', rel: 'noopener', text: 'Menyu PDF' }));
+        acts.push(h('button', { class: 'mc-btn mc-btn-sm kw-del', type: 'button', text: 'Sil', onclick: function () { remove(p); } }));
+        tb.appendChild(h('tr', {}, [
           h('td', {}, [h('b', { text: name }), h('small', { class: 'pk-id', text: p.id })]),
           h('td', { class: 'num', text: money(p.price) }),
           h('td', {}, st),
           h('td', { class: 'num', text: String(p.sort_order == null ? 0 : p.sort_order) }),
-          h('td', { class: 'pk-act' }, [
-            h('button', { class: 'mc-btn mc-btn-sm', type: 'button', text: 'Redaktə', onclick: function () { edit(p, false); } }),
-            h('button', { class: 'mc-btn mc-btn-sm kw-del', type: 'button', text: 'Sil', onclick: function () { remove(p); } })
-          ])
-        ]);
-        tb.appendChild(tr);
+          h('td', { class: 'pk-act' }, acts)
+        ]));
       });
       $('pk-wrap').hidden = !packages.length; $('pk-empty').hidden = packages.length > 0;
       $('pk-sample').hidden = !packages.some(function (p) { return p.example; });
@@ -115,101 +157,494 @@
       return { id: '', name: { az: '' }, price: '', unit: { az: 'standart porsiya', en: 'portion', ru: 'порция' },
                menu: [], sort_order: packages.length ? Math.max.apply(null, packages.map(function (p) { return p.sort_order || 0; })) + 10 : 10, active: true };
     }
-    function edit(p, fresh) {
-      cur = JSON.parse(JSON.stringify(p)); isNew = fresh;
-      cur.name = cur.name || { az: '' }; cur.unit = cur.unit || {}; cur.menu = cur.menu || [];
-      renderForm(); $('pk-editor').hidden = false; $('pk-editor').scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    function loadCatalog() {
+      if (catalog) return Promise.resolve(catalog);
+      return api('GET', '/api/dish-catalog').then(function (j) {
+        catalog = { list: j.dishes, byId: {}, categories: j.categories };
+        j.dishes.forEach(function (d) { catalog.byId[d.id] = d; });
+        $('mp-course-names').textContent = '';
+        j.categories.forEach(function (c) { $('mp-course-names').appendChild(h('option', { value: c })); });
+        return catalog;
+      });
     }
 
-    function field(label, input, cls) { return h('label', { class: 'kw-f ' + (cls || '') }, [document.createTextNode(label), input]); }
-    function bind(input, obj, key) { input.value = obj[key] == null ? '' : obj[key]; input.addEventListener('input', function () { obj[key] = input.value; }); return input; }
-    function langRow(label, obj, req) {
-      return h('div', { class: 'kw-row' }, ['az', 'en', 'ru'].map(function (l) {
-        var i = bind(h('input', { type: 'text', maxlength: '200' }), obj, l);
-        if (l === 'az' && req) i.required = true;
-        return field(label + ' (' + l + ')' + (l === 'az' && req ? ' *' : ''), i);
-      }));
+    function edit(p, fresh) {
+      cur = JSON.parse(JSON.stringify(p)); isNew = fresh;
+      cur.name = cur.name || { az: '' }; cur.unit = cur.unit || {};
+      say('');
+      $('pk-editor').hidden = false; $('pk-form').textContent = '';
+      $('pk-form').appendChild(h('div', { class: 'of-loading' }, [h('span', { class: 'of-spin', 'aria-hidden': 'true' }), h('span', { text: 'Menyu yüklənir…' })]));
+      Promise.all([loadCatalog(), api('GET', '/api/offer-packages/' + brand() + '/' + (fresh ? '_new' : encodeURIComponent(cur.id)) + '/plan')])
+        .then(function (r) {
+          plan = r[1].plan; presets = r[1].presets || []; imported = !!r[1].imported; dirty = false;
+          ui = { week: 1, meal: plan.meals[0].id, day: plan.days[0] };
+          renderForm();
+          $('pk-editor').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }).catch(function (e) { $('pk-editor').hidden = true; say(e.message, true); });
     }
-    function move(arr, i, d) { var j = i + d; if (j < 0 || j >= arr.length) return; var t = arr[i]; arr[i] = arr[j]; arr[j] = t; renderForm(); }
+
+    /* ---------- Paketin əsas sahələri ---------- */
+
+    function field(label, input, cls) { return h('label', { class: 'kw-f ' + (cls || '') }, [label, input]); }
+    function bind(input, obj, key) { input.value = obj[key] == null ? '' : obj[key]; input.addEventListener('input', function () { obj[key] = input.value; dirty = true; }); return input; }
 
     function renderForm() {
       var f = $('pk-form'); f.textContent = '';
       $('pk-ed-h').textContent = isNew ? 'Yeni paket' : 'Paket: ' + (cur.name.az || cur.id);
-      var idIn = bind(h('input', { type: 'text', maxlength: '41', autocomplete: 'off', pattern: '[a-z0-9][a-z0-9_-]{1,40}' }), cur, 'id');
+      var nameIn = bind(h('input', { type: 'text', maxlength: '200', required: true, placeholder: 'məs. Medium plus' }), cur.name, 'az');
+      var idIn = bind(h('input', { type: 'text', maxlength: '41', autocomplete: 'off', placeholder: 'medium-plus' }), cur, 'id');
       idIn.disabled = !isNew;
-      var price = bind(h('input', { type: 'number', min: '0.01', step: '0.01', inputmode: 'decimal' }), cur, 'price');
-      var sort = bind(h('input', { type: 'number', step: '1' }), cur, 'sort_order');
-      var active = h('input', { type: 'checkbox' }); active.checked = !!cur.active; active.addEventListener('change', function () { cur.active = active.checked; });
-      f.appendChild(h('div', { class: 'kw-row' }, [field('Id (kiçik latın hərfləri, rəqəm, - və _)', idIn), field('Qiymət, AZN (ƏDV xaric)', price), field('Sıra (kiçik əvvəldə)', sort, 'kw-s')]));
-      f.appendChild(langRow('Ad', cur.name, true));
-      f.appendChild(langRow('Vahid', cur.unit, false));
-      f.appendChild(h('label', { class: 'kw-chk' }, [active, document.createTextNode('Aktiv (agent bu paketi seçə bilər)')]));
-
-      f.appendChild(h('h3', { class: 'of-h', text: 'Menyu' }));
-      cur.menu.forEach(function (sec, si) {
-        sec.title = sec.title || {}; sec.items = sec.items || [];
-        var box = h('fieldset', { class: 'pk-sec' }, [
-          h('legend', { text: 'Bölmə ' + (si + 1) }),
-          langRow('Bölmə adı', sec.title, false)
-        ]);
-        sec.items.forEach(function (it, ii) {
-          box.appendChild(h('div', { class: 'pk-item' }, [
-            langRow('Maddə', it, false),
-            h('div', { class: 'pk-ctl' }, [
-              h('button', { class: 'mc-btn mc-btn-sm', type: 'button', 'aria-label': 'Maddəni yuxarı apar', text: '↑', onclick: function () { move(sec.items, ii, -1); } }),
-              h('button', { class: 'mc-btn mc-btn-sm', type: 'button', 'aria-label': 'Maddəni aşağı apar', text: '↓', onclick: function () { move(sec.items, ii, 1); } }),
-              h('button', { class: 'mc-btn mc-btn-sm kw-del', type: 'button', 'aria-label': 'Maddəni sil', text: 'Sil', onclick: function () { sec.items.splice(ii, 1); renderForm(); } })
-            ])
-          ]));
-        });
-        box.appendChild(h('div', { class: 'pk-ctl' }, [
-          h('button', { class: 'mc-btn mc-btn-sm', type: 'button', text: '+ Maddə', onclick: function () { sec.items.push({ az: '' }); renderForm(); } }),
-          h('button', { class: 'mc-btn mc-btn-sm', type: 'button', 'aria-label': 'Bölməni yuxarı apar', text: '↑ Bölmə', onclick: function () { move(cur.menu, si, -1); } }),
-          h('button', { class: 'mc-btn mc-btn-sm', type: 'button', 'aria-label': 'Bölməni aşağı apar', text: '↓ Bölmə', onclick: function () { move(cur.menu, si, 1); } }),
-          h('button', { class: 'mc-btn mc-btn-sm kw-del', type: 'button', text: 'Bölməni sil', onclick: function () { cur.menu.splice(si, 1); renderForm(); } })
-        ]));
-        f.appendChild(box);
+      if (isNew) nameIn.addEventListener('input', function () {   // id addan özü yaranır (dəyişmək olar)
+        if (idIn.dataset.touched) return;
+        var map = { 'ə': 'e', 'ı': 'i', 'ö': 'o', 'ü': 'u', 'ğ': 'g', 'ş': 's', 'ç': 'c' };
+        cur.id = idIn.value = nameIn.value.toLowerCase().replace(/[əıöüğşç]/g, function (c) { return map[c]; }).replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 41);
       });
-      f.appendChild(h('button', { class: 'mc-btn', type: 'button', text: '+ Menyu bölməsi', onclick: function () { cur.menu.push({ title: {}, items: [{ az: '' }] }); renderForm(); } }));
-      f.appendChild(h('div', { class: 'kw-row' }, [
+      idIn.addEventListener('input', function () { idIn.dataset.touched = '1'; });
+      var price = bind(h('input', { type: 'number', min: '0.01', step: '0.01', inputmode: 'decimal', placeholder: '10.00' }), cur, 'price');
+      var active = h('input', { type: 'checkbox' }); active.checked = !!cur.active; active.addEventListener('change', function () { cur.active = active.checked; dirty = true; });
+      f.appendChild(h('div', { class: 'kw-row' }, [field('Paketin adı *', nameIn, 'kw-g'), field('Qiymət, AZN (ƏDV xaric) *', price, 'kw-s mp-price')]));
+      f.appendChild(h('label', { class: 'kw-chk' }, [active, 'Aktiv — agent bu paketi təkliflərdə seçə bilər']));
+
+      // İstəyə görə: id, sıra, digər dillər, vahid — ehtiyac olanda açılır
+      var sort = bind(h('input', { type: 'number', step: '1' }), cur, 'sort_order');
+      var more = h('details', { class: 'mp-more' }, [h('summary', { text: 'Əlavə: id, sıra, ingiliscə/rusca ad, vahid' })]);
+      more.appendChild(h('div', { class: 'kw-row' }, [field('Id (latın hərfləri, rəqəm, - və _)', idIn), field('Sıra (kiçik əvvəldə)', sort, 'kw-s')]));
+      more.appendChild(h('div', { class: 'kw-row' }, [field('Ad (en)', bind(h('input', { type: 'text', maxlength: '200' }), cur.name, 'en')),
+                                                      field('Ad (ru)', bind(h('input', { type: 'text', maxlength: '200' }), cur.name, 'ru'))]));
+      more.appendChild(h('div', { class: 'kw-row' }, ['az', 'en', 'ru'].map(function (l) { return field('Vahid (' + l + ')' + (l === 'az' ? ' *' : ''), bind(h('input', { type: 'text', maxlength: '200' }), cur.unit, l)); })));
+      f.appendChild(more);
+
+      f.appendChild(h('div', { id: 'mp-root', class: 'mp' }));
+      renderPlan();
+
+      f.appendChild(h('div', { class: 'mp-save' }, [
         h('button', { class: 'mc-btn mc-btn-hero', type: 'submit', text: 'Yadda saxla' }),
-        h('button', { class: 'mc-btn mc-btn-no', type: 'button', text: 'Bağla', onclick: function () { $('pk-editor').hidden = true; } })
+        h('button', { class: 'mc-btn', type: 'button', text: 'PDF-ə bax', onclick: function () { preview(true); } }),
+        h('button', { class: 'mc-btn', type: 'button', text: 'Yalnız şəkillər PDF', onclick: function () { preview(false); } }),
+        h('button', { class: 'mc-btn mc-btn-no', type: 'button', text: 'Bağla', onclick: close })
       ]));
     }
 
-    function clean(o, keepAz) {
-      var out = {}; ['az', 'en', 'ru'].forEach(function (l) { var v = (o && o[l] || '').trim(); if (v) out[l] = v; });
-      return out;
+    function close() {
+      if (!dirty) { $('pk-editor').hidden = true; return; }
+      confirmDialog('Dəyişikliklər saxlanmayıb', 'Bağlasan, etdiyin dəyişikliklər itəcək.', 'Bağla').then(function (ok) { if (ok) { dirty = false; $('pk-editor').hidden = true; } });
     }
+
+    /* ---------- Menyu planı ---------- */
+
+    function key(w, d, m, c) { return 'w' + w + ':' + (isSame(m, c) ? '*' : d) + ':' + m + ':' + c; }
+    function isSame(m, c) { return plan.same.indexOf(m + ':' + c) >= 0; }
+    function cell(k) { return plan.cells[k] || []; }
+    function changed() { dirty = true; renderPlan(); }
+    function nextId(prefix, list) { var n = 1; while (list.some(function (x) { return x.id === prefix + n; })) n++; return prefix + n; }
+    function dish(id) { return catalog.byId[id] || { id: id, name: '#' + id, img: null }; }
+    function mealLabel(m) { return m.name + (m.time ? ' · ' + m.time : ''); }
+
+    function renderPlan() {
+      var root = $('mp-root'); if (!root) return; root.textContent = '';
+      root.appendChild(h('div', { class: 'mp-head' }, [
+        h('h3', { class: 'of-h', text: 'Menyu' }),
+        h('p', { class: 'kw-hint', text: 'Hansı yemək hansı gün və yemək vaxtında verilir. Xanadakı «+» ilə yemək seç, yeməyə basanda əlavə sahələrini (porsiya, kalori …) yaz.' })
+      ]));
+      if (imported) root.appendChild(h('div', { class: 'flash info', text: 'Bu paketin köhnə mətn menyusu cədvələ çevrildi. Yoxla və «Yadda saxla» bas.' }));
+      root.appendChild(settings());
+      if (plan.weeks > 1 || plan.meals.length > 1) root.appendChild(tabs());
+      if (ui.week > plan.weeks) ui.week = 1;
+      if (!plan.meals.some(function (m) { return m.id === ui.meal; })) ui.meal = plan.meals[0].id;
+      if (plan.days.indexOf(ui.day) < 0) ui.day = plan.days[0];
+      root.appendChild(narrow.matches ? dayView() : grid());
+      root.appendChild(summary());
+    }
+
+    function chip(text, opts) {
+      return h('button', { class: 'mp-chip' + (opts.on ? ' on' : '') + (opts.cls ? ' ' + opts.cls : ''), type: 'button', 'aria-pressed': opts.toggle ? String(!!opts.on) : null,
+        title: opts.title || null, onclick: opts.onclick }, [text]);
+    }
+
+    function setRow(label, kids, title) {   // solda ad, sağda seçimlər
+      return h('div', { class: 'mp-set-row' }, [h('span', { class: 'mp-set-l', text: label, title: title || null }), h('div', { class: 'mp-set-v' }, kids)]);
+    }
+
+    function settings() {
+      var box = h('div', { class: 'mp-set' });
+      // Günlər
+      box.appendChild(setRow('Günlər', [h('div', { class: 'mp-chips' }, DAYS.map(function (d, i) {
+        var on = plan.days.indexOf(i) >= 0;
+        return chip(DAYS_S[i], { on: on, toggle: true, title: d, onclick: function () {
+          if (on && plan.days.length === 1) { say('Ən azı bir gün qalmalıdır.', true); return; }
+          plan.days = on ? plan.days.filter(function (x) { return x !== i; }) : plan.days.concat([i]).sort();
+          changed();
+        } });
+      }))]));
+      // Yemək vaxtları
+      var meals = plan.meals.map(function (m) { return chip(mealLabel(m), { title: 'Dəyiş', onclick: function () { mealForm(m); } }); });
+      meals.push(chip('+ Yemək vaxtı', { cls: 'add', onclick: function () { mealForm(null); } }));
+      box.appendChild(setRow('Yemək vaxtları', [h('div', { class: 'mp-chips' }, meals)]));
+      // Kateqoriyalar
+      var courses = plan.courses.map(function (c) { return chip(c.name, { title: 'Dəyiş, yerini dəyiş və ya sil', onclick: function () { courseForm(c); } }); });
+      courses.push(chip('+ Kateqoriya', { cls: 'add', onclick: function () { courseForm(null); } }));
+      box.appendChild(setRow('Kateqoriyalar', [h('div', { class: 'mp-chips' }, courses)]));
+      // Rotasiya
+      var wk = h('select', { 'aria-label': 'Rotasiya həftələri' }, [1, 2, 3, 4].map(function (n) { return h('option', { value: n, text: n === 1 ? 'Hər həftə eyni' : n + ' həftəlik rotasiya', selected: n === plan.weeks }); }));
+      wk.addEventListener('change', function () {
+        var n = Number(wk.value);
+        if (n > plan.weeks && plan.weeks === 1) {   // yeni həftələr 1-ci həftənin surəti ilə başlayır
+          Object.keys(plan.cells).forEach(function (k) { if (k.indexOf('w1:') === 0) for (var w = 2; w <= n; w++) plan.cells['w' + w + k.slice(2)] = JSON.parse(JSON.stringify(plan.cells[k])); });
+        }
+        plan.weeks = n; changed();
+      });
+      box.appendChild(setRow('Rotasiya', [wk]));
+      // Əlavə sahələr (istəyə görə)
+      var fields = plan.fields.map(function (f) { return chip(f.name + (f.unit ? ' (' + f.unit + ')' : ''), { title: 'Dəyiş və ya sil', onclick: function () { fieldForm(f); } }); });
+      fields.push(chip('+ Sahə', { cls: 'add', onclick: function () { fieldForm(null); } }));
+      if (!plan.fields.length) fields.push(h('small', { class: 'mp-opt', text: 'istəyə görə: porsiya, kalori, allergenlər …' }));
+      box.appendChild(setRow('Əlavə sahələr', [h('div', { class: 'mp-chips' }, fields)]));
+      // PDF qeydi
+      var note = h('input', { type: 'text', maxlength: '300', placeholder: 'məs. Şəkillər illüstrativ xarakter daşıyır…', 'aria-label': 'PDF qeydi' });
+      note.value = plan.note || ''; note.addEventListener('input', function () { plan.note = note.value; dirty = true; });
+      box.appendChild(setRow('PDF qeydi', [note]));
+      return box;
+    }
+
+    function tabs() {
+      var row = h('div', { class: 'mp-tabs' });
+      if (plan.weeks > 1) row.appendChild(h('div', { class: 'ld-filter', role: 'group', 'aria-label': 'Həftə' }, Array.from({ length: plan.weeks }, function (_, i) {
+        return h('a', { href: '#', class: ui.week === i + 1 ? 'on' : '', onclick: function (e) { e.preventDefault(); ui.week = i + 1; renderPlan(); } }, [(i + 1) + '-ci həftə']);
+      })));
+      if (plan.meals.length > 1) row.appendChild(h('div', { class: 'ld-filter', role: 'group', 'aria-label': 'Yemək vaxtı' }, plan.meals.map(function (m) {
+        return h('a', { href: '#', class: ui.meal === m.id ? 'on' : '', onclick: function (e) { e.preventDefault(); ui.meal = m.id; renderPlan(); } }, [mealLabel(m)]);
+      })));
+      return row;
+    }
+
+    function dishChip(k, i, e) {
+      var d = dish(e.dish), extra = plan.fields.map(function (f) { var v = (e.x || {})[f.id]; return v ? (f.unit ? v + ' ' + f.unit : v) : ''; }).filter(Boolean).join(' · ');
+      return h('li', { class: 'mp-dish' }, [
+        h('button', { type: 'button', class: 'mp-dish-b', title: plan.fields.length ? 'Əlavə sahələr' : 'Dəyiş', onclick: function () { entryForm(k, i); } }, [
+          d.img ? h('img', { src: d.img, alt: '', loading: 'lazy' }) : h('span', { class: 'mp-noimg', title: 'Şəkli yoxdur' }),
+          h('span', { class: 'mp-dish-t' }, [h('b', { text: d.name }), extra ? h('small', { text: extra }) : null])
+        ]),
+        h('button', { type: 'button', class: 'mp-x', 'aria-label': d.name + ' — sil', text: '×', onclick: function () { plan.cells[k].splice(i, 1); if (!plan.cells[k].length) delete plan.cells[k]; changed(); } })
+      ]);
+    }
+
+    function cellBox(w, d, m, c, label) {
+      var k = key(w, d, m.id, c.id);
+      var list = h('ul', { class: 'mp-cell-l' }, cell(k).map(function (e, i) { return dishChip(k, i, e); }));
+      return h('div', { class: 'mp-cell' }, [list, h('button', { type: 'button', class: 'mp-add', 'aria-label': 'Yemək əlavə et: ' + label, onclick: function () { pick(k, c, label); } }, ['+'])]);
+    }
+
+    function rowHead(m, c) {
+      var same = h('input', { type: 'checkbox' }); same.checked = isSame(m.id, c.id);
+      same.addEventListener('change', function () { toggleSame(m.id, c.id, same.checked); });
+      return h('div', { class: 'mp-rh' }, [h('b', { text: c.name }), h('label', { class: 'mp-same', title: 'Məs. çörək, içki — hər gün eyni yemək' }, [same, 'Hər gün eyni'])]);
+    }
+
+    function toggleSame(m, c, on) {
+      var rk = m + ':' + c;
+      for (var w = 1; w <= plan.weeks; w++) {
+        if (on) {   // ilk dolu günün yeməkləri "hər gün" olur
+          var first = plan.days.map(function (d) { return plan.cells['w' + w + ':' + d + ':' + rk]; }).filter(Boolean)[0];
+          plan.days.forEach(function (d) { delete plan.cells['w' + w + ':' + d + ':' + rk]; });
+          if (first) plan.cells['w' + w + ':*:' + rk] = first;
+        } else {
+          var all = plan.cells['w' + w + ':*:' + rk]; delete plan.cells['w' + w + ':*:' + rk];
+          if (all) plan.days.forEach(function (d) { plan.cells['w' + w + ':' + d + ':' + rk] = JSON.parse(JSON.stringify(all)); });
+        }
+      }
+      if (on) plan.same.push(rk); else plan.same = plan.same.filter(function (x) { return x !== rk; });
+      changed();
+    }
+
+    function grid() {
+      var m = plan.meals.filter(function (x) { return x.id === ui.meal; })[0], w = ui.week;
+      var head = h('tr', {}, [h('th', { class: 'mp-corner' }, [h('span', { class: 'sr', text: 'Kateqoriya' })])].concat(plan.days.map(function (d) {
+        return h('th', {}, [h('span', { text: DAYS[d] }), h('button', { type: 'button', class: 'mp-copy', title: DAYS[d] + ' menyusunu başqa günlərə köçür', 'aria-label': DAYS[d] + ' menyusunu köçür', onclick: function () { copyDay(d); } }, ['⧉'])]);
+      })));
+      var rows = plan.courses.map(function (c) {
+        var cells = isSame(m.id, c.id)
+          ? [h('td', { colspan: plan.days.length, class: 'mp-all' }, [cellBox(w, '*', m, c, c.name + ' — hər gün')])]
+          : plan.days.map(function (d) { return h('td', {}, [cellBox(w, d, m, c, c.name + ' — ' + DAYS[d])]); });
+        return h('tr', {}, [h('th', { scope: 'row' }, [rowHead(m, c)])].concat(cells));
+      });
+      return h('div', { class: 'mp-grid-wrap' }, [h('table', { class: 'mp-grid' }, [h('thead', {}, [head]), h('tbody', {}, rows)])]);
+    }
+
+    function dayView() {   // telefonda: gün seçilir, kateqoriyalar alt-alta
+      var m = plan.meals.filter(function (x) { return x.id === ui.meal; })[0], w = ui.week, d = ui.day;
+      var box = h('div', { class: 'mp-day' });
+      box.appendChild(h('div', { class: 'mp-chips mp-daypick', role: 'group', 'aria-label': 'Gün' }, plan.days.map(function (i) {
+        return chip(DAYS_S[i], { on: i === d, toggle: true, title: DAYS[i], onclick: function () { ui.day = i; renderPlan(); } });
+      }).concat([h('button', { type: 'button', class: 'mc-btn mc-btn-sm', text: 'Köçür', onclick: function () { copyDay(d); } })])));
+      plan.courses.forEach(function (c) {
+        var same = isSame(m.id, c.id);
+        box.appendChild(h('div', { class: 'mp-dcard' }, [rowHead(m, c), cellBox(w, same ? '*' : d, m, c, c.name + ' — ' + (same ? 'hər gün' : DAYS[d]))]));
+      });
+      return box;
+    }
+
+    function summary() {
+      var ids = {}, missing = {};
+      Object.keys(plan.cells).forEach(function (k) { plan.cells[k].forEach(function (e) { ids[e.dish] = 1; if (!dish(e.dish).img) missing[e.dish] = 1; }); });
+      var n = Object.keys(ids).length, miss = Object.keys(missing).length;
+      var parts = [h('span', { text: n + ' fərqli yemək' })];
+      if (miss) parts.push(h('span', { class: 'mp-warn' }, [miss + ' yeməyin şəkli yoxdur — PDF-in şəkil səhifələrinə düşməyəcək. ', h('a', { href: '/tools/dishes?show=missing', target: '_blank', rel: 'noopener', text: 'Şəkil yüklə ↗' })]));
+      else if (n) parts.push(h('span', { class: 'mp-ok', text: 'Bütün yeməklərin şəkli var' }));
+      return h('div', { class: 'mp-sum' }, parts);
+    }
+
+    /* ---------- Dialoqlar ---------- */
+
+    function formDialog(title, inputs, opts) {
+      var d = $('mp-form'), body = $('mp-form-body');
+      $('mp-form-t').textContent = title; body.textContent = '';
+      inputs.forEach(function (i) { body.appendChild(i.node || field(i.label, i.input, i.cls)); });
+      $('mp-form-del').hidden = !opts.onDelete;
+      $('mp-form-del').textContent = opts.deleteLabel || 'Sil';
+      $('mp-form-del').onclick = function () { d.close('cancel'); opts.onDelete(); };
+      d.returnValue = '';
+      d.onclose = function () { if (d.returnValue === 'ok') opts.onSave(); };
+      d.showModal();
+      var first = body.querySelector('input:not([type=checkbox]),select'); if (first) first.focus();
+    }
+    $('mp-form-f').addEventListener('submit', function (e) {   // boş ad — dialoq bağlanmasın
+      if (e.submitter && e.submitter.value === 'ok') {
+        var req = $('mp-form-body').querySelector('[required]');
+        if (req && !req.value.trim()) { e.preventDefault(); req.focus(); }
+      }
+    });
+
+    function mealForm(m) {
+      var name = h('input', { type: 'text', maxlength: '60', required: true, list: 'mp-meal-names', placeholder: 'məs. Nahar' });
+      var time = h('input', { type: 'text', maxlength: '40', placeholder: 'məs. 12:00–14:00' });
+      name.value = m ? m.name : ''; time.value = m ? (m.time || '') : '';
+      var inputs = [{ label: 'Ad', input: name }, { label: 'Saat (istəyə görə)', input: time }];
+      if (m && plan.meals.length > 1) inputs.push({ node: moveButtons(plan.meals, plan.meals.indexOf(m)) });
+      formDialog(m ? 'Yemək vaxtı' : 'Yeni yemək vaxtı', inputs, {
+        onSave: function () {
+          if (m) { m.name = name.value.trim(); m.time = time.value.trim(); }
+          else {
+            var id = nextId('m', plan.meals), meal = { id: id, name: name.value.trim(), time: time.value.trim() };
+            // Tanınan yemək vaxtı gün ərzindəki yerinə düşür (səhər yeməyi nahardan əvvəl)
+            var rank = function (x) { var i = MEAL_ORDER.indexOf(x.name); return i < 0 ? 99 : i; };
+            var at = plan.meals.findIndex(function (x) { return rank(x) > rank(meal); });
+            plan.meals.splice(at < 0 ? plan.meals.length : at, 0, meal); ui.meal = id;
+          }
+          changed();
+        },
+        onDelete: m && plan.meals.length > 1 ? function () {
+          plan.meals = plan.meals.filter(function (x) { return x !== m; });
+          dropCells(function (mm) { return mm === m.id; }); changed();
+        } : null
+      });
+    }
+
+    function courseForm(c) {
+      var name = h('input', { type: 'text', maxlength: '60', required: true, list: 'mp-course-names', placeholder: 'məs. Desert' });
+      name.value = c ? c.name : '';
+      var inputs = [{ label: 'Kateqoriya', input: name }];
+      if (c && plan.courses.length > 1) inputs.push({ node: moveButtons(plan.courses, plan.courses.indexOf(c)) });
+      formDialog(c ? 'Kateqoriya' : 'Yeni kateqoriya', inputs, {
+        onSave: function () {
+          if (c) c.name = name.value.trim();
+          else plan.courses.push({ id: nextId('c', plan.courses), name: name.value.trim() });
+          changed();
+        },
+        onDelete: c && plan.courses.length > 1 ? function () {
+          plan.courses = plan.courses.filter(function (x) { return x !== c; });
+          plan.same = plan.same.filter(function (x) { return x.split(':')[1] !== c.id; });
+          dropCells(function (mm, cc) { return cc === c.id; }); changed();
+        } : null
+      });
+    }
+    function moveButtons(arr, i) {
+      return h('div', { class: 'mp-move' }, [
+        h('button', { type: 'button', class: 'mc-btn mc-btn-sm', text: '↑ Əvvələ', disabled: i === 0, onclick: function () { move(arr, i, -1); $('mp-form').close('cancel'); } }),
+        h('button', { type: 'button', class: 'mc-btn mc-btn-sm', text: '↓ Sona', disabled: i === arr.length - 1, onclick: function () { move(arr, i, 1); $('mp-form').close('cancel'); } })
+      ]);
+    }
+    function move(arr, i, d) { var j = i + d; if (j < 0 || j >= arr.length) return; var t = arr[i]; arr[i] = arr[j]; arr[j] = t; changed(); }
+    function dropCells(test) { Object.keys(plan.cells).forEach(function (k) { var p = k.split(':'); if (test(p[2], p[3])) delete plan.cells[k]; }); }
+
+    function fieldForm(f) {
+      var name = h('input', { type: 'text', maxlength: '60', required: true, placeholder: 'məs. Porsiya' });
+      var unit = h('input', { type: 'text', maxlength: '40', placeholder: 'məs. q, kkal (istəyə görə)' });
+      name.value = f ? f.name : ''; unit.value = f ? (f.unit || '') : '';
+      var inputs = [];
+      if (!f) {
+        var unused = presets.filter(function (p) { return !plan.fields.some(function (x) { return x.id === p.id; }); });
+        if (unused.length) inputs.push({ node: h('div', { class: 'mp-presets' }, [h('small', { text: 'Hazır sahələr:' })].concat(unused.map(function (p) {
+          return h('button', { type: 'button', class: 'mp-chip add', text: p.name + (p.unit ? ' (' + p.unit + ')' : ''), onclick: function () {
+            plan.fields.push({ id: p.id, name: p.name, unit: p.unit }); $('mp-form').close('cancel'); changed();
+          } });
+        }))) });
+      }
+      inputs.push({ label: 'Sahənin adı', input: name }, { label: 'Vahid', input: unit });
+      formDialog(f ? 'Əlavə sahə' : 'Yeni əlavə sahə', inputs, {
+        onSave: function () {
+          if (f) { f.name = name.value.trim(); f.unit = unit.value.trim(); }
+          else plan.fields.push({ id: nextId('f', plan.fields), name: name.value.trim(), unit: unit.value.trim() });
+          changed();
+        },
+        onDelete: f ? function () {
+          plan.fields = plan.fields.filter(function (x) { return x !== f; });
+          Object.keys(plan.cells).forEach(function (k) { plan.cells[k].forEach(function (e) { if (e.x) delete e.x[f.id]; }); });
+          changed();
+        } : null, deleteLabel: 'Sahəni sil'
+      });
+    }
+
+    function entryForm(k, i) {
+      var e = plan.cells[k][i], d = dish(e.dish);
+      if (!plan.fields.length) {
+        formDialog(d.name, [{ node: h('p', { class: 'kw-hint', text: 'Porsiya, kalori, allergen kimi məlumat yazmaq üçün yuxarıda «+ Sahə» əlavə et.' }) }], {
+          onSave: function () {}, onDelete: function () { plan.cells[k].splice(i, 1); if (!plan.cells[k].length) delete plan.cells[k]; changed(); }, deleteLabel: 'Menyudan çıxar'
+        });
+        $('mp-form-ok').hidden = true; $('mp-form').addEventListener('close', function once() { $('mp-form').removeEventListener('close', once); $('mp-form-ok').hidden = false; });
+        return;
+      }
+      var inputs = plan.fields.map(function (f) {
+        var inp = h('input', { type: 'text', maxlength: '60', 'data-f': f.id, placeholder: f.unit ? 'məs. 250' : '' });
+        inp.value = (e.x || {})[f.id] || '';
+        return { label: f.name + (f.unit ? ' (' + f.unit + ')' : ''), input: inp };
+      });
+      formDialog(d.name, inputs, {
+        onSave: function () {
+          var x = {}; inputs.forEach(function (i) { var v = i.input.value.trim(); if (v) x[i.input.getAttribute('data-f')] = v; });
+          if (Object.keys(x).length) e.x = x; else delete e.x;
+          changed();
+        },
+        onDelete: function () { plan.cells[k].splice(i, 1); if (!plan.cells[k].length) delete plan.cells[k]; changed(); }, deleteLabel: 'Menyudan çıxar'
+      });
+    }
+
+    function copyDay(from) {
+      var others = plan.days.filter(function (d) { return d !== from; });
+      if (!others.length) return;
+      var boxes = others.map(function (d) { return h('input', { type: 'checkbox', value: d }); });
+      var inputs = [{ node: h('p', { class: 'kw-hint', text: DAYS[from] + ' günün bütün yeməkləri (bu həftə, bütün yemək vaxtları) seçilən günlərə köçürülür; o günlərin indiki yeməkləri əvəz olunur.' }) }]
+        .concat(others.map(function (d, i) { return { node: h('label', { class: 'kw-chk' }, [boxes[i], DAYS[d]]) }; }));
+      formDialog('Günü köçür', inputs, { onSave: function () {
+        var w = ui.week;
+        boxes.filter(function (b) { return b.checked; }).forEach(function (b) {
+          var to = Number(b.value);
+          plan.meals.forEach(function (m) { plan.courses.forEach(function (c) {
+            if (isSame(m.id, c.id)) return;
+            var src = plan.cells['w' + w + ':' + from + ':' + m.id + ':' + c.id], dst = 'w' + w + ':' + to + ':' + m.id + ':' + c.id;
+            if (src) plan.cells[dst] = JSON.parse(JSON.stringify(src)); else delete plan.cells[dst];
+          }); });
+        });
+        changed();
+      } });
+      $('mp-form-ok').textContent = 'Köçür';
+      $('mp-form').addEventListener('close', function once() { $('mp-form').removeEventListener('close', once); $('mp-form-ok').textContent = 'Yadda saxla'; });
+    }
+
+    /* Yemək seçicisi */
+    var picking = null;
+    function pick(k, c, label) {
+      picking = { k: k, c: c };
+      $('mp-pick-t').textContent = 'Yemək seç'; $('mp-pick-sub').textContent = label;
+      $('mp-pick-q').value = '';
+      var known = catalog.list.some(function (d) { return sameCat(d.category, c.name); });
+      $('mp-pick-all').checked = !known;
+      renderPick();
+      $('mp-pick').showModal(); $('mp-pick-q').focus();
+    }
+    function norm(s) { return (s || '').toLocaleLowerCase('az').replace(/[\s\-–—_/,.;:()"'«»]+/g, ' ').trim(); }
+    function sameCat(a, b) { a = norm(a); b = norm(b); return !!a && (a === b || a.slice(0, 5) === b.slice(0, 5)); }
+    function renderPick() {
+      var q = norm($('mp-pick-q').value), all = $('mp-pick-all').checked || !!q, list = $('mp-pick-list');
+      var chosen = cell(picking.k).map(function (e) { return e.dish; });
+      var rows = catalog.list.filter(function (d) {
+        if (q) return [d.name, d.name_en, d.name_ru].some(function (n) { return norm(n).indexOf(q) >= 0; });
+        return all || sameCat(d.category, picking.c.name);
+      });
+      list.textContent = '';
+      rows.slice(0, 120).forEach(function (d) {
+        var on = chosen.indexOf(d.id) >= 0;
+        list.appendChild(h('li', {}, [h('button', { type: 'button', class: 'mp-pick-i' + (on ? ' on' : ''), role: 'option', 'aria-selected': String(on), onclick: function () { toggleDish(d.id); } }, [
+          d.img ? h('img', { src: d.img, alt: '', loading: 'lazy' }) : h('span', { class: 'mp-noimg', title: 'Şəkli yoxdur' }),
+          h('span', { class: 'mp-dish-t' }, [h('b', { text: d.name }), h('small', { text: [d.category, d.img ? '' : 'şəkli yoxdur'].filter(Boolean).join(' · ') })]),
+          h('span', { class: 'mp-tick', 'aria-hidden': 'true', text: on ? '✓' : '' })
+        ])]));
+      });
+      if (!rows.length) list.appendChild(h('li', { class: 'mp-pick-none', text: q ? 'Kataloqda tapılmadı.' : 'Bu kateqoriyada yemək yoxdur — «Bütün kateqoriyalar»ı seç və ya adını yaz.' }));
+      var raw = $('mp-pick-q').value.trim(), exact = catalog.list.some(function (d) { return norm(d.name) === q; });
+      $('mp-pick-add').hidden = !raw || exact;
+      $('mp-pick-add').textContent = '+ «' + raw + '» kataloqa əlavə et';
+    }
+    function toggleDish(id) {
+      var list = plan.cells[picking.k] || (plan.cells[picking.k] = []);
+      var i = list.map(function (e) { return e.dish; }).indexOf(id);
+      if (i >= 0) list.splice(i, 1); else if (list.length < 12) list.push({ dish: id }); else say('Bir xanada ən çox 12 yemək.', true);
+      if (!list.length) delete plan.cells[picking.k];
+      dirty = true; renderPick();
+    }
+    $('mp-pick-q').addEventListener('input', renderPick);
+    $('mp-pick-all').addEventListener('change', renderPick);
+    $('mp-pick-q').addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter') return; e.preventDefault();
+      var first = $('mp-pick-list').querySelector('.mp-pick-i:not(.on)');
+      if (!$('mp-pick-add').hidden && !first) $('mp-pick-add').click(); else if (first) first.click();
+    });
+    $('mp-pick-add').addEventListener('click', function () {
+      var name = $('mp-pick-q').value.trim(), btn = this; btn.disabled = true;
+      api('POST', '/api/dish-catalog', { name: name, category: picking.c.name }).then(function (j) {
+        catalog.list.push(j.dish); catalog.list.sort(function (a, b) { return a.name.localeCompare(b.name, 'az'); });
+        catalog.byId[j.dish.id] = j.dish; toggleDish(j.dish.id); $('mp-pick-q').value = ''; renderPick();
+      }).catch(function (e) { say(e.message, true); }).then(function () { btn.disabled = false; });
+    });
+    document.querySelectorAll('#mp-pick [data-close]').forEach(function (b) { b.addEventListener('click', function () { $('mp-pick').close(); }); });
+    $('mp-pick').addEventListener('close', function () { renderPlan(); });
+    narrow.addEventListener('change', function () { if (plan && !$('pk-editor').hidden) renderPlan(); });
+    window.addEventListener('beforeunload', function (e) { if (dirty && !$('pk-editor').hidden) { e.preventDefault(); e.returnValue = ''; } });
+
+    /* ---------- Yadda saxla / PDF ---------- */
+
+    function clean(o) { var out = {}; ['az', 'en', 'ru'].forEach(function (l) { var v = (o && o[l] || '').trim(); if (v) out[l] = v; }); return out; }
     function payload() {
       var id = (cur.id || '').trim(), price = Number(cur.price);
-      if (!ID_RE.test(id)) throw new Error('Id yanlışdır: kiçik latın hərfləri, rəqəm, - və _ (2–41 simvol).');
-      if (!(cur.name.az || '').trim()) throw new Error('Azərbaycan dilində ad məcburidir.');
+      if (!(cur.name.az || '').trim()) throw new Error('Paketin adını yaz.');
+      if (!ID_RE.test(id)) throw new Error('Id yanlışdır: kiçik latın hərfləri, rəqəm, - və _ (2–41 simvol). «Əlavə» bölməsində dəyiş.');
       if (!(price > 0)) throw new Error('Qiymət 0-dan böyük olmalıdır.');
-      var unit = clean(cur.unit); if (!unit.az) throw new Error('Vahid (az) məcburidir.');
-      var menu = [];
-      cur.menu.forEach(function (s) {
-        var items = (s.items || []).map(function (i) { return clean(i); }).filter(function (i) { return i.az; });
-        if (!items.length) return;
-        var sec = { items: items }, t = clean(s.title); if (t.az) sec.title = t; menu.push(sec);
-      });
-      var p = { id: id, name: clean(cur.name), price: price, unit: unit, menu: menu,
-                sort_order: parseInt(cur.sort_order, 10) || 0, active: !!cur.active, example: !!cur.example };
+      var unit = clean(cur.unit); if (!unit.az) throw new Error('Vahid (az) məcburidir — «Əlavə» bölməsində yaz.');
+      var p = { id: id, name: clean(cur.name), price: price, unit: unit, sort_order: parseInt(cur.sort_order, 10) || 0,
+                active: !!cur.active, example: !!cur.example, plan: plan };
       if (cur.description != null) p.description = cur.description;
       return p;
     }
+    function fail(err) { say(err.message, true); window.scrollTo({ top: 0, behavior: 'smooth' }); }
 
     $('pk-form').addEventListener('submit', function (e) {
       e.preventDefault();
-      var p; try { p = payload(); } catch (err) { say(err.message, true); window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
-      if (isNew && packages.some(function (x) { return x.id === p.id; })) { say('Bu id artıq var.', true); return; }
+      var p; try { p = payload(); } catch (err) { fail(err); return; }
+      if (isNew && packages.some(function (x) { return x.id === p.id; })) { fail(new Error('Bu id artıq var.')); return; }
+      var btn = e.submitter; if (btn) { btn.disabled = true; btn.textContent = 'Saxlanılır…'; }
       api('PUT', '/api/offer-packages/' + brand() + '/' + encodeURIComponent(p.id), p).then(function () {
-        $('pk-editor').hidden = true; load('Yadda saxlandı: ' + p.name.az);
-      }).catch(function (err) { say(err.message, true); window.scrollTo({ top: 0, behavior: 'smooth' }); });
+        dirty = false; $('pk-editor').hidden = true; load('Yadda saxlandı: ' + p.name.az);
+      }).catch(fail).then(function () { if (btn) { btn.disabled = false; btn.textContent = 'Yadda saxla'; } });
     });
 
+    function preview(schedule) {
+      var p; try { p = payload(); } catch (err) { fail(err); return; }
+      var win = window.open('', '_blank');   // popup bloklanmasın deyə klikdə açılır
+      if (win) win.document.write('<p style="font:15px system-ui;padding:24px">PDF hazırlanır…</p>');
+      fetch('/api/offer-packages/' + brand() + '/' + encodeURIComponent(p.id) + '/menu.pdf', {
+        method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF },
+        body: JSON.stringify({ package: p, plan: plan, schedule: schedule })
+      }).then(function (r) {
+        if (!r.ok) return r.json().catch(function () { return {}; }).then(function (j) { throw new Error(j.error || 'PDF hazırlanmadı.'); });
+        return r.blob();
+      }).then(function (b) {
+        var url = URL.createObjectURL(b);
+        if (win) win.location = url; else window.open(url, '_blank');
+      }).catch(function (err) { if (win) win.close(); say(err.message, true); });
+    }
+
     function remove(p) {
-      confirmDialog('Paketi sil', '«' + ((p.name && p.name.az) || p.id) + '» silinəcək. Bu geri qaytarılmır.', 'Sil').then(function (ok) {
+      confirmDialog('Paketi sil', '«' + ((p.name && p.name.az) || p.id) + '» və onun menyusu silinəcək. Bu geri qaytarılmır.', 'Sil').then(function (ok) {
         if (!ok) return;
         api('DELETE', '/api/offer-packages/' + brand() + '/' + encodeURIComponent(p.id)).then(function () { load('Paket silindi.'); })
           .catch(function (err) { say(err.message, true); });

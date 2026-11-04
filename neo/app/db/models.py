@@ -594,6 +594,21 @@ class EmployeeSearch(Base):
 # --- Yemək kataloqu (0014) ------------------------------------------------------
 
 
+class PackageMenu(Base):
+    """Paketin menyu planı (0015): günlər, yemək vaxtları, kateqoriyalar, hər xanadakı yeməklər və əlavə sahələr —
+    JSON mətni (app/package_menus.py). Agentdəki paketin `menu`-su bu plandan yaradılır."""
+
+    __tablename__ = "package_menus"
+    __table_args__ = (UniqueConstraint("brand", "package_id", name="uq_package_menus_brand_package"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    brand: Mapped[str] = mapped_column(String(16))
+    package_id: Mapped[str] = mapped_column(String(64))
+    plan: Mapped[str] = mapped_column(Text)
+    updated_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class Dish(Base):
     """Yemək və onun şəkli — şəkilli qiymət təklifi üçün (app/dishes.py). Təklifdəki maddə `key` ilə
     (adın normal forması, app/dishes.py::dish_key) uyğunlaşdırılır; şəkil JPEG baytları kimi bazadadır."""
