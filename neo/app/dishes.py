@@ -7,12 +7,14 @@ uyğunlaşdırılır — az/en/ru adlarından hər biri ola bilər. Şəkil yük
 from __future__ import annotations
 
 import io
+import json
 import re
 import unicodedata
 from datetime import datetime
+from pathlib import Path
 
 from PIL import Image, UnidentifiedImageError
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session, undefer
 
 from app.db.models import Dish
@@ -133,3 +135,30 @@ def remember(db: Session, names: list[str], category_of: dict[str, str] | None =
         if k not in known:
             db.add(Dish(key=k, name=n, category=(category_of.get(n) or None)))
     return len(set(fresh) - known)
+
+
+# Başlanğıc şəkillər: Seaport "Medium Plus — Dish Photography" PDF-indəki 28 yemək (app/dish_photos/).
+# Yalnız şəkli heç vaxt qoyulmamış yeməyə yazılır (image və image_updated_at boş) — istifadəçinin sildiyi
+# və ya dəyişdiyi şəkil geri gəlmir. Vercel-də startup-da kod işləmir, ona görə ilk lazım olanda çağırılır.
+STARTER_DIR = Path(__file__).parent / "dish_photos"
+_starter_done = False
+
+
+def seed_starter_photos(db: Session) -> int:
+    global _starter_done
+    if _starter_done:
+        return 0
+    index = STARTER_DIR / "index.json"
+    files = json.loads(index.read_text(encoding="utf-8")) if index.exists() else {}
+    by_key = {dish_key(name): file for file, name in files.items()}
+    added = 0
+    if by_key:
+        for d in db.scalars(select(Dish).where(Dish.key.in_(by_key), Dish.image.is_(None), Dish.image_updated_at.is_(None))):
+            # Paralel sorğu eyni yeməyi artıq yazıbsa, təkrar yazılmır (şərtli UPDATE)
+            res = db.execute(update(Dish).where(Dish.id == d.id, Dish.image.is_(None), Dish.image_updated_at.is_(None))
+                             .values(image=(STARTER_DIR / by_key[d.key]).read_bytes(), image_type="image/jpeg",
+                                     image_updated_at=datetime.utcnow()))
+            added += res.rowcount or 0
+        db.commit()
+    _starter_done = True
+    return added

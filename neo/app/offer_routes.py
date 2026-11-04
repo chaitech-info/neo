@@ -95,6 +95,7 @@ def render_pdf(snapshot: dict, pictures: bool = False) -> bytes:
         except Exception:
             db.rollback()
             log.exception("dish_remember_failed")
+        dishes.seed_starter_photos(db)
         photos = dishes.photos_for(db, names + [i for p in plans.values() for b in p.blocks for g in b.groups for i in g.items])
     return offer_pdf.render(snapshot, photos, plans)
 
@@ -369,6 +370,7 @@ def _dish_json(d: Dish, has_image: bool) -> dict:
 def dish_catalog(me: User = Depends(REQUIRE["sales"])):
     """Menyu planının yemək seçicisi üçün kataloq (şəkil özü yox, yalnız ünvanı)."""
     with security.SessionLocal() as db:
+        dishes.seed_starter_photos(db)
         with_image = set(db.scalars(select(Dish.id).where(Dish.image.is_not(None))))
         rows = db.scalars(select(Dish).order_by(Dish.name)).all()
         return JSONResponse({"dishes": [_dish_json(d, d.id in with_image) for d in rows],
@@ -430,6 +432,7 @@ def package_plan(brand: str, package_id: str, me: User = Depends(REQUIRE["admin"
 
 def _menu_pdf(package: dict, plan: dict, brand: str, schedule: bool) -> bytes:
     with security.SessionLocal() as db:
+        dishes.seed_starter_photos(db)
         dish_rows = package_menus.dish_map(db, plan)
         pkg = package_menus.pdf_package(plan, dish_rows, package)
         photos = dishes.photos_for(db, [i for b in pkg.blocks for g in b.groups for i in g.items])

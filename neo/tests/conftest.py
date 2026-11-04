@@ -21,6 +21,13 @@ def test_database_schema():
 
 
 @pytest.fixture(autouse=True)
+def no_starter_photos(monkeypatch):
+    """Başlanğıc yemək şəkilləri (app/dish_photos) testlərdə yazılmasın — şəkil saylarını dəyişir.
+    Onu yoxlayan test `_starter_done`-u özü False edir."""
+    monkeypatch.setattr("app.dishes._starter_done", True)
+
+
+@pytest.fixture(autouse=True)
 def no_real_ai_triage(monkeypatch):
     """Testlər OpenAI-yə getməsin: triaj defolt olaraq "AI yoxdur" (None) qaytarır,
     scraper-lər yalnız açar sözlərlə işləyir. Triajı yoxlayan test bunu öz

@@ -35,6 +35,7 @@ def dishes_page(request: Request, show: str = "all", q: str = "", me: User = Dep
     show = show if show in FILTERS else "all"
     q = q.strip()[:200]
     with security.SessionLocal() as db:
+        dishes.seed_starter_photos(db)
         base = select(Dish)
         if q:
             like = f"%{q}%"

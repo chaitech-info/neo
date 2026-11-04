@@ -176,3 +176,19 @@ def test_photos_match_by_any_language_name(db):
 
 def test_render_without_photos_is_unchanged():
     assert _pages(offer_pdf.render(WEEKLY, {})) == _pages(offer_pdf.render(WEEKLY)) == 3
+
+
+def test_starter_photos_fill_only_untouched_dishes(db, monkeypatch):
+    with db() as s:
+        removed = s.scalars(select(Dish).where(Dish.key == dishes.dish_key("Nar salatı"))).one()
+        dishes.clear_image(removed, None)          # istifadəçi şəklini silib — geri gəlməməlidir
+        s.commit()
+    monkeypatch.setattr(dishes, "_starter_done", False)
+    with db() as s:
+        assert dishes.seed_starter_photos(s) == 27
+        assert dishes.seed_starter_photos(s) == 0    # bir dəfə
+        assert s.scalars(select(Dish).where(Dish.key == dishes.dish_key("Nar salatı"))).one().image is None
+        assert s.scalars(select(Dish).where(Dish.key == dishes.dish_key("Mal əti stroqonofu"))).one().image
+    monkeypatch.setattr(dishes, "_starter_done", False)
+    with db() as s:
+        assert dishes.seed_starter_photos(s) == 0    # yenidən başlasa da, artıq şəkli olanlara toxunmur
