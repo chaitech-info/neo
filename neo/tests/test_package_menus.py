@@ -194,7 +194,28 @@ def test_plan_ids_and_stale_plan_is_reimported(db, monkeypatch):
         package_menus.save(s, "seaport", "standart", plan, None)
         s.commit()
     assert c.get("/api/offer-packages/seaport/plans").json() == {"ids": ["standart"]}
-    # Agentdəki menyu JSON ilə dəyişib → plan mətndən yenidən qurulur
+    # Agentdəki menyu JSON ilə dəyişib → saxlanmış plan qalır, fərq göstərilir; istəsə mətndən yenidən qurur
     monkeypatch.setattr(agent, "list_packages", lambda brand, client=None: [{"id": "standart", **WEEKLY["lines"][0]}])
     j = c.get("/api/offer-packages/seaport/standart/plan").json()
+    assert j["imported"] is False and j["differs"] is True and j["plan"]["days"] == [0, 1]
+    j = c.get("/api/offer-packages/seaport/standart/plan?source=agent").json()
     assert j["imported"] is True and len(j["plan"]["days"]) == 5
+
+
+def test_every_day_menu_is_one_block_like_medium_plus(db):
+    with db() as s:
+        ids = {n: _id(s, n) for n in ("Pomidor-reyhan şorbası", "Minestrone şorbası", "Mal əti stroqonofu", "Çörək çeşidləri")}
+        raw = _plan(s, same=["m1:c1", "m1:c2", "m1:c4"], fields=[])
+        raw["cells"] = {"w1:*:m1:c1": [{"dish": ids["Pomidor-reyhan şorbası"]}, {"dish": ids["Minestrone şorbası"]}],
+                        "w1:*:m1:c2": [{"dish": ids["Mal əti stroqonofu"]}], "w1:*:m1:c4": [{"dish": ids["Çörək çeşidləri"]}]}
+        plan = package_menus.clean(raw, s)
+        rows = package_menus.dish_map(s, plan)
+        menu = package_menus.agent_menu(plan, rows)
+        pkg = package_menus.pdf_package(plan, rows, {"id": "mp", "name": {"az": "Medium plus", "en": "Medium Plus"}, "price": 10})
+        again = package_menus.clean(package_menus.from_agent_menu(s, menu), s)   # mətndən geri çevrilir
+    assert package_menus.every_day(plan)
+    assert [m["title"]["az"] for m in menu] == ["Şorbalar", "Əsas yeməklər", "Çörək"]
+    assert menu[0]["items"][0] == {"az": "Pomidor-reyhan şorbası", "en": "Pomidor-reyhan şorbası", "ru": "Pomidor-reyhan şorbası"}
+    assert not pkg.weekly and len(pkg.blocks) == 1 and pkg.blocks[0].title == "Bazar ertəsi – Çərşənbə axşamı"
+    assert offer_pdf.summary_line(pkg) == "2 şorba, 1 əsas yemək, çörək çeşidləri."
+    assert package_menus.every_day(again) and package_menus.same_menu(package_menus.agent_menu(again, rows), menu)

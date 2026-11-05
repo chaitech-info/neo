@@ -81,7 +81,7 @@
     var CSRF = {{ csrf|tojson }};
     var $ = function (id) { return document.getElementById(id); };
     var packages = [], planIds = [], cur = null, isNew = false;
-    var plan = null, presets = [], catalog = null, imported = false, dirty = false;
+    var plan = null, presets = [], catalog = null, imported = false, differs = false, dirty = false;
     var ui = { week: 1, meal: null, day: null };
     var ID_RE = /^[a-z0-9][a-z0-9_-]{1,40}$/;
     var DAYS = ['Bazar ertəsi', 'Çərşənbə axşamı', 'Çərşənbə', 'Cümə axşamı', 'Cümə', 'Şənbə', 'Bazar'];
@@ -175,9 +175,13 @@
       say('');
       $('pk-editor').hidden = false; $('pk-form').textContent = '';
       $('pk-form').appendChild(h('div', { class: 'of-loading' }, [h('span', { class: 'of-spin', 'aria-hidden': 'true' }), h('span', { text: 'Menyu yüklənir…' })]));
-      Promise.all([loadCatalog(), api('GET', '/api/offer-packages/' + brand() + '/' + (fresh ? '_new' : encodeURIComponent(cur.id)) + '/plan')])
+      loadPlan('');
+    }
+
+    function loadPlan(source) {
+      Promise.all([loadCatalog(), api('GET', '/api/offer-packages/' + brand() + '/' + (isNew ? '_new' : encodeURIComponent(cur.id)) + '/plan' + (source ? '?source=' + source : ''))])
         .then(function (r) {
-          plan = r[1].plan; presets = r[1].presets || []; imported = !!r[1].imported; dirty = false;
+          plan = r[1].plan; presets = r[1].presets || []; imported = !!r[1].imported; differs = !!r[1].differs; dirty = !!source;
           ui = { week: 1, meal: plan.meals[0].id, day: plan.days[0] };
           renderForm();
           $('pk-editor').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -248,6 +252,10 @@
         h('p', { class: 'kw-hint', text: 'Hansı yemək hansı gün və yemək vaxtında verilir. Xanadakı «+» ilə yemək seç, yeməyə basanda əlavə sahələrini (porsiya, kalori …) yaz.' })
       ]));
       if (imported) root.appendChild(h('div', { class: 'flash info', text: 'Bu paketin köhnə mətn menyusu cədvələ çevrildi. Yoxla və «Yadda saxla» bas.' }));
+      if (differs) root.appendChild(h('div', { class: 'flash info' }, [
+        'Agentdəki menyu bu cədvəldən fərqlidir (məs. JSON ilə yüklənib). «Yadda saxla» bassan, agentə bu cədvəl gedəcək. ',
+        h('button', { type: 'button', class: 'mc-btn mc-btn-sm', text: 'Agentdəki menyudan yenidən qur', onclick: function () { loadPlan('agent'); } })
+      ]));
       root.appendChild(settings());
       if (plan.weeks > 1 || plan.meals.length > 1) root.appendChild(tabs());
       if (ui.week > plan.weeks) ui.week = 1;

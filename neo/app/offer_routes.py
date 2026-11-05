@@ -407,8 +407,10 @@ def package_plan_ids(brand: str, me: User = Depends(REQUIRE["admin"])):
 
 
 @router.get("/api/offer-packages/{brand}/{package_id}/plan")
-def package_plan(brand: str, package_id: str, me: User = Depends(REQUIRE["admin"])):
-    """Saxlanmış plan; yoxdursa — agentdəki mətn menyusundan çevrilmiş (hələ saxlanmayıb, `imported`)."""
+def package_plan(brand: str, package_id: str, source: str = "", me: User = Depends(REQUIRE["admin"])):
+    """Saxlanmış plan; yoxdursa (və ya ?source=agent) — agentdəki mətn menyusundan çevrilmiş (hələ saxlanmayıb,
+    `imported`). Saxlanmış plan agentdəki menyudan fərqlənirsə (məs. JSON ilə yüklənib), plan qaytarılır və
+    `differs` — istifadəçi seçir: planı saxlasın və ya mətndən yenidən qursun."""
     if (bad := _brand_or_error(brand)):
         return bad
     with security.SessionLocal() as db:
@@ -422,9 +424,9 @@ def package_plan(brand: str, package_id: str, me: User = Depends(REQUIRE["admin"
                     return _agent_error(exc)
                 found = None          # agent cavab vermir — saxlanmış plan yenə də açılsın
             menu = (found or {}).get("menu")
-        # Saxlanmış plan agentdəki menyu ilə eynidirsə — plan; menyu kənardan (JSON yükləmə) dəyişibsə — mətndən yenidən
-        if plan is not None and (not menu or package_menus.same_menu(package_menus.agent_menu(plan, package_menus.dish_map(db, plan)), menu)):
-            return JSONResponse({"plan": plan, "imported": False, "presets": package_menus.FIELD_PRESETS})
+        if plan is not None and source != "agent":
+            differs = bool(menu) and not package_menus.same_menu(package_menus.agent_menu(plan, package_menus.dish_map(db, plan)), menu)
+            return JSONResponse({"plan": plan, "imported": False, "differs": differs, "presets": package_menus.FIELD_PRESETS})
         plan = package_menus.from_agent_menu(db, menu) if menu else package_menus.default_plan()
         db.commit()   # çevirmədə kataloqa düşən yeni yeməklər
         return JSONResponse({"plan": plan, "imported": bool(menu), "presets": package_menus.FIELD_PRESETS})

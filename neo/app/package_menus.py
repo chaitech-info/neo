@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 
 from app import dishes as dish_catalog
 from app.db.models import Dish, PackageMenu
-from app.offer_pdf import WEEKDAYS, Block, Group, Package, _CAT_RE, _money, _weekday
+from app.offer_pdf import WEEKDAYS, Block, Group, Package, _CAT_RE, _money, _weekday, section_name
 
 MAX_WEEKS, MAX_MEALS, MAX_COURSES, MAX_FIELDS, MAX_PER_CELL = 4, 6, 15, 8, 12
 ID_RE = re.compile(r"^[a-z0-9_-]{1,24}$")
@@ -201,8 +201,36 @@ def _note(plan: dict, entry: dict) -> str:
     return " · ".join(parts)
 
 
+def every_day(plan: dict) -> bool:
+    """Bütün dolu sətirlər "hər gün eyni"dir (seçimli menyu, məs. Medium plus: hər gün 5 şorba, 8 əsas yemək …) —
+    menyu gün-gün yox, bir blok kimi göstərilir."""
+    rows = {k.split(":", 2)[2] for k in plan["cells"]}
+    return plan["weeks"] == 1 and bool(rows) and all(r in plan["same"] for r in rows)
+
+
+def _flat_agent_menu(plan: dict, dishes: dict[int, Dish]) -> list[dict]:
+    out = []
+    many_meals = len(plan["meals"]) > 1
+    for meal in plan["meals"]:
+        meal_en, meal_ru = MEAL_I18N.get(meal["name"], (meal["name"], meal["name"]))
+        for course in plan["courses"]:
+            items = [dishes[e["dish"]] for e in _cell(plan, 1, 0, meal["id"], course["id"]) if e["dish"] in dishes]
+            if not items:
+                continue
+            az, en = section_name(course["name"])
+            ru = COURSE_I18N.get(dish_catalog.category_name(course["name"]), ("", course["name"]))[1]
+            title = {"az": az, "en": en or az, "ru": ru}
+            if many_meals:
+                title = {"az": f"{meal['name']} — {az}", "en": f"{meal_en} — {en or az}", "ru": f"{meal_ru} — {ru}"}
+            out.append({"title": title, "items": [{"az": d.name, "en": d.name_en or d.name, "ru": d.name_ru or d.name} for d in items]})
+    return out
+
+
 def agent_menu(plan: dict, dishes: dict[int, Dish]) -> list[dict]:
-    """Agentə gedən paketin `menu`-su: hər həftə × gün bir bölmə, maddə "Kateqoriya: yemək" (az/en/ru)."""
+    """Agentə gedən paketin `menu`-su: hər həftə × gün bir bölmə, maddə "Kateqoriya: yemək" (az/en/ru).
+    Hər gün eyni menyuda — kateqoriya bölmələri ("Şorbalar": yeməklər), nümunə Medium plus PDF-i kimi."""
+    if every_day(plan):
+        return _flat_agent_menu(plan, dishes)
     out = []
     many_meals = len(plan["meals"]) > 1
     for w in range(1, plan["weeks"] + 1):
@@ -236,15 +264,19 @@ def pdf_package(plan: dict, dishes: dict[int, Dish], package: dict, lang: str = 
             return str(v.get(lang) or v.get("az") or "").strip()
         return str(v or "").strip()
 
+    days = plan["days"]
+    span = (f"{WEEKDAYS[min(days)][0]} – {WEEKDAYS[max(days)][0]}", f"{WEEKDAYS[min(days)][1]} – {WEEKDAYS[max(days)][1]}") \
+        if len(days) > 1 else (WEEKDAYS[days[0]][0], WEEKDAYS[days[0]][1])
+    flat = every_day(plan)
     blocks = []
     for w in range(1, plan["weeks"] + 1):
         sfx = _week_suffix(plan, w)
-        for d in plan["days"]:
+        for d in (plan["days"][:1] if flat else plan["days"]):   # hər gün eyni — bir blok
             day = WEEKDAYS[d]
             for meal in plan["meals"]:
                 groups = []
                 for course in plan["courses"]:
-                    g = Group(course["name"])
+                    g = Group(section_name(course["name"])[0] if flat else course["name"])
                     for e in _cell(plan, w, d, meal["id"], course["id"]):
                         dish = dishes.get(e["dish"])
                         if dish is None:
@@ -261,15 +293,15 @@ def pdf_package(plan: dict, dishes: dict[int, Dish], package: dict, lang: str = 
                     continue
                 meal_label = " ".join(x for x in (meal["name"] if len(plan["meals"]) > 1 or meal.get("time") else "",
                                                    meal.get("time") or "") if x)
+                if flat:
+                    blocks.append(Block(span[0], " · ".join(x for x in (span[1], meal_label) if x), groups))
+                    continue
                 accent = " · ".join(x for x in (day[1] + sfx[1], meal_label) if x)
                 blocks.append(Block((day[2] if lang == "ru" else day[0]) + (sfx[2] if lang == "ru" else sfx[0]), accent, groups))
-    days = plan["days"]
-    span = (f"{WEEKDAYS[min(days)][0]} – {WEEKDAYS[max(days)][0]}", f"{WEEKDAYS[min(days)][1]} – {WEEKDAYS[max(days)][1]}") \
-        if len(days) > 1 else (WEEKDAYS[days[0]][0], WEEKDAYS[days[0]][1])
     name = tr(package.get("name")) or str(package.get("id") or package.get("package_id") or "")
     name_en = str((package.get("name") or {}).get("en") or "").strip() if isinstance(package.get("name"), dict) else ""
     price = package.get("unit_price", package.get("price"))
-    return Package(name=name, name_en=name_en, weekly=True, blocks=blocks, price=_money(price, currency),
+    return Package(name=name, name_en=name_en, weekly=not flat, blocks=blocks, price=_money(price, currency),
                    unit=tr(package.get("unit")), description=tr(package.get("description")), days_span=span,
                    daily=len(plan["meals"]) == 1)
 

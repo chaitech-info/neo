@@ -275,8 +275,13 @@ def _money(value: Any, currency: str = "AZN") -> str:
     return f"{s} {currency}".strip()
 
 
+def az_lower(s: str) -> str:
+    """Azərbaycan hərfləri ilə kiçik hərf: "İçki" → "içki" (str.lower() "i̇çki" verir), "I" → "ı"."""
+    return s.replace("İ", "i").replace("I", "ı").lower()
+
+
 def _singular(label: str) -> str:
-    low = label.lower()
+    low = az_lower(label)
     return re.sub(r"(lar|lər)$", "", low) if len(low) > 5 else low
 
 
@@ -292,7 +297,9 @@ def daily_selection(pkg: Package) -> list[tuple[int | None, str]]:
         per_day = [next((g.items for g in b.groups if g.label == label), []) for b in pkg.blocks]
         same = all(items == per_day[0] for items in per_day)
         generic = label.casefold() in GENERIC or not label
-        if (pkg.weekly and same) or generic:
+        from app.dishes import category_name
+        single = category_name(label) == "Çörək" and max(len(i) for i in per_day) == 1   # "Çörək çeşidləri" — mətnlə
+        if (pkg.weekly and same) or generic or single:
             for item in per_day[0]:
                 out.append((None, item))
         else:
@@ -301,7 +308,7 @@ def daily_selection(pkg: Package) -> list[tuple[int | None, str]]:
 
 
 def summary_line(pkg: Package) -> str:
-    parts = [f"{n} {label}" if n else label[:1].lower() + label[1:] for n, label in daily_selection(pkg)]
+    parts = [f"{n} {label}" if n else az_lower(label[:1]) + label[1:] for n, label in daily_selection(pkg)]
     if not parts:
         return ""
     return ("Hər gün " if pkg.weekly else "") + ", ".join(parts) + "."
@@ -699,14 +706,16 @@ class MenuDoc(Doc):
                  schedule: bool = True, total: int = 0):
         super().__init__({"brand": brand, "language": "az", "lines": [{}]}, total=total, photos=photos, plans={0: pkg})
         self.note, self.schedule = note, schedule
-        self.weekly = True
+        self.weekly = pkg.weekly
 
     def title(self) -> str:
         p = self.packages[0]
         return f"{p.name_en or p.name} Corporate Lunch Menu"
 
     def running_head(self) -> str:
-        return "Həftəlik menyu" if self.schedule else "Yemək şəkilləri"
+        if not self.schedule:
+            return "Yemək şəkilləri"
+        return "Həftəlik menyu" if self.weekly else "Nahar menyusu"
 
     def cover(self) -> None:
         t, p = self.t, self.packages[0]
@@ -719,15 +728,16 @@ class MenuDoc(Doc):
             t.draw(LEFT, y, line, 40, NAVY)
             y += 44.5
         has_photos = bool(self.gallery_sections())
-        en = ("Weekly Menu & Dish Photography" if self.schedule and has_photos else
-              "Weekly Menu" if self.schedule else "Dish Photography")
-        az = ("Həftəlik menyu və yemək şəkilləri" if self.schedule and has_photos else
-              "Həftəlik menyu" if self.schedule else "Yemək şəkilləri")
+        menu_en, menu_az = ("Weekly Menu", "Həftəlik menyu") if self.weekly else ("Lunch Menu", "Nahar menyusu")
+        en = (f"{menu_en} & Dish Photography" if self.schedule and has_photos else
+              menu_en if self.schedule else "Dish Photography")
+        az = (f"{menu_az} və yemək şəkilləri" if self.schedule and has_photos else
+              menu_az if self.schedule else "Yemək şəkilləri")
         t.draw(LEFT, y - 2, en, 14, NAVY, italic=True)
         t.draw(LEFT, y + 19, az, 14, GREY, italic=True)
         self.rule(647.5)
         t.draw(LEFT, 677, f"{p.name} paket", 13, TEAL)
-        sections = [section_name(g.label)[0].lower() for g in _unique_groups(p)]
+        sections = [az_lower(section_name(g.label)[0]) for g in _unique_groups(p)]
         desc = p.description or (f"{p.name} menyusunda təqdim olunan yeməklər" +
                                  (": " + ", ".join(sections[:-1]) + (" və " if len(sections) > 1 else "") + sections[-1] + "."
                                   if sections else "."))
@@ -755,7 +765,8 @@ class MenuDoc(Doc):
         p = self.packages[0]
         if self.schedule and p.blocks:
             self.page_header()
-            self.section_title("Weekly menu", "Həftəlik menyu", p.days_span[0] if p.days_span else "")
+            self.section_title(*(("Weekly menu", "Həftəlik menyu") if p.weekly else ("Menu", "Menyu")),
+                               p.days_span[0] if p.days_span else "")
             for b in p.blocks:
                 self.day_block(b)
             self.daily(p)
