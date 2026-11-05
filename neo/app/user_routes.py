@@ -13,6 +13,9 @@ from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import func, select
 
+import structlog
+
+from app import dishes
 from app import lead_filters as lf
 from app import notify as nt
 from app.auth import security
@@ -22,6 +25,7 @@ from app.crm_routes import BAKU_OFFSET, _parse_local_datetime
 from app.crm import CrmError
 from app.db.models import LetterTemplate, Notification, Reminder, User, UserCategory
 
+log = structlog.get_logger()
 router = APIRouter()
 
 KIND_LABELS = {"tender": "Tender", "employer": "İşəgötürən", "news": "Xəbər"}
@@ -276,6 +280,13 @@ def notifications_page(request: Request, me: User = Depends(REQUIRE["viewer"])):
 def notifications_api(after: int = 0, me: User = Depends(REQUIRE["viewer"])):
     """Brauzer hər dəqiqə çağırır: vaxtı çatan xatırlatmalar burada bildirişə çevrilir."""
     with security.SessionLocal() as db:
+        # Başlanğıc yemək şəkilləri (app/dish_photos): Vercel-də startup yoxdur, bu sorğu isə hər dəqiqə gəlir —
+        # deploy-dan sonra bir dəqiqəyə yazılır; sonra prosesdə bir daha yoxlanmır. Xəta bildirişləri dayandırmasın.
+        try:
+            dishes.seed_starter_photos(db)
+        except Exception:
+            db.rollback()
+            log.exception("starter_photos_failed")
         nt.fire_due(db, me.id)
         rows = nt.unread(db, me.id, after_id=after)
         count = nt.unread_count(db, me.id)

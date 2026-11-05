@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
 from app import dishes, offer_client as agent, offer_pdf, offer_routes, web
@@ -192,3 +192,11 @@ def test_starter_photos_fill_only_untouched_dishes(db, monkeypatch):
     monkeypatch.setattr(dishes, "_starter_done", False)
     with db() as s:
         assert dishes.seed_starter_photos(s) == 0    # yenidən başlasa da, artıq şəkli olanlara toxunmur
+
+
+def test_notification_polling_writes_starter_photos(db, monkeypatch):
+    monkeypatch.setattr(dishes, "_starter_done", False)
+    c = TestClient(web.app)
+    assert c.get("/api/notifications").status_code == 200
+    with db() as s:
+        assert s.scalar(select(func.count()).select_from(Dish).where(Dish.image.is_not(None))) == 28
