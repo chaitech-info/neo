@@ -108,33 +108,6 @@
     </section>
     {% endif %}
 
-    <section class="od-card">
-      <h2>Məlumat</h2>
-      {% if can_edit %}
-      <form method="post" action="/opportunities/{{ opp.id }}/details">
-        {{ csrf_field(request) }}
-        <div class="kw-row" style="margin-top:0">
-          <label class="kw-f">Gözlənilən dəyər (AZN)<input name="expected_value" inputmode="decimal" value="{{ opp.expected_value if opp.expected_value is not none else '' }}"></label>
-          <label class="kw-f">Gözlənilən bağlanma<input type="date" name="expected_close_on" value="{{ opp.expected_close_on or '' }}"></label>
-        </div>
-        <label class="kw-f">Məsul şəxs
-          <select name="owner_id">
-            <option value="">— təyin edilməyib —</option>
-            {% for u in user_list %}<option value="{{ u.id }}" {% if u.id == opp.owner_id %}selected{% endif %}>{{ u.full_name }}</option>{% endfor %}
-            {% if owner and not owner.is_active %}<option value="{{ owner.id }}" selected>{{ owner.full_name }} (deaktiv)</option>{% endif %}
-          </select>
-        </label>
-        <button class="mc-btn" style="margin-top:14px" type="submit">Yadda saxla</button>
-      </form>
-      {% else %}
-      <dl class="od-kv">
-        <dt>Gözlənilən dəyər</dt><dd>{{ opp.expected_value or '—' }} {{ opp.currency }}</dd>
-        <dt>Bağlanma</dt><dd>{{ opp.expected_close_on or '—' }}</dd>
-        <dt>Məsul</dt><dd>{% if owner %}{{ owner.full_name }}{% if not owner.is_active %} (deaktiv){% endif %}{% else %}—{% endif %}</dd>
-      </dl>
-      {% endif %}
-    </section>
-
     {% if lead %}
     <section class="od-card">
       <h2>Haradan gəldi</h2>
