@@ -4,7 +4,7 @@
 {% block content %}
   <header class="ld-head">
     <h1 class="mc-title">Şirkət analizi</h1>
-    <p class="ld-sub">Şirkətin adını (və varsa saytını) yaz — AI onun saytını və bazamızdakı lead/fürsətləri oxuyub potensial müştəri kimi qiymətləndirir: nə iş görür, nə qədər böyükdür, catering ehtiyacı, necə yanaşmaq lazımdır. Hər uğurlu analiz <a href="/companies">Şirkət bazasında</a> saxlanılır.</p>
+    <p class="ld-sub">Şirkətin adını (və varsa saytını) yaz — AI onu internetdə araşdırır (rəsmi sayt, LinkedIn, xəbərlər), bazamızdakı lead/fürsətləri də oxuyub potensial müştəri kimi qiymətləndirir: nə iş görür, nə qədər böyükdür, catering ehtiyacı, necə yanaşmaq lazımdır. Hər uğurlu analiz <a href="/companies">Şirkət bazasında</a> saxlanılır.</p>
   </header>
 
   <section class="od-card">
@@ -15,7 +15,7 @@
         <label class="kw-f kw-g">Sayt (istəyə görə)<input name="website" maxlength="300" value="{{ website }}" placeholder="məs. sahil.az"></label>
       </div>
       <div class="em-act">
-        <button class="mc-btn mc-btn-hero" type="submit" data-busy="Analiz olunur… (~15 san.)">Analiz et</button>
+        <button class="mc-btn mc-btn-hero" type="submit" data-busy="İnternetdə araşdırılır… (~30 san.)">Analiz et</button>
         <a class="mc-btn" href="/tools/contracts?new=1#company-new" title="Analiz etmədən şirkəti (və müqaviləsini) əl ilə bazaya əlavə et">+ Şirkət əlavə et</a>
       </div>
     </form>
@@ -23,7 +23,7 @@
 
   {# Analiz gedərkən (~15 san.) nəticənin skeleti göstərilir; köhnə nəticə gizlənir. #}
   <div class="skel-wrap" data-skel hidden aria-live="polite">
-    <div class="skel-card"><b>AI şirkəti analiz edir — saytı və bazadakı məlumatı oxuyur…</b><div class="skel"><i></i><i></i><i></i><i></i></div></div>
+    <div class="skel-card"><b>AI şirkəti internetdə araşdırır — rəsmi sayt, LinkedIn, xəbərlər və bazadakı məlumat…</b><div class="skel"><i></i><i></i><i></i><i></i></div></div>
     <div class="skel-grid">
       <div class="skel-card"><div class="skel"><i></i><i></i><i></i></div></div>
       <div class="skel-card"><div class="skel"><i></i><i></i><i></i></div></div>
@@ -58,7 +58,7 @@
       <p class="od-empty">Bu şirkətlə bağlı lead tapılmadı.</p>
     {% endif %}
   </section>
-  <p class="od-hint">AI yalnız saytdakı və bazadakı məlumata əsaslanır — rəqəmləri və adları göndərməzdən əvvəl yoxla.</p>
+  <p class="od-hint">AI internetdəki açıq mənbələrə, şirkətin saytına və bazamızdakı məlumata əsaslanır — rəqəmləri və adları göndərməzdən əvvəl yoxla.</p>
   </div>
   {% endif %}
 

@@ -109,7 +109,9 @@ def save_analysis(session: Session, result: dict, website: str | None, user_id: 
         "name": result["name"], "ai": ai, "site": result.get("site") or "", "site_ok": bool(result.get("site_ok")),
         "found": [_plain(f) for f in result.get("found") or []],
         "facts": {"leads": len(facts.get("leads") or []), "opportunities": facts.get("opportunities") or 0},
+        "web": bool(result.get("web")),
     }, ensure_ascii=False)
+    _fill_contacts(org, ai)
     industry = (ai.get("industry") or "").strip()
     org.industry = industry[:300] if industry and industry.lower() != "bilinmir" else org.industry
     org.analysis_status = "ok"
@@ -118,6 +120,21 @@ def save_analysis(session: Session, result: dict, website: str | None, user_id: 
     org.analysed_by_id = user_id
     session.commit()
     return org
+
+
+def _fill_contacts(org: Organization, ai: dict) -> None:
+    """Veb axtarışının tapdığı rəsmi əlaqələr — yalnız kartdakı boş sahələrə (işçinin yazdığı üstələnmir)."""
+    from app.contacts import EMAIL_RE
+
+    email = str(ai.get("email") or "").strip().lower()
+    if not org.email and email and len(email) <= 254 and EMAIL_RE.fullmatch(email):
+        org.email = email
+    phone = " ".join(str(ai.get("phone") or "").split())
+    if not org.phone and phone and sum(c.isdigit() for c in phone) >= 7:
+        org.phone = phone[:64]
+    domain = normalize_domain(ai.get("website"))
+    if not org.website and domain:
+        org.website, org.domain = site_url(ai["website"]), org.domain or domain
 
 
 def analysis_of(org: Organization) -> dict | None:

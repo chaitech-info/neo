@@ -1006,6 +1006,11 @@ th.num, td.num { text-align: right; white-space: nowrap; font-variant-numeric: t
 .emp-box > .skel { margin-top: 12px; }
 @media (max-width: 560px) { .emp-list { grid-template-columns: minmax(0, 1fr); } }
 
+/* Şirkət analizinin mənbələri (veb axtarışı) */
+.od-sources > summary { cursor: pointer; font-weight: 600; }
+.od-sources ul { margin: 10px 0 0; padding-left: 18px; font-size: 13px; }
+.od-sources a { overflow-wrap: anywhere; }
+
 /* Alt şirkətlər (templates/_subsidiaries.html) */
 .sub-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 10px; }
 .sub { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; background: var(--s2);

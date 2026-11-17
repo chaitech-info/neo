@@ -142,3 +142,18 @@ def test_research_failure_is_a_clear_error(factory, monkeypatch):  # noqa: F811
     assert r.status_code == 502 and "Timeout" in r.json()["error"]
     r = TestClient(web.app).post(f"/tools/company/subsidiary/{org.id}/analyse")
     assert r.status_code == 404  # alt şirkət deyil
+
+
+def test_parent_domain_page_is_not_taken_as_the_subsidiary_site(factory):  # noqa: F811
+    """AI alt şirkətin "saytı" kimi ana şirkətin səhifəsini verəndə alt şirkətlər ana şirkətə qarışmamalıdır."""
+    found = [{"name": f"Azersun {n} Fabriki", "website": "https://www.azersun.com/en/activity-fields/qida",
+              "relation": "törəmə şirkət", "source_url": "https://www.azersun.com/en/activity-fields/qida",
+              "in_azerbaijan": True} for n in ("Çay", "Yağ")]
+    clean = subsidiaries._clean(found, "Azersun Holding", "https://www.azersun.com")
+    assert [f["website"] for f in clean] == [None, None]
+    with factory() as s:
+        parent = companies.company_for(s, "Azersun Holding", "azersun.com")
+        s.commit()
+        subs = subsidiaries.save(s, parent, subsidiaries._clean(found, "Azersun Holding"))  # sayt süzülməsə də
+        assert sorted(o.name for o in subs) == ["Azersun Yağ Fabriki", "Azersun Çay Fabriki"]
+        assert all(o.domain is None for o in subs)

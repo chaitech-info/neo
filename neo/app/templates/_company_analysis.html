@@ -9,10 +9,34 @@
       <dt>Sahə</dt><dd>{{ ai.industry }}</dd>
       <dt>Ölçü</dt><dd>{{ size_names.get(ai.size, ai.size) }}{% if ai.size_note %} — {{ ai.size_note }}{% endif %}</dd>
       <dt>Catering uyğunluğu</dt><dd><b>{{ fit_names.get(ai.fit, ai.fit) }}</b> — {{ ai.fit_reason }}</dd>
-      <dt>Sayt</dt><dd>{% if a.site %}<a href="{{ a.site }}" target="_blank" rel="noopener">{{ a.site }} ↗</a>{% if not a.site_ok %} (oxunmadı — analiz yalnız bazadakı məlumatla){% endif %}{% else %}verilməyib{% endif %}</dd>
+      <dt>Sayt</dt><dd>{% if a.site %}<a href="{{ a.site }}" target="_blank" rel="noopener">{{ a.site }} ↗</a>{% if not a.site_ok and not a.web %} (oxunmadı — analiz yalnız bazadakı məlumatla){% endif %}{% else %}verilməyib{% endif %}</dd>
       {% if a.found %}<dt>Saytdakı əlaqə</dt><dd>{% for f in a.found %}{% if f.email %}<a href="mailto:{{ f.email }}">{{ f.email }}</a>{% elif f.phone %}<a href="tel:{{ f.phone }}">{{ f.phone }}</a>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</dd>{% endif %}
+      {% if ai.employees %}<dt>İşçi sayı</dt><dd>{{ ai.employees }}</dd>{% endif %}
+      {% if ai.founded %}<dt>Təsis</dt><dd>{{ ai.founded }}</dd>{% endif %}
+      {% if ai.phone %}<dt>Telefon</dt><dd><a href="tel:{{ ai.phone }}">{{ ai.phone }}</a></dd>{% endif %}
+      {% if ai.email %}<dt>Email</dt><dd><a href="mailto:{{ ai.email }}">{{ ai.email }}</a></dd>{% endif %}
+      {% if ai.address %}<dt>Ünvan</dt><dd>{{ ai.address }}</dd>{% endif %}
+      {% if ai.locations %}<dt>Ofis və obyektlər</dt><dd>{{ ai.locations|join(' · ') }}</dd>{% endif %}
     </dl>
+    {% if a.web %}<p class="od-hint">AI şirkəti internetdə araşdırıb (veb axtarışı){% if ai.sources %} — {{ ai.sources|length }} mənbə, aşağıda{% endif %}.</p>{% endif %}
   </section>
+
+  {% if ai.key_people or ai.news %}
+  <div class="od-grid">
+    {% if ai.key_people %}
+    <section class="od-card">
+      <h2>Rəhbərlər və qərar verənlər</h2>
+      <ul class="ct-list">{% for p in ai.key_people %}<li class="ct"><div class="ct-main"><b>{{ p.name }}</b>{% if p.role %}<span class="ct-role">{{ p.role }}</span>{% endif %}</div></li>{% endfor %}</ul>
+    </section>
+    {% endif %}
+    {% if ai.news %}
+    <section class="od-card">
+      <h2>Son xəbərlər</h2>
+      <ul class="ct-list">{% for n in ai.news %}<li class="ct"><div class="ct-main">{% if n.url %}<a href="{{ n.url }}" target="_blank" rel="noopener">{{ n.title }} ↗</a>{% else %}<b>{{ n.title }}</b>{% endif %}{% if n.date %}<span class="ct-role">{{ n.date }}</span>{% endif %}</div></li>{% endfor %}</ul>
+    </section>
+    {% endif %}
+  </div>
+  {% endif %}
 
   <div class="od-grid">
     {% for title, items in [("Ehtimal olunan ehtiyaclar", ai.needs), ("Necə yanaşmalı", ai.approach), ("İlk söhbətdə deyiləcəklər", ai.talking_points), ("Risklər", ai.risks)] if items %}
@@ -22,6 +46,12 @@
     </section>
     {% endfor %}
   </div>
+  {% if ai.sources %}
+  <details class="od-card od-sources">
+    <summary>Mənbələr ({{ ai.sources|length }})</summary>
+    <ul>{% for u in ai.sources %}<li><a href="{{ u }}" target="_blank" rel="noopener">{{ u }}</a></li>{% endfor %}</ul>
+  </details>
+  {% endif %}
 {% endmacro %}
 
 {# Əlavə qeydlər (organizations.notes): JS ilə səhifə yenilənmədən saxlanılır, JS-siz adi forma kimi işləyir. #}

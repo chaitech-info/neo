@@ -1,11 +1,18 @@
 """Alətlər → Şirkət analizi: şirkətin adı (və istəyə görə saytı) → AI satış analizi.
 
-Mənbələr: şirkət saytının ana səhifəsi (robots.txt-ə əməl edir), bazadakı təşkilat, həmin şirkətlə
-bağlı lead-lər və fürsətlər. AI yalnız bu faktlara əsaslanır; bilinməyən "bilinmir" yazılır.
+Mənbələr: GPT veb axtarışı (OpenAI Responses API, `web_search` — rəsmi sayt, LinkedIn, xəbərlər, reyestrlər),
+şirkət saytının ana səhifəsi (robots.txt-ə əməl edir), bazadakı təşkilat, həmin şirkətlə bağlı lead-lər və
+fürsətlər. AI yalnız bu faktlara əsaslanır; tapılmayan "bilinmir"/boş qalır, internetdən gələn hər fakt üçün
+mənbə linki saxlanılır. Veb axtarışı alınmasa (vaxt, xəta) analiz əvvəlki kimi sayt + baza ilə gedir.
+
+Env: COMPANY_WEB_SEARCH (defolt 1), COMPANY_SEARCH_MODEL (defolt AI_ANALYSIS_MODEL / gpt-4.1-mini),
+COMPANY_SEARCH_TOOL (defolt web_search).
 """
 from __future__ import annotations
 
+import json
 import os
+import time
 
 import structlog
 from bs4 import BeautifulSoup
@@ -44,6 +51,53 @@ SCHEMA = {
         "risks": _LIST,
     },
 }
+
+_PERSON = {"type": "object", "additionalProperties": False, "required": ["name", "role"],
+           "properties": {"name": {"type": "string"}, "role": {"type": "string"}}}
+_NEWS = {"type": "object", "additionalProperties": False, "required": ["title", "date", "url"],
+         "properties": {"title": {"type": "string"}, "date": {"type": "string"}, "url": {"type": "string"}}}
+# Veb axtarışlı analizin əlavə sahələri (tapılmayan — "" və ya [])
+WEB_FIELDS = {
+    "website": {"type": "string"}, "phone": {"type": "string"}, "email": {"type": "string"},
+    "address": {"type": "string"}, "employees": {"type": "string"}, "founded": {"type": "string"},
+    "locations": _LIST, "key_people": {"type": "array", "items": _PERSON}, "news": {"type": "array", "items": _NEWS},
+    "sources": _LIST,
+}
+WEB_SCHEMA = {**SCHEMA, "required": SCHEMA["required"] + list(WEB_FIELDS),
+              "properties": {**SCHEMA["properties"], **WEB_FIELDS}}
+# Vercel funksiyası 60 saniyədir: sayt + veb axtarışı + (alınmasa) əvvəlki üsul bu büdcəyə sığmalıdır.
+BUDGET_S = 54
+FALLBACK_S = 12  # əvvəlki üsula (sayt + baza) lazım olan vaxt
+
+WEB_PROMPT = """\
+You are a B2B sales analyst for an Azerbaijani catering company. Research ONE company as a potential
+client with web search (official website, LinkedIn, news sites, business registries, job boards) and the
+facts given below, then answer in Azerbaijani (Latin script).
+
+About us (what we sell):
+{company}
+
+Rules: only state what a source says. If something is not found, use "bilinmir" for text fields and ""
+or [] for contact fields and lists — never invent people, numbers, phones or emails. Prefer sources about
+the company in Azerbaijan.
+
+Fields:
+- summary: 3-4 sentences — who they are, what they do, where, how big.
+- industry: one short phrase.
+- size: small / medium / large / unknown (by staff size); size_note: the evidence, or "bilinmir".
+- employees: staff count or range with its source (e.g. "≈450 (LinkedIn)"), or "".
+- founded: year, or "".
+- website, phone, email, address: the company's official contacts (head office in Azerbaijan), or "".
+- locations: offices, plants, branches, sites in Azerbaijan (short, max 8).
+- key_people: leaders and decision makers named publicly (CEO, director, HR, procurement), max 8.
+- news: up to 5 recent news items about the company (title, date YYYY-MM-DD if known, url).
+- sources: the URLs you used (max 10).
+- fit: how likely they need our catering (staff meals, events, facilities); fit_reason: 1-2 sentences.
+- needs: 2-4 concrete catering needs they probably have.
+- approach: 3-5 concrete next steps for our salesperson (whom to contact, what to offer, when).
+- talking_points: 2-4 short points to mention in the first conversation.
+- risks: 0-3 risks or reasons it may not work (own kitchen, competitor, too small...).
+"""
 
 PROMPT = """\
 You are a B2B sales analyst for an Azerbaijani catering company. Analyse ONE company as a potential
@@ -117,9 +171,49 @@ def db_facts(session: Session, name: str) -> dict:
     return {"orgs": orgs, "leads": leads, "opportunities": opps or 0}
 
 
+def _url(value) -> str:
+    value = str(value or "").strip()
+    return value[:500] if value.startswith(("http://", "https://")) else ""
+
+
+def _clean_web(out: dict) -> dict:
+    """Linkləri yoxlayır, siyahıları qısaldır (AI cavabı səhifəyə və bazaya düşməzdən əvvəl)."""
+    out["sources"] = [u for u in (_url(x) for x in out.get("sources") or []) if u][:10]
+    out["news"] = [{"title": str(n.get("title") or "")[:200], "date": str(n.get("date") or "")[:20], "url": _url(n.get("url"))}
+                   for n in out.get("news") or [] if isinstance(n, dict) and n.get("title")][:5]
+    out["key_people"] = [{"name": str(p.get("name") or "")[:120], "role": str(p.get("role") or "")[:120]}
+                         for p in out.get("key_people") or [] if isinstance(p, dict) and p.get("name")][:8]
+    out["locations"] = [str(x)[:160] for x in out.get("locations") or [] if x][:8]
+    out["website"] = _url(out.get("website")) or (("https://" + out["website"].strip()) if "." in str(out.get("website") or "")
+                                                   and " " not in str(out.get("website")).strip() else "")
+    for k in ("phone", "email", "address", "employees", "founded"):
+        v = str(out.get(k) or "").strip()
+        out[k] = "" if v.lower() == "bilinmir" else v[:200]
+    return out
+
+
+def web_research(client: OpenAI, system: str, user: str, timeout: float = BUDGET_S - FALLBACK_S) -> dict | None:
+    """GPT veb axtarışı ilə analiz (WEB_SCHEMA); alınmasa None — çağıran əvvəlki üsula keçir."""
+    if (os.environ.get("COMPANY_WEB_SEARCH") or "1") == "0" or timeout < 10:
+        return None
+    model = (os.environ.get("COMPANY_SEARCH_MODEL") or os.environ.get("AI_ANALYSIS_MODEL") or "gpt-4.1-mini")
+    try:
+        resp = client.with_options(timeout=timeout, max_retries=0).responses.create(
+            model=model, instructions=system, input=user,
+            tools=[{"type": os.environ.get("COMPANY_SEARCH_TOOL") or "web_search"}],
+            text={"format": {"type": "json_schema", "name": "company", "strict": True, "schema": WEB_SCHEMA}},
+        )
+        out = json.loads(resp.output_text)
+    except Exception as exc:
+        log.warning("company_web_research_failed", error=type(exc).__name__)
+        return None
+    return _clean_web(out) if isinstance(out, dict) else None
+
+
 def analyse(session: Session, name: str, website: str = "", *, client: OpenAI | None = None,
             crawler: WebsiteContacts | None = None) -> dict:
     """Nəticə: {"ai": {...}, "facts": {...}, "site": url, "site_ok": bool, "found": [...]}."""
+    started = time.monotonic()
     name = " ".join((name or "").split())[:200]
     if len(name) < 2:
         raise OutreachError("Şirkətin adını yaz")
@@ -137,15 +231,25 @@ def analyse(session: Session, name: str, website: str = "", *, client: OpenAI | 
                      + (f" | AI note: {lead.ai_reason[:200]}" if lead.ai_reason else ""))
     lines.append(f"\nWEBSITE TEXT:\n{text or '(could not read)'}")
 
-    system = PROMPT.replace("{company}", company_description())
-    model = os.environ.get("AI_ANALYSIS_MODEL") or os.environ.get("AI_MODEL_V2") or DEFAULT_MODEL
-    try:
-        # Azərbaycanca 10 sahəli cavab 700 tokendən (chat_json defoltu) uzun ola bilər.
-        out, _ = chat_json(_client(client), model, system, "\n".join(lines), SCHEMA, "company", max_tokens=1500)
-    except OutreachError:
-        raise
-    except Exception as exc:
-        log.exception("company_analysis_failed")
-        raise OutreachError(f"AI analiz edə bilmədi: {type(exc).__name__}") from exc
-    log.info("company_analysed", has_site=bool(text), leads=len(facts["leads"]))
-    return {"name": name, "ai": out, "facts": facts, "site": site, "site_ok": bool(text), "found": found}
+    ai = _client(client)
+    left = BUDGET_S - (time.monotonic() - started)
+    out = web_research(ai, WEB_PROMPT.replace("{company}", company_description()), "\n".join(lines), left - FALLBACK_S)
+    if out is None:
+        if BUDGET_S - (time.monotonic() - started) < FALLBACK_S - 4:
+            raise OutreachError("Araşdırma çox uzun çəkdi — bir az sonra yenidən cəhd et")
+        system = PROMPT.replace("{company}", company_description())
+        model = os.environ.get("AI_ANALYSIS_MODEL") or os.environ.get("AI_MODEL_V2") or DEFAULT_MODEL
+        try:
+            # Azərbaycanca 10 sahəli cavab 700 tokendən (chat_json defoltu) uzun ola bilər.
+            out, _ = chat_json(ai, model, system, "\n".join(lines), SCHEMA, "company", max_tokens=1500)
+        except OutreachError:
+            raise
+        except Exception as exc:
+            log.exception("company_analysis_failed")
+            raise OutreachError(f"AI analiz edə bilmədi: {type(exc).__name__}") from exc
+    web = "sources" in out
+    if web and not site and out.get("website"):
+        site = out["website"]
+    log.info("company_analysed", has_site=bool(text), leads=len(facts["leads"]), web=web,
+             sources=len(out.get("sources") or []))
+    return {"name": name, "ai": out, "facts": facts, "site": site, "site_ok": bool(text), "found": found, "web": web}

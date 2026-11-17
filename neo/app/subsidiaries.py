@@ -109,9 +109,11 @@ def group_pages(site: str, crawler: WebsiteContacts | None = None) -> str:
     return "\n\n".join(texts)[:MAX_GROUP_CHARS]
 
 
-def _clean(found: list, parent_name: str) -> list[dict]:
-    """Mənbəsiz, xaricdəki, ana şirkətin özü olan və təkrar nəticələr atılır."""
+def _clean(found: list, parent_name: str, parent_site: str = "") -> list[dict]:
+    """Mənbəsiz, xaricdəki, ana şirkətin özü olan və təkrar nəticələr atılır. Ana şirkətin domenindəki səhifə alt
+    şirkətin saytı sayılmır — yoxsa şirkət bazası onu domenə görə ana şirkətin özü kimi tanıyardı."""
     out, seen = [], {normalize_org(parent_name)}
+    parent_domain = companies.normalize_domain(parent_site)
     for f in found:
         name = " ".join(str(f.get("name") or "").split())[:300]
         source = str(f.get("source_url") or "").strip()
@@ -122,7 +124,8 @@ def _clean(found: list, parent_name: str) -> list[dict]:
             continue
         seen.add(key)
         website = companies.site_url(str(f.get("website") or "").strip())
-        out.append({"name": name, "website": website if companies.normalize_domain(website) else None,
+        domain = companies.normalize_domain(website)
+        out.append({"name": name, "website": website if domain and domain != parent_domain else None,
                     "relation": " ".join(str(f.get("relation") or "").split())[:200] or None, "source": source[:500]})
     return out[:MAX_SUBSIDIARIES]
 
@@ -145,7 +148,7 @@ def research(name: str, site: str = "", *, client: OpenAI | None = None,
     except Exception as exc:
         log.exception("subsidiary_research_failed", company=name)
         raise OutreachError(f"Alt şirkətlər araşdırılmadı: {type(exc).__name__}") from exc
-    out = _clean(found if isinstance(found, list) else [], name)
+    out = _clean(found if isinstance(found, list) else [], name, site)
     log.info("subsidiaries_found", company=name, raw=len(found), kept=len(out), group_pages=bool(pages))
     return out
 
@@ -153,8 +156,9 @@ def research(name: str, site: str = "", *, client: OpenAI | None = None,
 def save(session: Session, parent: Organization, found: list[dict]) -> list[Organization]:
     """Tapılanları şirkət bazasına ana şirkətə bağlı yazır (dublikatsız); başqa ana şirkətə bağlı olanlara toxunmur."""
     for f in found:
+        website = f.get("website") if companies.normalize_domain(f.get("website")) != parent.domain else None
         try:
-            org = companies.company_for(session, f["name"], f.get("website"))
+            org = companies.company_for(session, f["name"], website)
         except companies.CompanyError:
             continue
         if org.id == parent.id or org.id == parent.parent_id or org.parent_id not in (None, parent.id):
