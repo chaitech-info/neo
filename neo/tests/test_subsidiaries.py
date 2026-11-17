@@ -69,6 +69,8 @@ def test_research_uses_web_search_and_the_sites_group_pages(monkeypatch):
     assert [f["name"] for f in out] == ["Sahil Logistika MMC", "Sahil Aqro MMC"]
     call = ai.calls[0]
     assert call["tools"] == [{"type": "web_search"}] and call["text"]["format"]["type"] == "json_schema"
+    assert call["model"] == "gpt-5-mini" and call["reasoning"] == {"effort": "low"}  # dərin axtarış, ~15 san.
+    assert "Sahil Holding şirkətləri" in call["input"] and "subsidiaries" in call["input"]  # 3 dildə axtarış
     assert "text of https://sahil.az/az/sirketlerimiz" in call["input"] and "text of https://sahil.az/about-us" in call["input"]
     assert "other.az" not in call["input"] and "/contact" not in call["input"]
 

@@ -5,8 +5,8 @@ Group / Haqqımızda" kimi səhifələr. Yalnız əlaqəni açıq yazan mənbəs
 AI ad uydurmasın deyə mənbəsiz nəticə atılır. Tapılanlar şirkət bazasına ana şirkətə bağlı yazılır
 (organizations.parent_id), sonra panel hər birini ayrıca analiz edir (app/company_routes.py).
 
-Env: SUBSIDIARY_MODEL (defolt AI_ANALYSIS_MODEL / gpt-4.1-mini), SUBSIDIARY_SEARCH_TOOL (defolt web_search),
-SUBSIDIARIES_MAX (defolt 8 — avtomatik analiz olunan alt şirkət sayı).
+Env: SUBSIDIARY_MODEL (defolt gpt-5-mini), SUBSIDIARY_REASONING_EFFORT (defolt low), SUBSIDIARY_SEARCH_TOOL
+(defolt web_search), SUBSIDIARIES_MAX (defolt 15 — saxlanılan və avtomatik analiz olunan alt şirkət sayı).
 """
 from __future__ import annotations
 
@@ -31,7 +31,8 @@ from app.tenders import normalize_org
 
 log = structlog.get_logger()
 
-MAX_SUBSIDIARIES = int(os.environ.get("SUBSIDIARIES_MAX") or 8)
+MAX_SUBSIDIARIES = int(os.environ.get("SUBSIDIARIES_MAX") or 15)
+DEFAULT_MODEL = "gpt-5-mini"  # gpt-4.1-mini bir axtarışdan sonra çox vaxt boş qaytarırdı (məs. "enor group" — 0)
 MAX_GROUP_PAGES = 3
 MAX_GROUP_CHARS = 6000
 TIMEOUT_S = 50  # Vercel funksiyası 60 saniyədir
@@ -61,22 +62,28 @@ SCHEMA = {
 }
 
 PROMPT = """\
-Research the subsidiaries of ONE company for an Azerbaijani catering company's sales team.
+You research company groups for an Azerbaijani catering company's sales team.
 
 Company: {name}
 Website: {site}
 
-Find companies that this company owns or controls, or that belong to the same group/holding under it
-(subsidiaries, daughter companies, group member companies). Use web search and the website text below.
+Task: find the companies that belong to this company or its group — subsidiaries, daughter companies, member
+companies of the holding/group, and companies it owns or controls. Search thoroughly before answering:
+1) the group's own website (pages like "Our companies", "Şirkətlərimiz", "Fəaliyyət sahələri", "Group", "About",
+   "Brands") — the website text below may already list them;
+2) several web searches in Azerbaijani, English and Russian, e.g. "{name} şirkətləri", "{name} törəmə şirkət",
+   "{name} subsidiaries", "{name} group companies", "{name} дочерние компании";
+3) LinkedIn, news sites, business registries and tender sites.
 
 Rules:
-- Include a company ONLY if a source explicitly states the relationship; source_url must be that page.
-- Do not include the company itself, its parent, partners, clients, suppliers, or mere product brands.
-- name: the company's name as used in Azerbaijan (e.g. "Azersun Holding" → "Azərsun Logistika MMC").
-- website: its own site if known, else "".
-- relation: a short Azerbaijani phrase, e.g. "törəmə şirkət", "holdinqin üzvü", "100% payı ana şirkətdədir".
+- Include a company when a source states or clearly shows it is part of the group (listed on the group's site,
+  described as a subsidiary or member, or the group says it owns it). source_url must be that page.
+- Do not include the company itself, its parent, clients, partners, suppliers, or unrelated companies with a
+  similar name. Never invent companies.
+- name: the company's name as used in Azerbaijan; website: its own site if known, else "".
+- relation: a short Azerbaijani phrase, e.g. "törəmə şirkət", "qrupun üzvü", "100% payı ana şirkətdədir".
 - in_azerbaijan: true if it operates in Azerbaijan.
-- If you find none, return an empty list. Never invent companies. At most 12.
+- Up to 15 companies; an empty list if none are found.
 
 WEBSITE TEXT (group / about pages):
 {pages}
@@ -134,13 +141,17 @@ def research(name: str, site: str = "", *, client: OpenAI | None = None,
              crawler: WebsiteContacts | None = None) -> list[dict]:
     """AI + veb axtarışı → [{name, website, relation, source}] (mənbəsi olanlar)."""
     pages = group_pages(site, crawler) if site else ""
-    model = (os.environ.get("SUBSIDIARY_MODEL") or os.environ.get("AI_ANALYSIS_MODEL") or "gpt-4.1-mini")
+    model = os.environ.get("SUBSIDIARY_MODEL") or DEFAULT_MODEL
     prompt = PROMPT.format(name=name, site=site or "(unknown)", pages=pages or "(not available)")
+    kw = {}
+    if model.startswith(("gpt-5", "o")):  # düşünən modellər: aşağı səviyyə — ~15 san., Vercel-in 60 saniyəsinə sığır
+        kw["reasoning"] = {"effort": os.environ.get("SUBSIDIARY_REASONING_EFFORT") or "low"}
     try:
-        resp = _client(client).with_options(timeout=TIMEOUT_S).responses.create(
+        resp = _client(client).with_options(timeout=TIMEOUT_S, max_retries=0).responses.create(
             model=model, input=prompt,
             tools=[{"type": os.environ.get("SUBSIDIARY_SEARCH_TOOL") or "web_search"}],
             text={"format": {"type": "json_schema", "name": "subsidiaries", "strict": True, "schema": SCHEMA}},
+            **kw,
         )
         found = json.loads(resp.output_text).get("subsidiaries") or []
     except OutreachError:
