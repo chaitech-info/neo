@@ -668,9 +668,8 @@ class Doc:
         self.cover()
         self.page_header()
         span = self.span()
-        # Şəkilli təklifdə həftəlik menyu səhifələri (mətn) buraxılır: cover → təklif məlumatları → yemək şəkilləri.
-        text_menu = [] if self.photos and self.gallery_sections() else self.packages
-        for i, p in enumerate(text_menu):
+        # Şəkilli təklif də tam menyu ilə gedir: cover → menyu → təklif məlumatları → yemək şəkilləri (sonda).
+        for i, p in enumerate(self.packages):
             if i:
                 self.new_body_page()
             if self.weekly and len(self.packages) == 1:

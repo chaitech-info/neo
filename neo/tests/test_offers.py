@@ -208,8 +208,8 @@ def test_weekly_menu_pdf_matches_the_three_page_design():
     assert b"Caladea" in pdf and b"NotoSerif" in pdf  # ə Caladea-da yoxdur — Noto Serif ilə
 
 
-def test_illustrated_pdf_skips_text_menu_pages(monkeypatch):
-    """Şəkilli təklifdə həftəlik menyu mətn səhifələri yoxdur; şəkilsiz təklifdə var."""
+def test_illustrated_pdf_keeps_the_menu_and_adds_photos_at_the_end(monkeypatch):
+    """Şəkilli təklif: həftəlik menyu mətn səhifələri qalır, yemək şəkilləri sonda əlavə olunur."""
     import io
 
     from PIL import Image
@@ -218,15 +218,18 @@ def test_illustrated_pdf_skips_text_menu_pages(monkeypatch):
 
     buf = io.BytesIO()
     Image.new("RGB", (40, 30), "red").save(buf, "JPEG")
-    drawn = []
-    original = offer_pdf.Doc.day_block
+    drawn, gallery = [], []
+    original, original_gallery = offer_pdf.Doc.day_block, offer_pdf.Doc.gallery
     monkeypatch.setattr(offer_pdf.Doc, "day_block", lambda self, b: (drawn.append(b), original(self, b))[1])
+    monkeypatch.setattr(offer_pdf.Doc, "gallery", lambda self, *a, **k: (gallery.append(1), original_gallery(self, *a, **k))[1])
 
-    offer_pdf.render(WEEKLY)
-    assert drawn
+    plain = offer_pdf.render(WEEKLY)
+    assert drawn and not gallery
+    menu_blocks = len(drawn)
     drawn.clear()
     pdf = offer_pdf.render(WEEKLY, {dish_key("Mərcimək şorbası"): buf.getvalue()})
-    assert pdf.startswith(b"%PDF") and not drawn
+    assert pdf.startswith(b"%PDF") and len(drawn) == menu_blocks and gallery
+    assert _pages(pdf) > _pages(plain)
 
 
 def test_flat_menu_pdf_and_text_fallback():
