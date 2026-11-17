@@ -14,7 +14,10 @@
         <label class="kw-f kw-g">Şirkətin adı<input name="name" required minlength="2" maxlength="200" value="{{ name }}" placeholder="məs. Sahil MMC"></label>
         <label class="kw-f kw-g">Sayt (istəyə görə)<input name="website" maxlength="300" value="{{ website }}" placeholder="məs. sahil.az"></label>
       </div>
-      <button class="mc-btn mc-btn-hero" type="submit" data-busy="Analiz olunur… (~15 san.)">Analiz et</button>
+      <div class="em-act">
+        <button class="mc-btn mc-btn-hero" type="submit" data-busy="Analiz olunur… (~15 san.)">Analiz et</button>
+        <a class="mc-btn" href="/tools/contracts?new=1#company-new" title="Analiz etmədən şirkəti (və müqaviləsini) əl ilə bazaya əlavə et">+ Şirkət əlavə et</a>
+      </div>
     </form>
   </section>
 
@@ -34,6 +37,8 @@
   {{ analysis_view(result, size_names, fit_names) }}
 
   {% if saved %}{{ notes_section(request, saved, users) }}{% endif %}
+
+  {% if saved %}{% from "_subsidiaries.html" import subsidiaries_section %}{{ subsidiaries_section(request, saved, subs, subs_at, ai_ready, auto=true) }}{% endif %}
 
   {{ employees_section(request, result.name, staff, staff_at, employees_ready) }}
 

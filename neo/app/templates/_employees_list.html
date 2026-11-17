@@ -1,0 +1,32 @@
+{# İşçilər vəzifə səviyyəsi qrupları ilə (app/employees.py::view). Həm səhifə (employees_section), həm də axtarışdan
+   sonra JSON-un "html" sahəsi (app/company_routes.py) bu makro ilə qurulur — server və JS eyni HTML-i göstərir. #}
+{% macro employee_card(p) %}
+  <li class="emp emp-r{{ p.rank }}">
+    <span class="emp-av" aria-hidden="true">{{ p.initials }}</span>
+    <div class="emp-main">
+      <b>{{ p.name }}</b>{% if p.fit %} <span class="emp-fit" title="HR, satınalma və ya inzibati vəzifə — catering təklifi üçün yaxşı kontakt">əlaqə üçün uyğun</span>{% endif %}
+      {% if p.title %}<span class="emp-role">{{ p.title }}</span>{% endif %}
+      {% if p.location %}<span class="emp-loc">{{ p.location }}</span>{% endif %}
+    </div>
+    <a class="emp-li" href="{{ p.linkedin_url }}" target="_blank" rel="noopener" aria-label="{{ p.name }} — LinkedIn profili" title="LinkedIn profili">in</a>
+  </li>
+{% endmacro %}
+
+{% macro employee_groups(items) %}
+  {% set v = employee_view(items) %}
+  {% if v.total %}
+  <p class="emp-sum">{{ v.summary }}</p>
+  {% for g in v.groups %}
+  <div class="emp-group">
+    <h3 class="emp-gh">{{ g.label }} <em>{{ g.shown|length + g.more|length }}</em></h3>
+    <ul class="emp-list">{% for p in g.shown %}{{ employee_card(p) }}{% endfor %}</ul>
+    {% if g.more %}
+    <details class="emp-more">
+      <summary>+{{ g.more|length }} daha göstər</summary>
+      <ul class="emp-list">{% for p in g.more %}{{ employee_card(p) }}{% endfor %}</ul>
+    </details>
+    {% endif %}
+  </div>
+  {% endfor %}
+  {% endif %}
+{% endmacro %}

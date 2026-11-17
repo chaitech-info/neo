@@ -267,7 +267,7 @@ def test_pages_render_and_prefill(app_db, monkeypatch):
     assert "Qiymət təklifi" in html and "Lead-dən doldurulub" in html and '"lead_id": "lk"' in html
     assert offer_routes.lead_prefill(LeadRecord(dedupe_key="lk", title="T", raw_text="T body", entity_name="Azersun")) == {
         "lead_id": "lk", "message": "T\n\nT body", "customer_name": "Azersun"}
-    assert "Alətlər" in html and "/tools/packages" in html
+    assert "Təklif və menyu" in html and "/tools/packages" in html  # menyu bölməsi (base.html)
     assert c.get("/tools/packages").status_code == 200
 
 

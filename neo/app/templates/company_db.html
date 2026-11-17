@@ -4,7 +4,11 @@
 {% block content %}
   <header class="ld-head">
     <h1 class="mc-title">Şirkət bazası</h1>
-    <p class="ld-sub">Analiz olunmuş və əlavə edilmiş şirkətlər. Şirkəti aç — saxlanmış analiz, işçilər, əməkdaşlıq razılaşmaları və fürsətlər. Yeni analiz üçün <a href="/tools/company">Şirkət analizi</a>, yeni şirkət üçün <a href="/tools/contracts">Şirkət əlavə et</a>.</p>
+    <p class="ld-sub">Analiz olunmuş və əlavə edilmiş şirkətlər. Şirkəti aç — saxlanmış analiz, işçilər, əməkdaşlıq razılaşmaları və fürsətlər. Yeni analiz üçün <a href="/tools/company">Şirkət analizi</a>.</p>
+    <div class="em-act">
+      <a class="mc-btn mc-btn-hero" href="/tools/company">Şirkət analizi</a>
+      <a class="mc-btn" href="/tools/contracts?new=1#company-new">+ Şirkət əlavə et</a>
+    </div>
   </header>
 
   <form class="lr-bar" method="get" action="/companies" role="search">

@@ -37,42 +37,61 @@
     {% if can_approve(current) %}
     <a href="/approvals" class="nav-approve {{ 'active' if active == 'approvals' else '' }}">Təsdiq gözləyənlər{% if navc.approvals %}<span class="count late">{{ navc.approvals }}</span>{% endif %}</a>
     {% endif %}
-    <div class="nav-group">
-      <h4>Satış</h4>
-      <a href="/leads/pending_review" class="{{ 'active' if active == 'validation' else '' }}">Validasiya{% if navc.pending %}<span class="count hot">{{ navc.pending }}</span>{% endif %}</a>
-      <a href="/opportunities" class="{{ 'active' if active == 'opportunities' else '' }}">Fürsətlər</a>
-      <a href="/tasks" class="{{ 'active' if active == 'tasks' else '' }}">CRM{% if navc.tasks %}<span class="count">{{ navc.tasks }}</span>{% endif %}</a>
-      {% if has_role(current, 'sales') %}<a href="/contracts" class="{{ 'active' if active == 'contracts_register' else '' }}">Müqavilələr</a>{% endif %}
-    </div>
-    {% if has_role(current, 'sales') %}
-    <div class="nav-group">
-      <h4>Alətlər</h4>
-      <a href="/tools/offers" class="{{ 'active' if active == 'offers' else '' }}">Qiymət təklifi</a>
-      <a href="/tools/company" class="{{ 'active' if active == 'company' else '' }}">Şirkət analizi</a>
-      <a href="/companies" class="{{ 'active' if active == 'company_db' else '' }}">Şirkət bazası</a>
-      <a href="/tools/employees" class="{{ 'active' if active == 'employees' else '' }}">Şirkətin işçiləri</a>
-      <a href="/tools/contracts" class="{{ 'active' if active == 'contracts' else '' }}">Şirkət əlavə et</a>
-      <a href="/tools/dishes" class="{{ 'active' if active == 'dishes' else '' }}">Yemək şəkilləri</a>
-      {% if has_role(current, 'admin') %}<a href="/tools/packages" class="{{ 'active' if active == 'packages' else '' }}">Paketlər</a>{% endif %}
-    </div>
-    {% endif %}
-    <div class="nav-group">
-      <h4>Toplama</h4>
-      <a href="/" class="{{ 'active' if active == 'dashboard' else '' }}">Mənbələr</a>
-      <a href="/leads/rejected" class="{{ 'active' if active == 'rejected' else '' }}">Rədd edilənlər</a>
-      <a href="/leads" class="{{ 'active' if active == 'all' else '' }}">Bütün lead-lər</a>
-      <a href="/logs" class="{{ 'active' if active == 'logs' else '' }}">Loglar</a>
-    </div>
-    <div class="nav-group">
-      <h4>Ayarlar</h4>
-      <a href="/me/reminders" class="{{ 'active' if active == 'my_reminders' else '' }}">Qeydlər və xatırlatmalar</a>
-      <a href="/me/categories" class="{{ 'active' if active == 'my_categories' else '' }}">Süzgəc və kateqoriyalar</a>
-      <a href="/me/keywords" class="{{ 'active' if active == 'my_keywords' else '' }}">Mənim açar sözlərim</a>
-      {% if has_role(current, 'sales') %}<a href="/me/templates" class="{{ 'active' if active == 'my_templates' else '' }}">Məktub şablonlarım</a>{% endif %}
-      <a href="/settings/keywords" class="{{ 'active' if active == 'keywords' else '' }}">Açar sözlər</a>
-      {% if has_role(current, 'admin') %}<a href="/settings/mailboxes" class="{{ 'active' if active == 'mailboxes' else '' }}">Poçt qutuları</a>{% endif %}
-      {% if has_role(current, 'admin') %}<a href="/users" class="{{ 'active' if active == 'users' else '' }}">İstifadəçilər</a>{% endif %}
-    </div>
+    {# Menyu bölmələri (alt menyular): aktiv səhifənin bölməsi həmişə açıqdır, qalanlarının açıq/bağlı vəziyyəti
+       brauzerdə yadda qalır (aşağıdakı skript). Bağlı bölmədə vacib say (məs. Validasiya) başlıqda görünür.
+       "Şirkət əlavə et" menyuda deyil — Şirkət analizi və Şirkət bazası səhifələrində düymədir. #}
+    {% set sales = has_role(current, 'sales') %}
+    {% set admin = has_role(current, 'admin') %}
+    {% set groups = [
+      {"key": "sales", "title": "Satış", "items": [
+        ("/leads/pending_review", "validation", "Validasiya", true, navc.pending, "hot"),
+        ("/opportunities", "opportunities", "Fürsətlər", true, 0, ""),
+        ("/tasks", "tasks", "CRM və tapşırıqlar", true, navc.tasks, ""),
+        ("/contracts", "contracts_register", "Müqavilələr", sales, 0, ""),
+      ]},
+      {"key": "companies", "title": "Şirkətlər", "also": ["contracts"], "items": [
+        ("/tools/company", "company", "Şirkət analizi", sales, 0, ""),
+        ("/companies", "company_db", "Şirkət bazası", sales, 0, ""),
+        ("/tools/employees", "employees", "Şirkətin işçiləri", sales, 0, ""),
+      ]},
+      {"key": "offers", "title": "Təklif və menyu", "items": [
+        ("/tools/offers", "offers", "Qiymət təklifi", sales, 0, ""),
+        ("/tools/packages", "packages", "Paketlər", admin, 0, ""),
+        ("/tools/dishes", "dishes", "Yemək şəkilləri", sales, 0, ""),
+      ]},
+      {"key": "leads", "title": "Lead toplama", "items": [
+        ("/", "dashboard", "Mənbələr", true, 0, ""),
+        ("/leads", "all", "Bütün lead-lər", true, 0, ""),
+        ("/leads/rejected", "rejected", "Rədd edilənlər", true, 0, ""),
+        ("/logs", "logs", "Loglar", true, 0, ""),
+      ]},
+      {"key": "me", "title": "Mənim", "items": [
+        ("/me/reminders", "my_reminders", "Qeydlər və xatırlatmalar", true, 0, ""),
+        ("/me/categories", "my_categories", "Süzgəc və kateqoriyalar", true, 0, ""),
+        ("/me/keywords", "my_keywords", "Mənim açar sözlərim", true, 0, ""),
+        ("/me/templates", "my_templates", "Məktub şablonlarım", sales, 0, ""),
+      ]},
+      {"key": "settings", "title": "Ayarlar", "items": [
+        ("/settings/keywords", "keywords", "Açar sözlər", true, 0, ""),
+        ("/settings/mailboxes", "mailboxes", "Poçt qutuları", admin, 0, ""),
+        ("/users", "users", "İstifadəçilər", admin, 0, ""),
+      ]},
+    ] %}
+    {% for g in groups %}
+      {% set shown = g["items"]|selectattr(3)|list %}
+      {% if shown %}
+      {% set here = active in shown|map(attribute=1)|list or active in g.get("also", []) %}
+      {% set hot = shown|selectattr(4)|selectattr(5, "equalto", "hot")|map(attribute=4)|sum %}
+      <details class="nav-group" data-nav="{{ g.key }}"{% if here %} open data-here{% endif %}>
+        <summary><span>{{ g.title }}</span>{% if hot %}<span class="count hot nav-sum-count">{{ hot }}</span>{% endif %}<svg class="nav-chev" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></summary>
+        <div class="nav-items">
+          {% for href, key, label, show, n, cls in shown %}
+          <a href="{{ href }}" class="{{ 'active' if active == key else '' }}"{% if active == key %} aria-current="page"{% endif %}>{{ label }}{% if n %}<span class="count {{ cls }}">{{ n }}</span>{% endif %}</a>
+          {% endfor %}
+        </div>
+      </details>
+      {% endif %}
+    {% endfor %}
     <div class="me">
       {{ theme_toggle() }}
       <b>{{ current.full_name }}</b>
@@ -151,6 +170,24 @@
       }
       poll();
       setInterval(poll, 60000);
+    })();
+    /* Menyu bölmələri: açıq/bağlı vəziyyət yadda qalır (defolt — yalnız Satış və aktiv səhifənin bölməsi açıq). */
+    (function () {
+      var KEY = 'neo-nav-open', state = { sales: true };
+      try { state = JSON.parse(localStorage.getItem(KEY) || 'null') || state; } catch (e) {}
+      var groups = document.querySelectorAll('details[data-nav]');
+      groups.forEach(function (d) {
+        if (!d.hasAttribute('data-here') && state[d.dataset.nav]) d.open = true;
+        // Yalnız istifadəçinin klikini yadda saxla: "toggle" hadisəsi səhifə açılanda aktiv bölmə üçün də gəlir,
+        // onda ziyarət olunan hər bölmə sonradan həmişə açıq qalardı.
+        d.querySelector('summary').addEventListener('click', function () {
+          setTimeout(function () {
+            state[d.dataset.nav] = d.open;
+            groups.forEach(function (o) { if (o.dataset.nav === d.dataset.nav) o.open = d.open; });
+            try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {}
+          });
+        });
+      });
     })();
   </script>
   {% endif %}

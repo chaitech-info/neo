@@ -77,12 +77,25 @@ p { max-width: 72ch; }
   color: var(--rail-ink);
   padding: 22px 14px;
   position: sticky; top: 0; height: 100vh; overflow-y: auto;
-  display: flex; flex-direction: column; gap: 22px;
+  display: flex; flex-direction: column; gap: 4px;
 }
-.brand { font-family: var(--font-cond); font-weight: 700; font-size: 22px; color: var(--rail-brand); padding: 0 10px; text-decoration: none; display: block; }
+.brand { font-family: var(--font-cond); font-weight: 700; font-size: 22px; color: var(--rail-brand); padding: 0 10px; text-decoration: none; display: block; margin-bottom: 14px; }
 .brand small { display: block; font: 500 12px/1.3 var(--font); color: var(--ink-3); margin-top: 2px; }
-.nav-group { display: flex; flex-direction: column; gap: 2px; }
-.nav-group h4 { margin: 0 10px 6px; font: 500 12px/1 var(--font); color: var(--rail-tx2); }
+/* Menyu bölmələri — <details> alt menyular (base.html) */
+.nav-group > summary {
+  list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: var(--radius); font: 600 12.5px/1 var(--font); letter-spacing: .02em;
+  color: var(--rail-tx2); user-select: none; transition: background-color 120ms ease, color 120ms ease;
+}
+.nav-group > summary::-webkit-details-marker { display: none; }
+.nav-group > summary > span:first-child { flex: 1; }
+@media (hover: hover) and (pointer: fine) { .nav-group > summary:hover { background: var(--rail-hov); color: var(--rail-brand); } }
+.nav-group[data-here] > summary { color: var(--rail-brand); }
+.nav-chev { width: 14px; height: 14px; flex: none; transition: transform 160ms var(--ease-out); }
+.nav-group[open] > summary .nav-chev { transform: rotate(90deg); }
+.nav-group[open] > summary .nav-sum-count { display: none; }  /* açıq bölmədə say linkin özündədir */
+.nav-items { display: flex; flex-direction: column; gap: 2px; padding: 2px 0 8px; }
+.nav-group .nav-items a { padding-left: 22px; }  /* alt menyu bir pillə içəridə; aktiv link — sol yaşıl zolaq (tək xətt) */
 .nav-group a {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   padding: 8px 10px; border-radius: var(--radius); color: var(--rail-ink); text-decoration: none; font-size: 14.5px;
@@ -116,10 +129,10 @@ p { max-width: 72ch; }
   .rail-toggle { display: block; }
   .rail-toggle summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; }
   .rail-toggle summary::-webkit-details-marker { display: none; }
-  .rail-toggle summary .brand { padding: 0; font-size: 20px; }
+  .rail-toggle summary .brand { padding: 0; font-size: 20px; margin: 0; }
   .rail-toggle summary .burger { font: 600 14px var(--font); color: var(--rail-ink); border: 1px solid var(--bd2); border-radius: var(--radius); padding: 6px 12px; }
   .rail-toggle[open] .rail-links { display: flex; }
-  .rail-links { display: none; flex-direction: column; gap: 16px; padding-top: 14px; }
+  .rail-links { display: none; flex-direction: column; gap: 4px; padding-top: 14px; }
   .rail-desktop { display: none; }
   .main { padding: 20px 16px 48px; }
   h1 { font-size: 25px; }
@@ -964,6 +977,53 @@ th.num, td.num { text-align: right; white-space: nowrap; font-variant-numeric: t
 .ct:first-child { border-top: 0; }
 .ct-main { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
 .ct-role { color: var(--tx2); font-size: 13px; }
+
+/* İşçilər vəzifə səviyyəsi qrupları ilə (templates/_employees_list.html) */
+.emp-sum { margin: 4px 0 2px; color: var(--tx2); font-size: 13px; }
+.emp-group { margin-top: 18px; }
+.emp-gh { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font: 600 14px var(--font); color: var(--tx); }
+.emp-gh em { font-style: normal; font-size: 12px; color: var(--tx2); background: var(--s2); border-radius: 999px; padding: 1px 8px; }
+.emp-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.emp { --ring: var(--bd2); display: flex; align-items: center; gap: 12px; min-width: 0; padding: 10px 12px;
+  background: var(--s2); border: 1px solid var(--line); border-radius: 12px; }
+.emp-r1 { --ring: var(--warn); } .emp-r2 { --ring: var(--st-negotiation); } .emp-r3 { --ring: var(--run); }
+.emp-r4 { --ring: var(--st-qualified); } .emp-r5 { --ring: var(--tx3); }
+.emp-av { flex: none; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center;
+  font: 600 14px var(--font); color: var(--tx); background: var(--s1); box-shadow: 0 0 0 2px var(--ring); }
+.emp-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.emp-main b { font-weight: 600; overflow-wrap: anywhere; }
+.emp-role { color: var(--tx2); font-size: 13px; overflow-wrap: anywhere; }
+.emp-loc { color: var(--tx3); font-size: 12px; }
+.emp-fit { align-self: flex-start; font-size: 11px; font-weight: 600; color: var(--go); background: var(--go-w);
+  border-radius: 999px; padding: 1px 8px; }
+.emp-li { flex: none; width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center;
+  font: 700 13px var(--font); color: var(--run); background: var(--run-w); text-decoration: none; }
+.emp-li:hover { background: var(--hov); }
+.emp-more { margin-top: 10px; }
+.emp-more > summary { cursor: pointer; width: max-content; color: var(--run); font-size: 13px; font-weight: 600; list-style: none; }
+.emp-more > summary::-webkit-details-marker { display: none; }
+.emp-more[open] > summary { margin-bottom: 10px; }
+.emp-box > .skel { margin-top: 12px; }
+@media (max-width: 560px) { .emp-list { grid-template-columns: minmax(0, 1fr); } }
+
+/* Alt şirkətlər (templates/_subsidiaries.html) */
+.sub-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 10px; }
+.sub { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; background: var(--s2);
+  border: 1px solid var(--line); border-radius: 12px; min-width: 0; }
+.sub-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.sub-name { font-weight: 600; color: var(--tx); text-decoration: none; overflow-wrap: anywhere; }
+.sub-name:hover { text-decoration: underline; }
+.sub-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--tx2); font-size: 13px; }
+.sub-meta a { color: var(--run); text-decoration: none; overflow-wrap: anywhere; }
+.sub-sum { margin: 2px 0 0; color: var(--tx2); font-size: 13px; line-height: 1.45; }
+.sub.is-pending .sub-sum { color: var(--tx3); font-style: italic; }
+.sub-fit { flex: none; font-size: 12px; font-weight: 600; border-radius: 999px; padding: 2px 10px; background: var(--s1);
+  color: var(--tx2); border: 1px solid var(--line); }
+.sub-fit-high { color: var(--go); background: var(--go-w); border-color: transparent; }
+.sub-fit-medium { color: var(--warn); background: var(--warn-w); border-color: transparent; }
+.sub-fit-low { color: var(--err); background: var(--err-w); border-color: transparent; }
+[data-sub-list] > .skel { margin-top: 12px; }
+@media (max-width: 560px) { .sub { flex-direction: column; } }
 .ct-ways { display: flex; flex-wrap: wrap; gap: 4px 12px; width: 100%; font-size: 13px; }
 .ct-ways a { color: var(--run); text-decoration: none; overflow-wrap: anywhere; }
 .ct-ways a:hover { text-decoration: underline; }
@@ -972,7 +1032,7 @@ th.num, td.num { text-align: right; white-space: nowrap; font-variant-numeric: t
 
 /* Fürsət səhifəsi: AI məktub */
 .em-form textarea { width: 100%; min-height: 320px; resize: vertical; font: inherit; line-height: 1.5; }
-.em-act { display: flex; gap: 10px; align-items: center; margin-top: 12px; }
+.em-act { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 12px; }
 .em-start { align-items: end; }
 .em-history { margin-top: 14px; }
 
@@ -985,6 +1045,9 @@ th.num, td.num { text-align: right; white-space: nowrap; font-variant-numeric: t
 }
 .nav-bell .count, .nav-approve .count { margin-left: auto; }
 .nav-bell .ic { width: 16px; height: 16px; flex: none; }
+.nav-approve, .nav-bell:not(:has(+ .nav-approve)) { margin-bottom: 10px; }
+.nav-approve, .nav-bell:not(:has(+ .nav-approve)) { margin-bottom: 10px; }
+.nav-group:last-of-type { margin-bottom: 14px; }
 .nav-bell.active, .nav-approve.active { background: var(--rail-hov); color: var(--rail-brand); border-left-color: var(--saffron); font-weight: 600; }
 .nav-approve { font-weight: 600; color: var(--rail-brand); background: color-mix(in srgb, var(--warn) 10%, transparent); }
 @media (hover: hover) and (pointer: fine) { .nav-bell:hover, .nav-approve:hover { background: var(--rail-hov); color: var(--rail-brand); } }

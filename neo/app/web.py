@@ -35,7 +35,7 @@ from app.db.engine import SERVERLESS, engine
 from app.db.backfill import backfill
 from app.db.migrate import upgrade_to_head
 from app.db.repository import LeadRepository
-from app import crm
+from app import crm, employees
 from app.crm_routes import router as crm_router
 from app.outreach import linkedin_comment
 from app.keyword_routes import router as keyword_router
@@ -241,6 +241,7 @@ templates.env.filters["baku_time"] = _baku_time
 templates.env.filters["day"] = _day
 templates.env.globals["css_version"] = CSS_VERSION
 templates.env.globals["utcnow"] = datetime.utcnow  # son tarixin keçib-keçmədiyi üçün
+templates.env.globals["employee_view"] = employees.view  # templates/_employees_list.html
 
 
 @app.on_event("startup")

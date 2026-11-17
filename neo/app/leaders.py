@@ -26,14 +26,18 @@ DEFAULT_ACTOR = "harvestapi~linkedin-company-employees"
 DEFAULT_MAX = 8
 
 # Rəhbər / qərar verən vəzifələr (az/ru/en) — catering satışında kimə yazmaq lazımdır.
-SENIOR_RE = re.compile(
-    r"\b(ceo|cfo|coo|cto|chief|founder|co-founder|owner|president|partner|managing|general manager|"
+_LEADER_WORDS = (
+    r"ceo|cfo|coo|cto|chief|founder|co-founder|owner|president|partner|managing|general manager|"
     r"director|head of|head|vp|vice president|"
     r"direktor|rəhbər|rehber|təsisçi|tesisci|sədr|sedr|müdir|mudir|baş menecer|"
-    r"директор|руководитель|основатель|генеральный|начальник|"
-    r"hr|human resources|people|procurement|purchasing|satınalma|satinalma|admin(istrative)? manager)\b",
-    re.I,
+    r"директор|руководитель|основатель|генеральный|начальник"
 )
+# Catering xidmətini adətən HR, satınalma və inzibati/ofis menecerləri seçir (app/employees.py — "əlaqə üçün uyğun").
+_BUYER_WORDS = (r"hr|human resources|people|procurement|purchasing|satınalma|satinalma|"
+                r"admin(istrative)? manager|office manager|ofis menecer\w*|inzibati|insan resurslar\w*|kadr\w*|"
+                r"закуп\w*|снабжени\w*|кадр\w*|персонал\w*|офис-менеджер\w*|административн\w*")
+BUYER_RE = re.compile(rf"\b({_BUYER_WORDS})\b", re.I)
+SENIOR_RE = re.compile(rf"\b({_LEADER_WORDS}|{_BUYER_WORDS})\b", re.I)
 SEARCH_TITLES = ["CEO", "Director", "Founder", "Owner", "General Manager", "Head", "HR", "Procurement",
                  "Direktor", "Директор"]
 

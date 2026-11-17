@@ -1,0 +1,88 @@
+{# Alt şirkətlər (app/subsidiaries.py): AI internetdə və şirkətin saytında tapır, hər biri şirkət bazasına ana şirkətə
+   bağlı yazılır və avtomatik analiz olunur. Siyahı həm səhifədə, həm JSON-un "html"
+   sahəsində bu makrolarla qurulur. auto=true (Şirkət analizi səhifəsi) — araşdırma özü başlayır, kartda düymə ilə. #}
+{% macro subsidiary_card(c) %}
+  <li class="sub{% if not c.analysed %} is-pending{% endif %}" data-sub="{{ c.id }}"{% if not c.analysed %} data-sub-pending{% endif %}>
+    <div class="sub-main">
+      <a class="sub-name" href="/companies/{{ c.id }}">{{ c.name }}</a>
+      <span class="sub-meta">
+        {% if c.relation %}<span>{{ c.relation }}</span>{% endif %}
+        {% if c.website %}<a href="{{ c.website }}" target="_blank" rel="noopener">{{ c.domain or c.website }} ↗</a>{% endif %}
+        {% if c.source %}<a href="{{ c.source }}" target="_blank" rel="noopener" title="Əlaqəni göstərən mənbə">mənbə ↗</a>{% endif %}
+      </span>
+      {% if c.analysed %}
+        {% if c.summary %}<p class="sub-sum">{{ c.summary }}</p>{% endif %}
+      {% else %}
+        <p class="sub-sum" data-sub-state>Analiz gözləyir…</p>
+      {% endif %}
+    </div>
+    {% if c.analysed %}<span class="sub-fit sub-fit-{{ c.fit or 'unknown' }}" title="Catering ehtiyacı">{{ c.fit_name or 'Bilinmir' }}</span>{% endif %}
+  </li>
+{% endmacro %}
+
+{% macro subsidiaries_list(cards) %}
+  {% if cards %}<ul class="sub-list">{% for c in cards %}{{ subsidiary_card(c) }}{% endfor %}</ul>{% endif %}
+{% endmacro %}
+
+{% macro subsidiaries_section(request, parent, cards, checked_at, ready, auto=false) %}
+  <section class="od-card" id="subsidiaries" data-sub-box data-parent="{{ parent.id }}"{% if ready and auto and not checked_at %} data-sub-auto{% endif %}>
+    <h2>Alt şirkətlər <em data-sub-count>{{ cards|length if checked_at else '' }}</em></h2>
+    <p class="od-hint" data-sub-status>
+      {% if checked_at %}AI araşdırması · {{ checked_at|baku_time }}{% if not cards %} — açıq mənbədə alt şirkət tapılmadı.{% endif %}
+      {% elif not ready %}Alt şirkətlər axtarılmayıb: AI qoşulmayıb (OPENAI_API_KEY).
+      {% elif auto %}AI internetdə və şirkətin saytında alt şirkətləri axtarır…
+      {% else %}Alt şirkətlər hələ araşdırılmayıb. AI internetdə və şirkətin saytında axtarır, tapılanları analiz edir.{% endif %}
+    </p>
+    <div data-sub-list>{{ subsidiaries_list(cards) }}</div>
+    {% if ready %}
+    <form method="post" action="/tools/company/{{ parent.id }}/subsidiaries" data-sub-form>
+      {{ csrf_field(request) }}<input type="hidden" name="force" value="1">
+      <button class="mc-btn mc-btn-sm" type="submit" title="OpenAI veb axtarışı — hər araşdırma bir neçə sent">{{ 'Yenidən araşdır' if checked_at else 'Alt şirkətləri araşdır' }}</button>
+    </form>
+    {% endif %}
+  </section>
+  <script>
+    (function () {
+      var box = document.querySelector('[data-sub-box]');
+      if (!box) return;
+      var f = box.querySelector('form[data-sub-form]'), list = box.querySelector('[data-sub-list]'),
+          st = box.querySelector('[data-sub-status]'), cnt = box.querySelector('[data-sub-count]');
+      if (!f) return;
+      var b = f.querySelector('button');
+      function post(url, fields) {
+        var data = new FormData(f);
+        Object.keys(fields || {}).forEach(function (k) { data.set(k, fields[k]); });
+        return fetch(url, { method: 'POST', body: data, credentials: 'same-origin' })
+          .then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error(d.error || 'Alınmadı'); return d; }); });
+      }
+      // Gözləyən alt şirkətlər bir-bir analiz olunur (hər biri ayrıca sorğu — Vercel 60 san).
+      function analyseNext() {
+        var li = list.querySelector('[data-sub-pending]');
+        if (!li) { b.disabled = false; return Promise.resolve(); }
+        li.removeAttribute('data-sub-pending');
+        var state = li.querySelector('[data-sub-state]');
+        if (state) state.textContent = 'AI analiz edir…';
+        return post('/tools/company/subsidiary/' + li.dataset.sub + '/analyse')
+          .then(function (d) { li.outerHTML = d.html; })
+          .catch(function (err) { if (state) state.textContent = 'Analiz alınmadı: ' + ((err && err.message) || ''); })
+          .then(analyseNext);
+      }
+      function search(force) {
+        b.disabled = true; st.textContent = 'AI internetdə və şirkətin saytında alt şirkətləri axtarır… (~30 san.)';
+        list.innerHTML = '<div class="skel" aria-hidden="true"><i></i><i></i><i></i></div>';
+        return post(f.action, { force: force ? '1' : '' })
+          .then(function (d) {
+            list.innerHTML = d.html || '';
+            cnt.textContent = d.count;
+            st.textContent = 'AI araşdırması · ' + d.checked_at + (d.count ? '' : ' — açıq mənbədə alt şirkət tapılmadı.');
+            b.textContent = 'Yenidən araşdır';
+            return analyseNext();
+          })
+          .catch(function (err) { list.innerHTML = ''; st.textContent = (err && err.message) || 'Araşdırma alınmadı'; b.disabled = false; });
+      }
+      f.addEventListener('submit', function (e) { e.preventDefault(); search(true); });
+      if (box.hasAttribute('data-sub-auto')) search(false);
+      else if (list.querySelector('[data-sub-pending]')) { b.disabled = true; analyseNext(); }
+    })();
+  </script>
+{% endmacro %}

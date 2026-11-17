@@ -4,6 +4,7 @@
 {% block content %}
   {% from "_company_analysis.html" import analysis_view, employees_section, notes_section %}
   {% from "_agreements.html" import agreement_fields, agreement_list %}
+  {% from "_subsidiaries.html" import subsidiaries_section %}
   {% set me = request.state.user %}
 
   <nav class="od-crumb" aria-label="Yol"><a href="/companies">← Şirkət bazası</a></nav>
@@ -13,6 +14,7 @@
       {% if org.analysed_at %}<span class="kw-chip on">Analiz olunub · {{ org.analysed_at|baku_time }}{% if org.analysed_by_id in users %} · {{ users[org.analysed_by_id] }}{% endif %}</span>
       {% else %}<span class="kw-chip">Analiz olunmayıb</span>{% endif %}
       {% if org.industry %}<span class="tag">{{ org.industry }}</span>{% endif %}
+      {% if parent_org %}<span class="tag">Ana şirkət: <a href="/companies/{{ parent_org.id }}">{{ parent_org.name }}</a>{% if org.parent_relation %} · {{ org.parent_relation }}{% endif %}</span>{% endif %}
     </p>
   </header>
 
@@ -86,6 +88,8 @@
     {{ csrf_field(request) }}<input type="hidden" name="name" value="{{ org.name }}"><input type="hidden" name="website" value="{{ org.website or '' }}">
     <button class="mc-btn" type="submit" data-busy="Analiz olunur… (~15 san.)">{{ 'Yenidən analiz et' if analysis else 'Analiz et' }}</button>
   </form>
+
+  {{ subsidiaries_section(request, org, subs, subs_at, ai_ready) }}
 
   {{ employees_section(request, org.name, staff, staff_at, employees_ready) }}
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import datetime, timedelta
 
 import httpx
@@ -18,8 +19,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import EmployeeSearch
-from app.leaders import (APIFY_API, RUN_TIMEOUT_S, _DONE_BAD, _RUN_ID_RE, LeadersError, _actor, _call, _item_to_found,
-                         _token)
+from app.leaders import (APIFY_API, BUYER_RE, RUN_TIMEOUT_S, _DONE_BAD, _RUN_ID_RE, LeadersError, _actor, _call,
+                         _item_to_found, _token)
 from app.tenders import normalize_org
 
 log = structlog.get_logger()
@@ -109,10 +110,118 @@ def poll(session: Session, run_id: str, company: str, limit: int = HARD_MAX, *, 
 
 
 def items_of(row: EmployeeSearch | None) -> list[dict]:
+    """Saxlanmış işçilər vəzifə səviyyəsinə görə sıralı (ranked)."""
     if row is None:
         return []
     try:
         data = json.loads(row.items)
     except ValueError:
         return []
-    return data if isinstance(data, list) else []
+    return ranked(data) if isinstance(data, list) else []
+
+
+# --- Vəzifə səviyyəsi -----------------------------------------------------------------------------------------
+# Vəzifə mətni əvvəl sadələşdirilir (kiçik hərf, ə→e, ı/İ→i, ş→s …), ona görə nümunələr ASCII yazılıb;
+# kiril sözləri kiçik hərflə olduğu kimi qalır.
+_FOLD = str.maketrans({"ə": "e", "ı": "i", "ö": "o", "ü": "u", "ğ": "g", "ş": "s", "ç": "c", "̇": None})
+
+
+def _fold(text: str | None) -> str:
+    return (text or "").replace("İ", "i").replace("I", "i").lower().translate(_FOLD)
+
+
+def _words(pattern: str) -> re.Pattern:
+    return re.compile(rf"\b({pattern})\b")
+
+
+_JUNIOR = _words(r"intern|internship|trainee|assistant|asst|junior|jr|tecrubeci|komekci|"
+                 r"стаж[её]р\w*|ассистент\w*|помощник\w*|младш\w*")
+_DEPUTY = _words(r"deputy|muavin\w*|заместител\w*")
+_VICE = _words(r"vice[- ]president|вице-президент\w*")
+_TOP = _words(r"ceo|chief executive( officer)?|founder|co-?founder|owner|president|chairman|chairwoman|chairperson|"
+              r"managing director|managing partner|general manager|general director|bas direktor|bas icraci direktor|"
+              r"tesisci|sedr\w*|генеральн\w* директор\w*|основател\w*|владел\w*|председател\w*|президент\w*")
+_CLEVEL = _words(r"cfo|coo|cto|cmo|chro|cio|cdo|cpo|cco|cso|chief \w+|vp|svp|evp")
+_DIRECTOR = _words(r"director|head|direktor\w*|rehber\w*|mudir\w*|директор\w*|руководител\w*|начальник\w*")
+_MANAGER = _words(r"manager|lead|leader|supervisor|coordinator|menecer\w*|koordinator\w*|менеджер\w*|координатор\w*")
+# "Deputy Director of Sales" — departament direktorunun müavini; qualifiersiz "Direktor müavini" şirkət rəhbərinin müavinidir.
+_DEPT = _words(r"of|sobe\w*|department|departament\w*|по|отдел\w*|департамент\w*")
+
+RANK_NAMES = {1: ("Rəhbərlik", "rəhbər"), 2: ("C-level və VP", "C-level/VP"), 3: ("Direktorlar", "direktor"),
+              4: ("Menecerlər", "menecer"), 5: ("Mütəxəssislər", "mütəxəssis"), 6: ("Junior", "junior"),
+              7: ("Digər", "vəzifəsi bilinməyən")}
+OPEN_RANKS = (1, 2)  # rəhbərlik həmişə tam açıq; aşağı qruplar COLLAPSE_AFTER-dən çoxdursa qatlanır
+COLLAPSE_AFTER = 10
+
+
+def _base_rank(f: str) -> int:
+    if _VICE.search(f):
+        return 2
+    if _TOP.search(f):
+        return 1
+    if _CLEVEL.search(f):
+        return 2
+    if _DIRECTOR.search(f):
+        return 3
+    if _MANAGER.search(f):
+        return 4
+    return 5
+
+
+def seniority_rank(title: str | None) -> int:
+    """1 rəhbərlik … 6 junior/köməkçi, 7 vəzifə yoxdur. Köməkçilər ("Assistant to CEO") rəhbər sayılmır;
+    müavin (deputy, müavin, заместитель) əsas vəzifədən bir pillə aşağı düşür."""
+    f = _fold(title).strip()
+    if not f:
+        return 7
+    if _JUNIOR.search(f):
+        return 6
+    if not _DEPUTY.search(f):
+        return _base_rank(f)
+    rest = _DEPUTY.sub(" ", f)
+    base = _base_rank(rest)
+    if base == 5 and not rest.strip():
+        base = 1  # təkcə "Заместитель" / "Müavin" — şirkət rəhbərinin müavini
+    elif base == 3 and not _DEPT.search(rest):
+        base = 1  # "Direktor müavini", "Deputy Director"
+    return min(base + 1, 5)
+
+
+def contact_fit(title: str | None, rank: int | None = None) -> bool:
+    """Catering satışı üçün qərar verən (HR, satınalma, inzibati/ofis menecer) — köməkçilər istisna."""
+    return bool(title and BUYER_RE.search(title)) and (rank or seniority_rank(title)) != 6
+
+
+def _initials(name: str | None) -> str:
+    parts = [p for p in (name or "").replace(".", " ").split() if p[:1].isalpha()]
+    if not parts:
+        return "?"
+    return (parts[0][0] + (parts[-1][0] if len(parts) > 1 else "")).upper()
+
+
+def ranked(items: list) -> list[dict]:
+    """Səviyyə, sonra ad üzrə sıralı; hər işçiyə rank, fit, initials əlavə olunur (JSON və Jinja eyni sıranı görür)."""
+    out = []
+    for p in items:
+        if not isinstance(p, dict):
+            continue
+        rank = seniority_rank(p.get("title"))
+        out.append({**p, "rank": rank, "fit": contact_fit(p.get("title"), rank), "initials": _initials(p.get("name"))})
+    return sorted(out, key=lambda p: (p["rank"], _fold(p.get("name"))))
+
+
+def view(items: list) -> dict:
+    """Qruplar (boşlar göstərilmir) və xülasə — templates/_employees_list.html üçün."""
+    people_ = items if all(isinstance(p, dict) and "rank" in p for p in items) else ranked(items)
+    groups = []
+    for rank, (label, short) in RANK_NAMES.items():
+        members = [p for p in people_ if p["rank"] == rank]
+        if not members:
+            continue
+        cut = len(members) if rank in OPEN_RANKS or len(members) <= COLLAPSE_AFTER else COLLAPSE_AFTER
+        groups.append({"rank": rank, "label": label, "short": short, "shown": members[:cut], "more": members[cut:]})
+    fit = sum(1 for p in people_ if p["fit"])
+    summary = [f"Cəmi {len(people_)}"] + [f"{len(g['shown']) + len(g['more'])} {g['short']}" for g in groups]
+    if fit:
+        summary.append(f"{fit} əlaqə üçün uyğun")
+    return {"total": len(people_), "groups": groups, "summary": " · ".join(summary)}

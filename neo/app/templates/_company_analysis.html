@@ -1,4 +1,5 @@
 {# Şirkət analizinin nəticəsi — Şirkət analizi (yeni nəticə) və Şirkət bazası (saxlanmış) səhifələri. #}
+{% from "_employees_list.html" import employee_groups %}
 {% macro analysis_view(a, size_names, fit_names, heading=true) %}
   {% set ai = a.ai %}
   <section class="od-card">
@@ -77,19 +78,12 @@
       {% elif not ready %}İşçi məlumatı yoxdur: LinkedIn axtarışı qoşulmayıb (APIFY_TOKEN).
       {% else %}İşçilər hələ axtarılmayıb. Mənbə — LinkedIn profilləri (təxmini və ya uydurma məlumat göstərilmir).{% endif %}
     </p>
-    <ul class="ct-list" data-emp-list>
-      {% for p in items %}
-      <li class="ct"><div class="ct-main">
-        <b>{{ p.name }}</b>{% if p.title %}<span class="ct-role">{{ p.title }}</span>{% endif %}
-        <span class="ct-ways">{% if p.location %}<span>{{ p.location }}</span>{% endif %}<a href="{{ p.linkedin_url }}" target="_blank" rel="noopener">LinkedIn ↗</a></span>
-      </div></li>
-      {% endfor %}
-    </ul>
+    <div class="emp-box" data-emp-list>{{ employee_groups(items) }}</div>
     {% if ready and can_search %}
     <form method="post" action="/tools/company/employees" data-emp-form>
       {{ csrf_field(request) }}<input type="hidden" name="company" value="{{ company }}">
       <input type="hidden" name="force" value="{{ '1' if searched_at else '' }}">
-      <button class="mc-btn mc-btn-sm" type="submit">{{ 'Yenidən axtar' if searched_at else 'İşçiləri LinkedIn-də axtar' }}</button>
+      <button class="mc-btn mc-btn-sm" type="submit" title="Apify ilə LinkedIn axtarışı — pulludur, nəticə saxlanılır">{{ 'Yenidən axtar (pulludur)' if searched_at else 'İşçiləri LinkedIn-də tap (pulludur, 1–3 dəq.)' }}</button>
     </form>
     {% endif %}
   </section>
@@ -99,7 +93,6 @@
       if (!f) return;
       var box = document.querySelector('[data-emp-box]'), list = box.querySelector('[data-emp-list]'),
           st = box.querySelector('[data-emp-status]'), cnt = box.querySelector('[data-emp-count]'), b = f.querySelector('button');
-      function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; }
       var POLL_MS = 4000, MAX_POLLS = 90;  // Apify run-ı başladılır, nəticə /poll ilə gəlir (Vercel 60 san)
       function post(url, fields) {
         var data = new FormData(f);
@@ -119,25 +112,16 @@
         e.preventDefault();
         var before = list.innerHTML;
         b.disabled = true; st.textContent = 'LinkedIn-də axtarılır… (1–3 dəq.)';
-        list.innerHTML = '<li class="ct" aria-hidden="true"><div class="skel" style="flex:1"><i></i><i></i><i></i></div></li>';
+        list.innerHTML = '<div class="skel" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>';
         post(f.action)
           .then(function (d) { return wait(d, null, 0); })
           .then(function (d) {
             var items = d.items || [];
-            list.innerHTML = '';
-            items.forEach(function (p) {
-              var li = el('li', 'ct'), m = el('div', 'ct-main');
-              m.appendChild(el('b', '', p.name));
-              if (p.title) m.appendChild(el('span', 'ct-role', p.title));
-              var w = el('span', 'ct-ways');
-              if (p.location) w.appendChild(el('span', '', p.location));
-              var a = el('a', '', 'LinkedIn ↗'); a.href = p.linkedin_url; a.target = '_blank'; a.rel = 'noopener';
-              w.appendChild(a); m.appendChild(w); li.appendChild(m); list.appendChild(li);
-            });
+            list.innerHTML = d.html || '';  // server qruplu HTML qaytarır (templates/_employees_list.html)
             cnt.textContent = items.length;
             st.textContent = 'LinkedIn axtarışı · ' + d.searched_at + (d.from_cache ? ' (saxlanmış nəticə)' : '')
               + (items.length ? '' : ' — LinkedIn-də bu şirkətin işçisi tapılmadı.');
-            f.querySelector('[name=force]').value = '1'; b.textContent = 'Yenidən axtar';
+            f.querySelector('[name=force]').value = '1'; b.textContent = 'Yenidən axtar (pulludur)';
           })
           .catch(function (err) { list.innerHTML = before; st.textContent = (err && err.message) || 'Axtarış alınmadı'; })
           .then(function () { b.disabled = false; });

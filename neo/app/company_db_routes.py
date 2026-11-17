@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import delete, select
 
-from app import companies, company_analysis, employees
+from app import companies, company_analysis, employees, subsidiaries
 from app.auth import security
 from app.auth.security import REQUIRE, verify_csrf
 from app.companies import contract_page
@@ -45,7 +45,7 @@ def _card_context(db, org: Organization) -> dict:
         "employees_ready": employees_enabled(), "users": users, "today": today(),
         "size_names": company_analysis.SIZE_NAMES, "fit_names": company_analysis.FIT_NAMES,
         "status_names": companies.AGREEMENT_STATUS_NAMES, "shown_status": companies.shown_status,
-        "stage_names": STAGE_NAMES,
+        "stage_names": STAGE_NAMES, **subsidiaries.context(db, org),
     }
 
 

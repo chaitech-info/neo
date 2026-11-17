@@ -188,6 +188,11 @@ class Organization(Base):
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # əlavə qeydlər (sərbəst mətn)
     notes_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     notes_updated_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    # 0017: alt şirkətlər (app/subsidiaries.py) — ana şirkət, münasibət və onu göstərən mənbə linki.
+    parent_id: Mapped[Optional[int]] = mapped_column(ForeignKey("organizations.id"), index=True, nullable=True)
+    parent_relation: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    parent_source: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    subsidiaries_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
 class Tender(Base):

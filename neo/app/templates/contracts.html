@@ -9,7 +9,7 @@
   </header>
 
   <section class="kw-sec">
-    <details class="kw-new" {% if not total %}open{% endif %}>
+    <details class="kw-new" {% if not total or request.query_params.get('new') %}open{% endif %}>
       <summary>+ Şirkət əlavə et</summary>
       <form method="post" action="/tools/contracts" id="company-new">
         {{ csrf_field(request) }}
