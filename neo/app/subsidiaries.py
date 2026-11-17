@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from datetime import datetime
 from urllib.parse import urljoin, urlparse
 
@@ -137,30 +138,49 @@ def _clean(found: list, parent_name: str, parent_site: str = "") -> list[dict]:
     return out[:MAX_SUBSIDIARIES]
 
 
-def research(name: str, site: str = "", *, client: OpenAI | None = None,
-             crawler: WebsiteContacts | None = None) -> list[dict]:
-    """AI + veb axtarışı → [{name, website, relation, source}] (mənbəsi olanlar)."""
-    pages = group_pages(site, crawler) if site else ""
+RETRY = ("\n\nA first search found nothing. Search again more broadly: try other spellings of the name, the legal "
+         "name with MMC/LLC/ASC, the founders' or directors' other companies, LinkedIn company pages and posts, "
+         "and registry or tender pages that mention the group.")
+
+
+def _ask(client: OpenAI, prompt: str, timeout: float) -> list:
     model = os.environ.get("SUBSIDIARY_MODEL") or DEFAULT_MODEL
-    prompt = PROMPT.format(name=name, site=site or "(unknown)", pages=pages or "(not available)")
     kw = {}
     if model.startswith(("gpt-5", "o")):  # düşünən modellər: aşağı səviyyə — ~15 san., Vercel-in 60 saniyəsinə sığır
         kw["reasoning"] = {"effort": os.environ.get("SUBSIDIARY_REASONING_EFFORT") or "low"}
+    resp = client.with_options(timeout=timeout, max_retries=0).responses.create(
+        model=model, input=prompt,
+        tools=[{"type": os.environ.get("SUBSIDIARY_SEARCH_TOOL") or "web_search"}],
+        text={"format": {"type": "json_schema", "name": "subsidiaries", "strict": True, "schema": SCHEMA}},
+        **kw,
+    )
+    found = json.loads(resp.output_text).get("subsidiaries") or []
+    return found if isinstance(found, list) else []
+
+
+def research(name: str, site: str = "", *, about: str = "", client: OpenAI | None = None,
+             crawler: WebsiteContacts | None = None) -> list[dict]:
+    """AI + veb axtarışı → [{name, website, relation, source}] (mənbəsi olanlar). `about` — şirkət analizinin
+    xülasəsi (adı ümumi olan şirkəti dəqiqləşdirir). Model bəzən boş qaytarır — vaxt qalıbsa bir dəfə də axtarır."""
+    started = time.monotonic()
+    pages = group_pages(site, crawler) if site else ""
+    prompt = PROMPT.format(name=name, site=site or "(unknown)", pages=pages or "(not available)")
+    if about:
+        prompt += f"\nWHAT WE ALREADY KNOW ABOUT THE COMPANY:\n{about[:800]}\n"
+    ai = _client(client)
+    tries = 0
     try:
-        resp = _client(client).with_options(timeout=TIMEOUT_S, max_retries=0).responses.create(
-            model=model, input=prompt,
-            tools=[{"type": os.environ.get("SUBSIDIARY_SEARCH_TOOL") or "web_search"}],
-            text={"format": {"type": "json_schema", "name": "subsidiaries", "strict": True, "schema": SCHEMA}},
-            **kw,
-        )
-        found = json.loads(resp.output_text).get("subsidiaries") or []
+        found, tries = _ask(ai, prompt, TIMEOUT_S), 1
+        left = TIMEOUT_S - (time.monotonic() - started)
+        if not found and left > 25:
+            found, tries = _ask(ai, prompt + RETRY, left - 3), 2
     except OutreachError:
         raise
     except Exception as exc:
         log.exception("subsidiary_research_failed", company=name)
         raise OutreachError(f"Alt şirkətlər araşdırılmadı: {type(exc).__name__}") from exc
-    out = _clean(found if isinstance(found, list) else [], name, site)
-    log.info("subsidiaries_found", company=name, raw=len(found), kept=len(out), group_pages=bool(pages))
+    out = _clean(found, name, site)
+    log.info("subsidiaries_found", company=name, raw=len(found), kept=len(out), group_pages=bool(pages), tries=tries)
     return out
 
 

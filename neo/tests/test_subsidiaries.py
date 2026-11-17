@@ -159,3 +159,21 @@ def test_parent_domain_page_is_not_taken_as_the_subsidiary_site(factory):  # noq
         subs = subsidiaries.save(s, parent, subsidiaries._clean(found, "Azersun Holding"))  # sayt süzülməsə də
         assert sorted(o.name for o in subs) == ["Azersun Yağ Fabriki", "Azersun Çay Fabriki"]
         assert all(o.domain is None for o in subs)
+
+
+def test_empty_first_answer_is_retried_once_with_a_broader_search(monkeypatch):
+    monkeypatch.setattr(subsidiaries, "site_text", lambda url, crawler=None: ("", []))
+
+    class Flaky(FakeAI):
+        def create(self, **kw):
+            self.calls.append(kw)
+            items = [] if len(self.calls) == 1 else FOUND
+            return SimpleNamespace(output_text=json.dumps({"subsidiaries": items}))
+
+    ai = Flaky(FOUND)
+    out = subsidiaries.research("Sahil Holding", about="Logistika. Bakıda anbar şirkəti.", client=ai)
+    assert len(ai.calls) == 2 and "Search again more broadly" in ai.calls[1]["input"]
+    assert "Bakıda anbar şirkəti" in ai.calls[0]["input"] and len(out) == 2
+    ok = FakeAI(FOUND)
+    subsidiaries.research("Sahil Holding", client=ok)
+    assert len(ok.calls) == 1  # tapılıbsa təkrar sorğu yoxdur

@@ -115,7 +115,9 @@ def company_subsidiaries(request: Request, org_id: int, force: str = Form(""), m
             return JSONResponse({"error": "Şirkət tapılmadı"}, status_code=404)
         if force == "1" or org.subsidiaries_checked_at is None:
             try:
-                found = subsidiaries.research(org.name, org.website or "")
+                ai = (companies.analysis_of(org) or {}).get("ai") or {}
+                about = " ".join(str(ai.get(k) or "") for k in ("industry", "summary") if ai.get(k) and ai.get(k) != "bilinmir")
+                found = subsidiaries.research(org.name, org.website or "", about=about)
             except OutreachError as exc:
                 return JSONResponse({"error": str(exc)}, status_code=502)
             subsidiaries.save(db, org, found)
