@@ -331,9 +331,8 @@ def opportunity_email_send(request: Request, opp_id: int, to: str = Form(...), s
 
 
 def approvers(db) -> list[User]:
-    """Təsdiqləyicilər; heç biri yoxdursa — adminlər (sorğu itməsin)."""
-    rows = list(db.scalars(select(User).where(User.role_code == "approver", User.is_active.is_(True))))
-    return rows or list(db.scalars(select(User).where(User.role_code == "admin", User.is_active.is_(True))))
+    """Təsdiq yalnız CEO rolundadır."""
+    return list(db.scalars(select(User).where(User.role_code == "ceo", User.is_active.is_(True))))
 
 
 @router.post("/opportunities/{opp_id}/email/approval", dependencies=[Depends(verify_csrf)])

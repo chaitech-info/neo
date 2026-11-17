@@ -46,3 +46,14 @@ def test_create_user_normalizes_email_and_rejects_duplicates(session):
 def test_create_user_rejects_unknown_role(session):
     with pytest.raises(ValueError, match="Rol"):
         create_user(session, email="b@sirket.az", full_name="B", role_code="superuser", password="möhkəm-şifrə-1")
+
+
+def test_only_ceo_can_approve():
+    from app.auth.security import can_approve
+    from app.db.models import User
+
+    def user(role):
+        return User(email="x@y.az", full_name="X", role_code=role, password_hash="x", is_active=True)
+
+    assert can_approve(user("ceo"))
+    assert not any(can_approve(user(r)) for r in ("admin", "manager", "sales", "viewer"))

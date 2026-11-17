@@ -51,7 +51,7 @@ def _enum(name: str, *values: str) -> Enum:
 # --- Dəyər siyahıları — miqrasiya 0002 bunların nüsxəsini saxlayır; ikisinin
 # uyğunluğunu tests/test_migrations.py yoxlayır. -------------------------------
 
-ROLE_CODES = ("admin", "approver", "manager", "sales", "viewer")  # approver — 0012
+ROLE_CODES = ("admin", "ceo", "manager", "sales", "viewer")  # ceo — 0016
 SOURCE_KINDS = ("tender_portal", "news", "jobs", "corporate", "intl_api", "social")
 RUN_TRIGGERS = ("schedule", "manual", "scrape_all")
 RUN_STATUSES = ("running", "ok", "failed", "blocked_robots")

@@ -208,6 +208,27 @@ def test_weekly_menu_pdf_matches_the_three_page_design():
     assert b"Caladea" in pdf and b"NotoSerif" in pdf  # ə Caladea-da yoxdur — Noto Serif ilə
 
 
+def test_illustrated_pdf_skips_text_menu_pages(monkeypatch):
+    """Şəkilli təklifdə həftəlik menyu mətn səhifələri yoxdur; şəkilsiz təklifdə var."""
+    import io
+
+    from PIL import Image
+
+    from app.dishes import dish_key
+
+    buf = io.BytesIO()
+    Image.new("RGB", (40, 30), "red").save(buf, "JPEG")
+    drawn = []
+    original = offer_pdf.Doc.day_block
+    monkeypatch.setattr(offer_pdf.Doc, "day_block", lambda self, b: (drawn.append(b), original(self, b))[1])
+
+    offer_pdf.render(WEEKLY)
+    assert drawn
+    drawn.clear()
+    pdf = offer_pdf.render(WEEKLY, {dish_key("Mərcimək şorbası"): buf.getvalue()})
+    assert pdf.startswith(b"%PDF") and not drawn
+
+
 def test_flat_menu_pdf_and_text_fallback():
     doc = offer_pdf.Doc(FLAT)
     pkg = doc.packages[0]

@@ -33,11 +33,11 @@ log = structlog.get_logger()
 
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
-# approver (Təsdiqləyici, 0012): menecerin icazələri + "Təsdiq gözləyənlər" — satışın məktublarını təsdiqləyir.
-ROLE_RANK = {"viewer": 0, "sales": 1, "manager": 2, "approver": 2, "admin": 3}
-ROLE_NAMES = {"viewer": "Müşahidəçi", "sales": "Satış", "manager": "Menecer", "approver": "Təsdiqləyici",
+# ceo (CEO, 0016): menecerin icazələri + "Təsdiq gözləyənlər" — satışın məktublarını yalnız CEO təsdiqləyir.
+ROLE_RANK = {"viewer": 0, "sales": 1, "manager": 2, "ceo": 2, "admin": 3}
+ROLE_NAMES = {"viewer": "Müşahidəçi", "sales": "Satış", "manager": "Menecer", "ceo": "CEO",
               "admin": "Administrator"}
-APPROVER_ROLES = ("approver", "admin")
+APPROVER_ROLES = ("ceo",)
 
 SESSION_MAX_AGE = 12 * 3600
 MAX_FAILED_LOGINS = 5
@@ -114,7 +114,7 @@ def has_role(user: Optional[User], role: str) -> bool:
 
 
 def can_approve(user: Optional[User]) -> bool:
-    """Məktub təsdiqi rütbə ilə yox, rolun özü ilə verilir — menecer təsdiqləyici deyil."""
+    """Məktub təsdiqi rütbə ilə yox, rolun özü ilə verilir — yalnız CEO (admin də daxil deyil)."""
     return user is not None and user.role_code in APPROVER_ROLES
 
 
@@ -141,7 +141,7 @@ class RequireApprover(Require):
     def __call__(self, request: Request) -> User:
         user = super().__call__(request)
         if not can_approve(user):
-            raise PermissionDenied("approver")
+            raise PermissionDenied("ceo")
         return user
 
 

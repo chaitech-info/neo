@@ -1,4 +1,4 @@
-"""Təsdiq gözləyənlər (yalnız Təsdiqləyici və admin): satışın "Təsdiqə göndər" basdığı məktublar.
+"""Təsdiq gözləyənlər (yalnız CEO rolu): satışın "Təsdiqə göndər" basdığı məktublar.
 
 Təsdiqləyici mətni düzəldib təsdiqləyir və ya səbəb yazıb rədd edir; qərar göndərənə bildiriş kimi
 gedir, status fürsət səhifəsinin "Təsdiq" bölməsində görünür. Təsdiqlənmiş məktubu göndərən özü

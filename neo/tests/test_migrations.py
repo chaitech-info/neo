@@ -45,11 +45,11 @@ def test_fresh_database_gets_full_schema_and_seed(engine):
 
     tables = set(inspect(engine).get_table_names())
     assert CRM_TABLES | {"leads", "alembic_version"} <= tables
-    assert _version(engine) == "0015"
+    assert _version(engine) == "0016"
     assert "items_fetched" in {c["name"] for c in inspect(engine).get_columns("scrape_runs")}
     with engine.connect() as c:
         assert c.execute(text("SELECT code FROM roles ORDER BY code")).scalars().all() == [
-            "admin", "approver", "manager", "sales", "viewer"]
+            "admin", "ceo", "manager", "sales", "viewer"]
         assert c.execute(text("SELECT count(*) FROM sources WHERE is_active")).scalar() == len(__import__("app.sources", fromlist=["SOURCES"]).SOURCES)
         assert c.execute(text("SELECT is_active FROM sources WHERE key='azerweb'")).scalar() == 0
         assert c.execute(text("SELECT respect_robots FROM sources WHERE key='linkedin'")).scalar() == 0
@@ -66,7 +66,7 @@ def test_legacy_database_is_upgraded_without_data_loss(engine):
     upgrade_to_head(engine)
     upgrade_to_head(engine)  # ikinci dəfə — heç nə etməməlidir
 
-    assert _version(engine) == "0015"
+    assert _version(engine) == "0016"
     cols = {c["name"] for c in inspect(engine).get_columns("leads")}
     assert NEW_LEAD_COLUMNS <= cols
     with engine.connect() as c:
@@ -111,6 +111,19 @@ def test_0012_approver_role_passes_check_and_downgrades(engine):
     with engine.connect() as c:
         assert c.execute(text("SELECT role_code FROM users")).scalar() == "manager"
         assert "approver" not in c.execute(text("SELECT code FROM roles")).scalars().all()
+
+
+def test_0016_ceo_role_downgrades_to_approver(engine):
+    """Geri qaytaranda CEO yenidən təsdiqləyici olur."""
+    upgrade_to_head(engine)
+    with engine.begin() as c:
+        c.execute(text(
+            "INSERT INTO users (id, email, full_name, password_hash, role_code, is_active, created_at) "
+            "VALUES (1, 'a@x.az', 'A', 'h', 'ceo', 1, '2026-11-16 00:00:00')"))
+        command.downgrade(alembic_config(c), "0015")
+    with engine.connect() as c:
+        assert c.execute(text("SELECT role_code FROM users")).scalar() == "approver"
+        assert "ceo" not in c.execute(text("SELECT code FROM roles")).scalars().all()
 
 
 def test_downgrade_to_baseline_keeps_leads(engine):
