@@ -318,11 +318,12 @@ def daily_selection(pkg: Package) -> list[tuple[int | None, str]]:
     return out
 
 
-def summary_line(pkg: Package) -> str:
+def summary_line(pkg: Package, daily: bool = True) -> str:
     parts = [f"{n} {label}" if n else az_lower(label[:1]) + label[1:] for n, label in daily_selection(pkg)]
     if not parts:
         return ""
-    return ("Hər gün " if pkg.weekly else "") + ", ".join(parts) + "."
+    text = ", ".join(parts) + "."
+    return ("Hər gün " + text) if pkg.weekly and daily else text[:1].upper() + text[1:]
 
 
 # --- Çəkmə ---------------------------------------------------------------------------------------
@@ -335,6 +336,7 @@ class Doc:
         `measure` — yalnız səhifə sayı üçün keçid: şəkillər çəkilmir (yerləri eynidir, səhifələr eyni bölünür)."""
         _register_fonts()
         self.snap, self.total, self.measure = snapshot, total, measure
+        self.photo_mode = False  # şəkilli təklif: həftəlik menyu və günlər heç yerdə yazılmır (build)
         self.crops: dict[tuple[int, float, float], ImageReader | None] = {}
         self.photos = photos or {}
         self.lang = snapshot.get("language") if snapshot.get("language") in ("az", "en", "ru") else "az"
@@ -358,9 +360,11 @@ class Doc:
         return "Corporate Lunch Menu"
 
     def running_head(self) -> str:
-        return "Həftəlik nahar menyusu" if self.weekly else "Nahar menyusu"
+        return "Həftəlik nahar menyusu" if self.weekly and not self.photo_mode else "Nahar menyusu"
 
     def span(self) -> tuple[str, str] | None:
+        if self.photo_mode:
+            return None
         spans = {p.days_span for p in self.packages if p.days_span}
         return spans.pop() if len(spans) == 1 else None
 
@@ -407,7 +411,8 @@ class Doc:
             t.draw(LEFT - 2, y, line, 38, NAVY)
             y += 42
         y += 22
-        t.draw(LEFT, y, "Weekly Executive Dining Proposal" if self.weekly else "Corporate Dining Proposal", 14.5,
+        weekly = self.weekly and not self.photo_mode
+        t.draw(LEFT, y, "Weekly Executive Dining Proposal" if weekly else "Corporate Dining Proposal", 14.5,
                NAVY, italic=True)
         span = self.span()
         second = span[1] if span else (f"Prepared for {self.snap['customer_name']}" if self.snap.get("customer_name") else "")
@@ -421,14 +426,14 @@ class Doc:
             t.draw(LEFT, y, f"{p.name} paket", 14.5, TEAL)
             desc = p.description or (
                 "Hər gün üçün ayrıca tərtib olunmuş, sevilən klassik yeməklərdən ibarət balanslı nahar menyusu. "
-                "Komandanız üçün sadə, səliqəli və etibarlı gündəlik həll." if p.weekly else
+                "Komandanız üçün sadə, səliqəli və etibarlı gündəlik həll." if p.weekly and not self.photo_mode else
                 "Sevilən klassik yeməklərdən ibarət balanslı nahar menyusu. "
                 "Komandanız üçün sadə, səliqəli və etibarlı gündəlik həll.")
             yy = y
             for line in t.wrap(desc, 11, 292)[:4]:
                 t.draw(COL2, yy, line, 11, NAVY)
                 yy += 16.5
-            summary = summary_line(p)
+            summary = summary_line(p, daily=not self.photo_mode)
             if summary:
                 for line in t.wrap(summary, 8.5, 300)[:2]:
                     t.draw(COL2, yy + 10, line, 8.5, GREY)
@@ -685,8 +690,9 @@ class Doc:
         self.y = r + 170
 
     def build(self) -> bytes:
+        self.photo_mode = bool(self.photos and self.gallery_sections())
         self.cover()
-        if self.photos and self.gallery_sections():
+        if self.photo_mode:
             # Şəkilli təklif: üz qabığından sonra dərhal yemək şəkilləri (kateqoriyalar üzrə), həftəlik menyu və
             # günlər yazılmır; təklif məlumatları (müştəri, qiymət) sonda.
             self.gallery(close_current=False)

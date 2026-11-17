@@ -233,6 +233,14 @@ def test_illustrated_pdf_goes_cover_then_photos_without_the_weekly_menu(monkeypa
     assert calls[:2] == ["gallery", "proposal"]  # şəkillər, sonra təklif məlumatları
     assert _pages(pdf) == 2  # üz qabığı + şəkillər/təklif məlumatları
 
+    texts = []
+    original_draw = offer_pdf.Text.draw
+    monkeypatch.setattr(offer_pdf.Text, "draw", lambda self, x, y, s, *a, **k: (texts.append(s), original_draw(self, x, y, s, *a, **k))[1])
+    offer_pdf.render(WEEKLY, {dish_key("Mərcimək şorbası"): buf.getvalue()})
+    drawn = " | ".join(texts)
+    for word in ("Bazar ertəsi", "Monday", "Weekly", "Həftəlik", "Hər gün"):
+        assert word not in drawn, word  # üz qabığında da günlər yazılmır
+
 
 def test_flat_menu_pdf_and_text_fallback():
     doc = offer_pdf.Doc(FLAT)
