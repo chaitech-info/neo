@@ -208,8 +208,9 @@ def test_weekly_menu_pdf_matches_the_three_page_design():
     assert b"NotoSerif" in pdf and b"Caladea" not in pdf  # bütün mətn bir şriftdə — ə sözün içində fərqlənmir
 
 
-def test_illustrated_pdf_keeps_the_menu_and_adds_photos_at_the_end(monkeypatch):
-    """Şəkilli təklif: həftəlik menyu mətn səhifələri qalır, yemək şəkilləri sonda əlavə olunur."""
+def test_illustrated_pdf_goes_cover_then_photos_without_the_weekly_menu(monkeypatch):
+    """Şəkilli təklif: üz qabığından sonra yemək şəkilləri, həftəlik menyu/gün blokları yoxdur, təklif
+    məlumatları sonda. Şəkilsiz təklifdə həftəlik menyu var."""
     import io
 
     from PIL import Image
@@ -218,18 +219,19 @@ def test_illustrated_pdf_keeps_the_menu_and_adds_photos_at_the_end(monkeypatch):
 
     buf = io.BytesIO()
     Image.new("RGB", (40, 30), "red").save(buf, "JPEG")
-    drawn, gallery = [], []
-    original, original_gallery = offer_pdf.Doc.day_block, offer_pdf.Doc.gallery
-    monkeypatch.setattr(offer_pdf.Doc, "day_block", lambda self, b: (drawn.append(b), original(self, b))[1])
-    monkeypatch.setattr(offer_pdf.Doc, "gallery", lambda self, *a, **k: (gallery.append(1), original_gallery(self, *a, **k))[1])
+    calls = []
+    for name in ("day_block", "gallery", "proposal"):
+        original = getattr(offer_pdf.Doc, name)
+        monkeypatch.setattr(offer_pdf.Doc, name,
+                            (lambda n, o: lambda self, *a, **k: (calls.append(n), o(self, *a, **k))[1])(name, original))
 
-    plain = offer_pdf.render(WEEKLY)
-    assert drawn and not gallery
-    menu_blocks = len(drawn)
-    drawn.clear()
+    offer_pdf.render(WEEKLY)
+    assert "day_block" in calls and "gallery" not in calls
+    calls.clear()
     pdf = offer_pdf.render(WEEKLY, {dish_key("Mərcimək şorbası"): buf.getvalue()})
-    assert pdf.startswith(b"%PDF") and len(drawn) == menu_blocks and gallery
-    assert _pages(pdf) > _pages(plain)
+    assert pdf.startswith(b"%PDF") and "day_block" not in calls
+    assert calls[:2] == ["gallery", "proposal"]  # şəkillər, sonra təklif məlumatları
+    assert _pages(pdf) == 2  # üz qabığı + şəkillər/təklif məlumatları
 
 
 def test_flat_menu_pdf_and_text_fallback():

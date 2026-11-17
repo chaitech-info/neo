@@ -155,7 +155,7 @@ def test_pictured_offer_uses_dish_photos_and_remembers_new_dishes(db, monkeypatc
     d = c.post("/api/offers", json={"brand": "seaport", "message": "a", "pictures": True}).json()
     pictured = base64.b64decode(d["pdf_base64"])
     assert pictured.startswith(b"%PDF") and _images(pictured) == _images(plain) + 2  # 2 fərqli yemək şəkli
-    assert _pages(pictured) >= _pages(plain)
+    assert _pages(pictured) < _pages(plain)  # şəkilli: üz qabığı → şəkillər, həftəlik menyu səhifələri yoxdur
     with db() as s:
         assert s.scalars(select(OfferRecord)).one().pictures is True
         assert s.scalar(select(Dish).where(Dish.key == dishes.dish_key("Təzə plov"))).category == "Əsas yemək"

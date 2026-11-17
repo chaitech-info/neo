@@ -686,9 +686,16 @@ class Doc:
 
     def build(self) -> bytes:
         self.cover()
+        if self.photos and self.gallery_sections():
+            # Şəkilli təklif: üz qabığından sonra dərhal yemək şəkilləri (kateqoriyalar üzrə), həftəlik menyu və
+            # günlər yazılmır; təklif məlumatları (müştəri, qiymət) sonda.
+            self.gallery(close_current=False)
+            self.proposal()
+            self.finish_page(self.body_footer())
+            self.c.save()
+            return self.buf.getvalue()
         self.page_header()
         span = self.span()
-        # Şəkilli təklif də tam menyu ilə gedir: cover → menyu → təklif məlumatları → yemək şəkilləri (sonda).
         for i, p in enumerate(self.packages):
             if i:
                 self.new_body_page()
@@ -702,8 +709,6 @@ class Doc:
                 self.day_block(b)
             self.daily(p)
         self.proposal()
-        if self.photos:
-            self.gallery()
         self.finish_page(self.body_footer())
         self.c.save()
         return self.buf.getvalue()
