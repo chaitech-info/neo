@@ -20,7 +20,8 @@
           </label>
           <label class="kw-f">Paket
             <select id="of-package" name="package_id">
-              <option value="">— agent özü seçsin —</option>
+              {# "Agent özü seçsin" söndürülüb — paketi həmişə işçi seçir. Geri qaytarmaq üçün: <option value="">— agent özü seçsin —</option> #}
+              <option value="" disabled selected>— paket seç —</option>
             </select>
           </label>
         </div>
@@ -202,7 +203,7 @@
             var o = el('option', '', p.name + (p.price != null ? ' — ' + fmt(p.price) : '') + (p.example ? ' (nümunə)' : ''));
             o.value = p.id; o.dataset.name = p.name; sel.appendChild(o);
           });
-          if (!(res.data.packages || []).length) { note.textContent = 'Bu brend üçün paket yoxdur — agent özü seçəcək.'; note.hidden = false; }
+          if (!(res.data.packages || []).length) { note.textContent = 'Bu brend üçün paket yoxdur — əvvəl «Paketlər» bölməsində paket əlavə edin.'; note.hidden = false; }
         })
         .catch(function (err) { note.textContent = (err && err.message) || 'Paketlər yüklənmədi'; note.hidden = false; })
         .then(function () { sel.disabled = false; });
@@ -291,6 +292,7 @@
       if (busy) return;
       var msg = $('of-message').value.trim();
       if (!msg) { fail('Müştəri sorğusunu yazın.'); $('of-message').focus(); return; }
+      if (!$('of-package').value) { fail('Paketi seçin.'); $('of-package').focus(); return; }
       conv = [{ role: 'user', content: msg }];
       var b = baseBody(); b.message = msg;
       call(b);

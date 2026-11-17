@@ -148,6 +148,12 @@ def _apify_error(exc: httpx.HTTPStatusError) -> LeadersError:
 
 
 def _call(method: str, url: str, *, client: httpx.Client | None = None, **kw) -> dict | list:
+    # Token URL-də yox, başlıqda: httpx sorğu URL-ini loglayır və açar Vercel loglarına düşürdü.
+    params = dict(kw.pop("params", None) or {})
+    if token := params.pop("token", None):
+        kw["headers"] = {**(kw.get("headers") or {}), "Authorization": f"Bearer {token}"}
+    if params:
+        kw["params"] = params
     http = client or _http()
     try:
         resp = http.request(method, url, timeout=20, **kw)

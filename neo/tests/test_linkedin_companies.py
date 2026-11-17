@@ -42,7 +42,7 @@ def test_posts_are_filtered_by_keywords_and_azerbaijan_gate_for_global_companies
     assert leads[0].entity_name == "SOCAR" and leads[0].source == "linkedin_companies"
     assert leads[0].posted_at.year == 2026 and "Şirkət səhifəsi: SOCAR" in leads[0].raw_text
     url, kw = scraper.calls[0]
-    assert url == APIFY_RUN_SYNC_URL and kw["params"] == {"token": "tok"}
+    assert url == APIFY_RUN_SYNC_URL and kw["headers"] == {"Authorization": "Bearer tok"} and "params" not in kw  # token loglara düşməsin
     assert kw["json"]["targetUrls"] == [SOCAR.url, BP.url, GHOST.url] and kw["json"]["maxPosts"] == 10
 
 

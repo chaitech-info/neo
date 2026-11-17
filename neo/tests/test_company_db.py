@@ -316,6 +316,7 @@ def test_employees_search_starts_run_and_polls(factory, monkeypatch):
     start = client.post("/tools/company/employees", data={"company": "Sahil MMC", "limit": "50"}).json()
     assert start == {"run": "empRun12345"}
     assert json.loads(calls[0].content) == {"companies": ["Sahil MMC"], "maxItems": 50}
+    assert "token" not in str(calls[0].url) and calls[0].headers["authorization"] == "Bearer t"  # açar loglara düşməsin
 
     poll = {"company": "Sahil MMC", "run": start["run"]}
     assert client.post("/tools/company/employees/poll", data=poll).json() == {"pending": True}

@@ -19,6 +19,7 @@ və yeməyin əlavə sahələri (porsiya, kalori …) adın altında kiçik yaz�
 """
 from __future__ import annotations
 
+import functools
 import io
 import re
 from dataclasses import dataclass, field
@@ -26,6 +27,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Callable
 
+from reportlab import rl_config
 from reportlab.lib.colors import HexColor
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.utils import ImageReader
@@ -34,6 +36,9 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen.canvas import Canvas
 
 STATIC = Path(__file__).parent / "static"
+# rl_accel (C) quraşdırılmayıb: şəkillərin ASCII85 kodlaması saf Python-da gedir və Vercel-də şəkilli PDF-in
+# vaxtının yarısını aparırdı. Binar axın etibarlı PDF-dir, həm də ~25% kiçikdir.
+rl_config.useA85 = 0
 W, H = A4
 LEFT, RIGHT = 56.5, A4[0] - 56.5
 COL2, COL3 = 198.0, 391.0           # sağ sütunlar (üz qabığı / bölmə başlıqları; gün blokunda 223 və 391)
@@ -227,6 +232,11 @@ def menu_items(snapshot: dict) -> list[tuple[str, str]]:
     return out
 
 
+@functools.lru_cache(maxsize=4)
+def _logo(name: str) -> ImageReader:
+    return ImageReader(str(STATIC / "offer" / name))
+
+
 def _cover_crop(data: bytes, w: float, h: float) -> ImageReader | None:
     """Şəkli w:h nisbətində mərkəzdən kəsib kiçildir (PDF yüngül qalsın)."""
     from PIL import Image
@@ -299,10 +309,10 @@ def daily_selection(pkg: Package) -> list[tuple[int | None, str]]:
         generic = label.casefold() in GENERIC or not label
         from app.dishes import category_name
         single = category_name(label) == "Çörək" and max(len(i) for i in per_day) == 1   # "Çörək çeşidləri" — mətnlə
-        if (pkg.weekly and same) or generic or single:
+        if generic or single or (pkg.weekly and same and len(per_day[0]) == 1):
             for item in per_day[0]:
                 out.append((None, item))
-        else:
+        else:  # hər gün eyni çox maddə (məs. 10 içki) də sayla: "10 içki", siyahı üz qabığına sığmır
             out.append((max(len(i) for i in per_day), _singular(label)))
     return out
 
@@ -319,10 +329,12 @@ def summary_line(pkg: Package) -> str:
 
 class Doc:
     def __init__(self, snapshot: dict, total: int = 0, photos: dict[str, bytes] | None = None,
-                 plans: dict[int, Package] | None = None):
-        """`plans` — {snapshot-dakı sətrin indeksi: menyu planından qurulmuş paket} (app/package_menus.py)."""
+                 plans: dict[int, Package] | None = None, measure: bool = False):
+        """`plans` — {snapshot-dakı sətrin indeksi: menyu planından qurulmuş paket} (app/package_menus.py).
+        `measure` — yalnız səhifə sayı üçün keçid: şəkillər çəkilmir (yerləri eynidir, səhifələr eyni bölünür)."""
         _register_fonts()
-        self.snap, self.total = snapshot, total
+        self.snap, self.total, self.measure = snapshot, total, measure
+        self.crops: dict[tuple[int, float, float], ImageReader | None] = {}
         self.photos = photos or {}
         self.lang = snapshot.get("language") if snapshot.get("language") in ("az", "en", "ru") else "az"
         self.brand = snapshot.get("brand") or "seaport"
@@ -357,13 +369,20 @@ class Doc:
         footer(len(self.pages), self.total or len(self.pages))
         self.c.showPage()
 
+    def _crop(self, data: bytes, w: float, h: float) -> ImageReader | None:
+        """Eyni şəkil (məs. bir neçə gündə təkrarlanan yemək) bir dəfə kəsilib kiçildilir."""
+        key = (id(data), w, h)
+        if key not in self.crops:
+            self.crops[key] = _cover_crop(data, w, h)
+        return self.crops[key]
+
     def logo(self, x: float, top: float, width: float, small: bool) -> float:
         if self.brand == "seaport":
-            img = STATIC / "offer" / ("seaport-mark.png" if small else "seaport-logo.png")
-            r = ImageReader(str(img))
+            r = _logo("seaport-mark.png" if small else "seaport-logo.png")
             iw, ih = r.getSize()
             h = width * ih / iw
-            self.c.drawImage(r, x, H - top - h, width, h, mask="auto")
+            if not self.measure:
+                self.c.drawImage(r, x, H - top - h, width, h, mask="auto")
             return h
         size = 15 if small else 34
         self.t.draw(x, top + size, "NAFA", size, NAVY)
@@ -580,7 +599,7 @@ class Doc:
                     page()
                 for j, (name, data, note) in enumerate(dishes[i:i + 2]):
                     x = LEFT + j * (GAL_W + GAL_GAP)
-                    img = _cover_crop(data, GAL_W, GAL_H)
+                    img = None if self.measure else self._crop(data, GAL_W, GAL_H)
                     if img is not None:
                         self.c.drawImage(img, x, H - self.y - GAL_H, GAL_W, GAL_H)
                     line = t.wrap(name, 10.8, GAL_W)[0]
@@ -692,7 +711,7 @@ class Doc:
 def render(snapshot: dict, photos: dict[str, bytes] | None = None, plans: dict[int, Package] | None = None) -> bytes:
     """Agentin təklif snapshot-u → PDF baytları. `photos` — {dish_key: JPEG} (şəkilli təklif; app/dishes.py),
     `plans` — menyu planından qurulmuş paketlər (app/package_menus.py). Footer-də "02 / 03" üçün iki keçid."""
-    first = Doc(snapshot, photos=photos, plans=plans)
+    first = Doc(snapshot, photos=photos, plans=plans, measure=True)
     first.build()
     return Doc(snapshot, total=len(first.pages), photos=photos, plans=plans).build()
 
@@ -704,8 +723,9 @@ class MenuDoc(Doc):
     """Nümunə SeaPort_MediumPlus_Menu_Dish_Photos.pdf: üz qabığı, (istəyə görə) həftəlik menyu, yemək şəkilləri."""
 
     def __init__(self, pkg: Package, photos: dict[str, bytes], brand: str = "seaport", note: str = "",
-                 schedule: bool = True, total: int = 0):
-        super().__init__({"brand": brand, "language": "az", "lines": [{}]}, total=total, photos=photos, plans={0: pkg})
+                 schedule: bool = True, total: int = 0, measure: bool = False):
+        super().__init__({"brand": brand, "language": "az", "lines": [{}]}, total=total, photos=photos, plans={0: pkg},
+                         measure=measure)
         self.note, self.schedule = note, schedule
         self.weekly = pkg.weekly
 
@@ -791,6 +811,6 @@ def _unique_groups(p: Package) -> list[Group]:
 
 def render_menu(pkg: Package, photos: dict[str, bytes], brand: str = "seaport", note: str = "",
                 schedule: bool = True) -> bytes:
-    first = MenuDoc(pkg, photos, brand, note, schedule)
+    first = MenuDoc(pkg, photos, brand, note, schedule, measure=True)
     first.build()
     return MenuDoc(pkg, photos, brand, note, schedule, total=len(first.pages)).build()

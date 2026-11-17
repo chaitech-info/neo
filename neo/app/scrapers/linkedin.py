@@ -158,7 +158,7 @@ class LinkedInScraper(BaseScraper):
         }
         resp = self.post(
             APIFY_RUN_SYNC_URL,
-            params={"token": self.api_token},
+            headers={"Authorization": f"Bearer {self.api_token}"},  # URL-də olsa loglara düşür
             json=payload,
             timeout=120.0,
         )
