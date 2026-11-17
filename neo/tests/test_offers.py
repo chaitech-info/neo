@@ -205,7 +205,7 @@ def test_weekly_menu_pdf_matches_the_three_page_design():
     assert pkg.price == "6 AZN" and doc.title() == "Standard Corporate Lunch Menu"
     pdf = offer_pdf.render(WEEKLY)
     assert pdf.startswith(b"%PDF") and _pages(pdf) == 3
-    assert b"Caladea" in pdf and b"NotoSerif" in pdf  # ə Caladea-da yoxdur — Noto Serif ilə
+    assert b"NotoSerif" in pdf and b"Caladea" not in pdf  # bütün mətn bir şriftdə — ə sözün içində fərqlənmir
 
 
 def test_illustrated_pdf_keeps_the_menu_and_adds_photos_at_the_end(monkeypatch):
@@ -346,4 +346,22 @@ def test_created_offer_preview_uses_neo_design(app_db, monkeypatch):
                                                                           "offer_id": OK["offer_id"]})
     d = TestClient(web.app).post("/api/offers", json={"brand": "seaport", "message": "a"}).json()
     pdf = base64.b64decode(d["pdf_base64"])
-    assert pdf.startswith(b"%PDF") and _pages(pdf) == 3 and b"Caladea" in pdf
+    assert pdf.startswith(b"%PDF") and _pages(pdf) == 3 and b"NotoSerif" in pdf
+
+
+def test_created_offer_preview_uses_the_full_offer_when_lines_have_no_menu(app_db, monkeypatch):
+    """Agentin "yarat" cavabında sətir var, menyu yoxdur — sağdakı önizləmə tam təklifdən qurulmalıdır
+    (əvvəl boş "Menyu" səhifəsi çıxırdı, düzgün PDF yalnız tarixçədə idi)."""
+    import base64
+
+    short = {**OK, "lines": [{"package_id": "standart", "name": "Standart", "unit_price": "8.00"}]}
+    fetched = []
+    monkeypatch.setattr(agent, "create_offer", lambda body, client=None: dict(short))
+    monkeypatch.setattr(agent, "get_offer", lambda oid, client=None: fetched.append(oid) or WEEKLY)
+    drawn = []
+    original = offer_pdf.Doc.day_block
+    monkeypatch.setattr(offer_pdf.Doc, "day_block", lambda self, b: (drawn.append(b), original(self, b))[1])
+    r = TestClient(web.app).post("/api/offers", json={"brand": "seaport", "message": "a", "package_id": "standart"})
+    assert r.status_code == 200 and fetched == ["SP-20261016-003"]
+    pdf = base64.b64decode(r.json()["pdf_base64"])
+    assert _pages(pdf) == 3 and drawn  # həftəlik menyu çəkilib

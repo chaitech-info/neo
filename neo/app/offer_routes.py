@@ -101,7 +101,11 @@ def render_pdf(snapshot: dict, pictures: bool = False) -> bytes:
 
 
 def _render_base64(data: dict, pictures: bool = False) -> str:
-    snapshot = data if data.get("lines") else agent.get_offer(str(data["offer_id"]))
+    # Agentin "yarat" cavabında sətirlər menyusuz gəlir — PDF boş menyu ilə qurulurdu (tarixçə isə düzgün idi,
+    # çünki tam təklifi get_offer ilə alır). Menyusu olmayan sətir varsa tam təklif götürülür.
+    lines = [l for l in data.get("lines") or [] if isinstance(l, dict)]
+    full = lines and all(l.get("menu") for l in lines)
+    snapshot = data if full else agent.get_offer(str(data["offer_id"]))
     return base64.b64encode(render_pdf(snapshot, pictures)).decode()
 
 

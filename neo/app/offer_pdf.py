@@ -79,18 +79,19 @@ def _covered(font: str) -> set[int]:
     return set(pdfmetrics.getFont(font).face.charWidths)
 
 
-# --- Mətn: Caladea + Noto Serif ehtiyat şrifti ---------------------------------------------------
+# --- Mətn: Noto Serif (Caladea — yalnız ehtiyat) -------------------------------------------------
 
 
 class Text:
-    """Caladea-da olmayan simvolları (ə, Ə, kiril) Noto Serif-ə keçirən kiçik mətn köməkçisi."""
+    """Bütün mətn Noto Serif-lədir: Azərbaycan əlifbasının hamısı (ə, Ə, ğ, ı, ş …) və kiril bir şriftdədir.
+    Əvvəl əsas şrift Caladea idi və "ə" sözün ortasında Noto-ya keçirdi — hərf fərqli görünürdü."""
 
     def __init__(self, c: Canvas):
         self.c = c
-        self.cov = {"Cal": _covered("Cal"), "Cal-I": _covered("Cal-I")}
+        self.cov = {"Noto": _covered("Noto"), "Noto-I": _covered("Noto-I")}
 
     def runs(self, s: str, italic: bool) -> list[tuple[str, str]]:
-        main, alt = ("Cal-I", "Noto-I") if italic else ("Cal", "Noto")
+        main, alt = ("Noto-I", "Cal-I") if italic else ("Noto", "Cal")
         cov, out = self.cov[main], []
         for ch in s:
             f = main if ord(ch) in cov or ch == " " else alt
