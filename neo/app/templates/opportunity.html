@@ -171,7 +171,8 @@
         <input type="hidden" name="contact_id" value="{{ draft.contact_id }}">
         <input type="hidden" name="template_id" value="{{ draft.template_id or '' }}">
         <input type="hidden" name="approval_id" value="{{ draft.approval_id or '' }}">
-        {% if draft.approval_id %}<p class="flash" role="status">Bu məktub təsdiqlənib. Fayl əlavə edib göndərə bilərsən; mətni dəyişsən, yenidən təsdiqə göndərmək tövsiyə olunur.</p>{% endif %}
+        <input type="hidden" name="files_from" value="{{ draft.files_from or '' }}">
+        {% if draft.approval_id %}<p class="flash" role="status">Bu məktub təsdiqlənib. Təsdiqə göndərdiyin fayllar aşağıda işarəlidir və məktubla gedəcək; mətni dəyişsən, yenidən təsdiqə göndərmək tövsiyə olunur.</p>{% endif %}
         {% if draft.revised %}<p class="flash" role="status">Məktub göstərişinə görə yenidən yazıldı — yoxla.</p>{% endif %}
         <div class="kw-row" style="margin-top:0">
           <label class="kw-f">Kimə<input type="email" name="to" required value="{{ draft.to }}" list="em-to" placeholder="ad@sirket.az"></label>
@@ -186,12 +187,22 @@
           </label>
           <button class="mc-btn" type="submit" formaction="/opportunities/{{ opp.id }}/email/draft" formenctype="application/x-www-form-urlencoded" formnovalidate data-busy="Yenidən yazılır…">Yenidən yarat</button>
         </div>
-        <label class="kw-f">Fayl əlavə et (istəyə görə: təklif, kataloq, menyu — ən çox 5 fayl, cəmi 4 MB)<input type="file" name="files" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.zip,.txt,.csv"></label>
+        {% if draft.files %}
+        <fieldset class="em-files">
+          <legend>Təsdiqə göndərilmiş fayllar (işarəli olanlar məktubla gedir)</legend>
+          {% for f in draft.files %}
+          <label class="kw-chk"><input type="checkbox" name="keep_files" value="{{ f.id }}" checked>
+            <span>{{ f.name }} <small>{{ f.size }}</small></span>
+            <a href="/approvals/files/{{ f.id }}" target="_blank" rel="noopener">aç ↗</a></label>
+          {% endfor %}
+        </fieldset>
+        {% endif %}
+        <label class="kw-f">Fayl əlavə et (istəyə görə: təklif, kataloq, menyu — ən çox 5 fayl, cəmi 4 MB). “Təsdiqə göndər” bassan, fayllar da təsdiqləyiciyə gedir.<input type="file" name="files" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.zip,.txt,.csv"></label>
         {% if page_error %}<p class="od-hint">Fayl seçmişdinsə, yenidən seç — səhv olanda fayllar formada qalmır.</p>{% endif %}
         {% if not default_sender and not mailbox_list %}<p class="od-hint">Poçt hələ qoşulmayıb (SMTP_USER / SMTP_PASSWORD və ya Ayarlar → Poçt qutuları) — göndərmə xəta verəcək.</p>{% endif %}
         <div class="em-act">
           <button class="mc-btn mc-btn-hero" type="submit" data-busy="Göndərilir…">Göndər</button>
-          <button class="mc-btn" type="submit" formaction="/opportunities/{{ opp.id }}/email/approval" formenctype="application/x-www-form-urlencoded" data-busy="Göndərilir…" title="Məktubu təsdiqləyiciyə göndər — təsdiq və ya rədd bildiriş kimi gələcək">Təsdiqə göndər</button>
+          <button class="mc-btn" type="submit" formaction="/opportunities/{{ opp.id }}/email/approval" data-busy="Göndərilir…" title="Məktubu fayllarla birlikdə təsdiqləyiciyə göndər — təsdiq və ya rədd bildiriş kimi gələcək">Təsdiqə göndər</button>
           <a class="mc-btn" href="/opportunities/{{ opp.id }}">Ləğv et</a>
         </div>
         <p class="od-hint">Məktub seçdiyin şirkət poçtundan gedir. Cavab həmin poçta gəlir və “Cavablar” bölməsində görünür; status özü dəyişir (müsbət → Potensial müştəri, mənfi → İmtina).</p>
@@ -296,6 +307,7 @@
           <span class="ct-role">{{ a.to_address }} · göndərdi: {{ users[a.requested_by_id].full_name if a.requested_by_id in users else '—' }} · {{ a.created_at|baku_time }}</span>
           <span class="ct-role"><span class="ap ap-{{ a.status }}">{{ approval_names[a.status] }}</span>{% if a.decided_by_id %} · {{ users[a.decided_by_id].full_name if a.decided_by_id in users else '' }} · {{ a.decided_at|baku_time }}{% endif %}{% if a.sent_at %} · göndərilib {{ a.sent_at|baku_time }}{% endif %}</span>
           {% if a.decision_note %}<span class="ct-role">Qeyd: {{ a.decision_note }}</span>{% endif %}
+          {% if approval_files.get(a.id) %}<span class="ct-role ap-files">Fayllar: {% for f in approval_files[a.id] %}<a href="/approvals/files/{{ f.id }}" target="_blank" rel="noopener">{{ f.name }}</a> <small>{{ f.size }}</small>{% if not loop.last %} · {% endif %}{% endfor %}</span>{% endif %}
           <details class="od-more"><summary>Mətni göstər</summary><div class="raw">{{ a.body }}</div></details>
         </div>
         {% if can_edit and a.status == 'approved' and not a.sent_at %}

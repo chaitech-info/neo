@@ -15,7 +15,11 @@ SeaPort_MediumPlus_Menu_Dish_Photos.pdf kimi, kateqoriya-kateqoriya, iki sütund
 Paketin menyu planı varsa (app/package_menus.py), menyu plandan qurulur: yemək vaxtları, rotasiya həftələri
 və yeməyin əlavə sahələri (porsiya, kalori …) adın altında kiçik yazı ilə.
 
-Şrift Caladea-dır (nümunə PDF-dəki kimi); onda olmayan hərflər (ə, Ə, kiril) Noto Serif ilə yazılır.
+Şrift Noto Serif-dir (bax `Text`); Caladea yalnız ehtiyatdır.
+
+Dizaynlar (`DESIGNS`, istifadəçi formda seçir): klassik, gecə, yaşıl, isti, minimal — məzmun və düzüm eynidir,
+rənglər, şrift (Noto Serif / Noto Sans) və səhifə bəzəyi fərqlidir. "Təklif məlumatları"nda həmişə yazılır:
+qiymət 1 nəfərlik yemək üçündür və ƏDV qiymətə daxil deyil (agent ƏDV-ni daxil sayıbsa — daxildir).
 """
 from __future__ import annotations
 
@@ -44,16 +48,70 @@ LEFT, RIGHT = 56.5, A4[0] - 56.5
 COL2, COL3 = 198.0, 391.0           # sağ sütunlar (üz qabığı / bölmə başlıqları; gün blokunda 223 və 391)
 DAY_COLS = (LEFT, 223.5, 391.0)
 FOOTER_RULE, BODY_BOTTOM = 779.0, 760.0
+COVER_FILL_TOP = 292.0              # tünd üz qabığı: bu xətdən aşağı rəngli fon, yuxarıda loqo ağ fonda
 LEAD = 15.8                         # menyu maddələrinin sətir aralığı
 GAL_W, GAL_H, GAL_GAP = 232.0, 173.0, 18.0   # "Yemək şəkilləri": 2 sütun, şəkil 232×173 pt (nümunədəki kimi)
 GAL_ROW = 204.0                              # şəkil + ad + boşluq
 NOTE_LEAD = 11.0                             # yeməyin əlavə sahələri sətri
 
-NAVY = HexColor("#1a365d")
-TEAL = HexColor("#00a0b2")
-GREY = HexColor("#6b7488")
-RULE = HexColor("#dfe4eb")
 LOGO_NAVY = HexColor("#2c3e86")
+WHITE = HexColor("#ffffff")
+
+
+@dataclass(frozen=True)
+class Palette:
+    ink: Any       # əsas mətn
+    accent: Any    # vurğu (bölmə adları, rəqəmlər)
+    muted: Any     # köməkçi mətn
+    line: Any      # ayırıcı xətlər
+
+
+def _pal(ink: str, accent: str, muted: str, line: str) -> Palette:
+    return Palette(HexColor(ink), HexColor(accent), HexColor(muted), HexColor(line))
+
+
+@dataclass(frozen=True)
+class Design:
+    """Təklif PDF-inin dizaynı (istifadəçi Qiymət təklifi formunda seçir). Məzmun və səhifə düzümü eynidir;
+    rənglər, şrift və səhifə bəzəyi (üz qabığı, zolaq, çərçivə, alt zolaq) fərqlənir."""
+    code: str
+    name: str                      # formdakı ad
+    hint: str                      # formdakı qısa izah
+    body: Palette
+    sans: bool = False             # Noto Sans (yoxsa Noto Serif)
+    cover: Palette | None = None   # üz qabığının rəngləri (tünd fonda açıq mətn); None — body
+    cover_fill: Any = None         # üz qabığının aşağı hissəsinin fonu (loqo ağ hissədə qalır)
+    page_fill: Any = None          # bütün səhifələrin fonu
+    side_band: Any = None          # sol kənarda şaquli zolaq
+    top_bar: Any = None            # səhifənin yuxarısında zolaq
+    frame: Any = None              # üz qabığında çərçivə
+    foot_fill: Any = None          # menyu səhifələrinin alt zolağı (səhifə nömrəsi onun üstündə)
+    swatch: tuple[str, str] = ("#ffffff", "#000000")   # formdakı nümunə rənglər (fon, vurğu)
+
+
+DESIGNS: dict[str, Design] = {d.code: d for d in (
+    Design("classic", "Klassik", "tünd göy və firuzəyi, ağ fon",
+           _pal("#1a365d", "#00a0b2", "#6b7488", "#dfe4eb"), swatch=("#1a365d", "#00a0b2")),
+    Design("midnight", "Gecə", "tünd üz qabığı, qızılı vurğu",
+           _pal("#16233a", "#a9812f", "#6c7484", "#e3ddd0"),
+           cover=_pal("#ffffff", "#d9b56a", "#b4bdcc", "#33435e"), cover_fill=HexColor("#16233a"),
+           foot_fill=HexColor("#16233a"), swatch=("#16233a", "#d9b56a")),
+    Design("garden", "Yaşıl", "yaşıl zolaq, müasir şrift",
+           _pal("#1f3d2b", "#5f8f2f", "#66756b", "#dbe5d6"), sans=True, side_band=HexColor("#1f3d2b"),
+           swatch=("#1f3d2b", "#8fbf4a")),
+    Design("terra", "İsti", "krem fon, kərpici vurğu, çərçivə",
+           _pal("#3b2a20", "#b8532c", "#8a7868", "#e4d8c4"), page_fill=HexColor("#fbf6ec"),
+           frame=HexColor("#b8532c"), swatch=("#fbf6ec", "#b8532c")),
+    Design("mono", "Minimal", "qara-ağ, narıncı xətt, müasir şrift",
+           _pal("#15181d", "#e8590c", "#6b7280", "#e2e5e9"), sans=True, top_bar=HexColor("#e8590c"),
+           swatch=("#15181d", "#e8590c")),
+)}
+DEFAULT_DESIGN = "classic"
+
+
+def design_code(value: Any) -> str:
+    """Tanınmayan / boş dəyər → klassik dizayn."""
+    return value if isinstance(value, str) and value in DESIGNS else DEFAULT_DESIGN
 
 WEEKDAYS = [  # (az, en, ru)
     ("Bazar ertəsi", "Monday", "Понедельник"), ("Çərşənbə axşamı", "Tuesday", "Вторник"),
@@ -70,7 +128,8 @@ def _register_fonts() -> None:
     if _fonts_ready:
         return
     for name, file in (("Cal", "Caladea-Regular"), ("Cal-I", "Caladea-Italic"),
-                       ("Noto", "NotoSerif-Regular"), ("Noto-I", "NotoSerif-Italic")):
+                       ("Noto", "NotoSerif-Regular"), ("Noto-I", "NotoSerif-Italic"),
+                       ("Sans", "NotoSans-Regular"), ("Sans-I", "NotoSans-Italic")):
         pdfmetrics.registerFont(TTFont(name, str(STATIC / "fonts" / f"{file}.ttf")))
     _fonts_ready = True
 
@@ -86,12 +145,14 @@ class Text:
     """Bütün mətn Noto Serif-lədir: Azərbaycan əlifbasının hamısı (ə, Ə, ğ, ı, ş …) və kiril bir şriftdədir.
     Əvvəl əsas şrift Caladea idi və "ə" sözün ortasında Noto-ya keçirdi — hərf fərqli görünürdü."""
 
-    def __init__(self, c: Canvas):
+    def __init__(self, c: Canvas, sans: bool = False, color: Any = None):
         self.c = c
-        self.cov = {"Noto": _covered("Noto"), "Noto-I": _covered("Noto-I")}
+        self.fonts = ("Sans", "Sans-I") if sans else ("Noto", "Noto-I")   # dizayna görə: Noto Sans / Noto Serif
+        self.cov = {f: _covered(f) for f in self.fonts}
+        self.color = color      # rəng verilməyəndə (Doc palitraya görə dəyişir)
 
     def runs(self, s: str, italic: bool) -> list[tuple[str, str]]:
-        main, alt = ("Noto-I", "Cal-I") if italic else ("Noto", "Cal")
+        main, alt = (self.fonts[1], "Cal-I") if italic else (self.fonts[0], "Cal")
         cov, out = self.cov[main], []
         for ch in s:
             f = main if ord(ch) in cov or ch == " " else alt
@@ -104,9 +165,10 @@ class Text:
     def width(self, s: str, size: float, italic: bool = False, tracking: float = 0) -> float:
         return sum(pdfmetrics.stringWidth(t, f, size) for f, t in self.runs(s, italic)) + tracking * max(len(s) - 1, 0)
 
-    def draw(self, x: float, y: float, s: str, size: float, color=NAVY, italic: bool = False,
+    def draw(self, x: float, y: float, s: str, size: float, color=None, italic: bool = False,
              tracking: float = 0, align: str = "left") -> float:
         """y — yuxarıdan baza xətti. Eni qaytarır."""
+        color = color if color is not None else self.color
         w = self.width(s, size, italic, tracking)
         if align == "right":
             x -= w
@@ -233,9 +295,22 @@ def menu_items(snapshot: dict) -> list[tuple[str, str]]:
     return out
 
 
-@functools.lru_cache(maxsize=4)
-def _logo(name: str) -> ImageReader:
-    return ImageReader(str(STATIC / "offer" / name))
+@functools.lru_cache(maxsize=8)
+def _logo(name: str, tint: str = "") -> ImageReader:
+    """Loqo. `tint` — rəngli səhifə fonu ("#fbf6ec"): loqonun ağ fonu səhifənin rənginə qarışsın deyə şəkil
+    fonla vurulur (multiply) — ağ → fon rəngi, loqonun rəngləri demək olar dəyişmir, kənarlar hamar qalır."""
+    path = STATIC / "offer" / name
+    if not tint:
+        return ImageReader(str(path))
+    from PIL import Image, ImageChops
+
+    img = Image.open(path).convert("RGBA")
+    flat = Image.new("RGB", img.size, "white")
+    flat.paste(img, mask=img.split()[3])
+    out = io.BytesIO()
+    ImageChops.multiply(flat, Image.new("RGB", img.size, tint)).save(out, "PNG")
+    out.seek(0)
+    return ImageReader(out)
 
 
 def _cover_crop(data: bytes, w: float, h: float) -> ImageReader | None:
@@ -331,11 +406,14 @@ def summary_line(pkg: Package, daily: bool = True) -> str:
 
 class Doc:
     def __init__(self, snapshot: dict, total: int = 0, photos: dict[str, bytes] | None = None,
-                 plans: dict[int, Package] | None = None, measure: bool = False):
+                 plans: dict[int, Package] | None = None, measure: bool = False, design: str = DEFAULT_DESIGN):
         """`plans` — {snapshot-dakı sətrin indeksi: menyu planından qurulmuş paket} (app/package_menus.py).
-        `measure` — yalnız səhifə sayı üçün keçid: şəkillər çəkilmir (yerləri eynidir, səhifələr eyni bölünür)."""
+        `measure` — yalnız səhifə sayı üçün keçid: şəkillər çəkilmir (yerləri eynidir, səhifələr eyni bölünür).
+        `design` — DESIGNS-dəki kod (rənglər, şrift, səhifə bəzəyi)."""
         _register_fonts()
         self.snap, self.total, self.measure = snapshot, total, measure
+        self.design = DESIGNS[design_code(design)]
+        self.pal = self.design.body
         self.photo_mode = False  # şəkilli təklif: həftəlik menyu və günlər heç yerdə yazılmır (build)
         self.crops: dict[tuple[int, float, float], ImageReader | None] = {}
         self.photos = photos or {}
@@ -350,9 +428,47 @@ class Doc:
         self.c = Canvas(self.buf, pagesize=A4)
         self.c.setTitle(self.title())
         self.c.setAuthor("Seaport Catering" if self.brand == "seaport" else "NAFA")
-        self.t = Text(self.c)
+        self.t = Text(self.c, self.design.sans, self.pal.ink)
         self.pages: list[Callable[[int, int], None]] = []
         self.y = 0.0
+
+    # Rənglər: cari palitra (üz qabığında dizaynın `cover` palitrası, qalan səhifələrdə `body`)
+    ink = property(lambda self: self.pal.ink)
+    accent = property(lambda self: self.pal.accent)
+    muted = property(lambda self: self.pal.muted)
+    line = property(lambda self: self.pal.line)
+
+    def use(self, pal: Palette) -> None:
+        self.pal = pal
+        self.t.color = pal.ink
+
+    def fill(self, color: Any, x: float, top: float, w: float, h: float) -> None:
+        self.c.setFillColor(color)
+        self.c.rect(x, H - top - h, w, h, stroke=0, fill=1)
+
+    def decorate(self, cover: bool = False) -> None:
+        """Səhifənin bəzəyi — məzmundan əvvəl çəkilir: fon, zolaqlar, çərçivə, alt zolaq."""
+        d = self.design
+        if d.page_fill is not None:
+            self.fill(d.page_fill, 0, 0, W, H)
+        if cover and d.cover_fill is not None:
+            self.fill(d.cover_fill, 0, COVER_FILL_TOP, W, H - COVER_FILL_TOP)
+        if d.side_band is not None:
+            self.fill(d.side_band, 0, 0, 22 if cover else 9, H)
+        if d.top_bar is not None:
+            self.fill(d.top_bar, 0, 0, W, 20 if cover else 7)
+        if cover and d.frame is not None:
+            self.c.setStrokeColor(d.frame)
+            for inset, width in ((24, 1.1), (29, 0.4)):
+                self.c.setLineWidth(width)
+                self.c.rect(inset, inset, W - 2 * inset, H - 2 * inset, stroke=1, fill=0)
+        if not cover and d.foot_fill is not None:
+            self.fill(d.foot_fill, 0, FOOTER_RULE, W, H - FOOTER_RULE)
+
+    def fit(self, s: str, size: float, width: float, italic: bool = False) -> float:
+        """Böyük başlıq sətrə sığmırsa (uzun paket adı, enli şrift) — sığana qədər kiçilir."""
+        w = self.t.width(s, size, italic)
+        return size if w <= width else max(size * width / w, size * 0.55)
 
     def title(self) -> str:
         if len(self.packages) == 1 and self.packages[0].name_en:
@@ -383,47 +499,51 @@ class Doc:
 
     def logo(self, x: float, top: float, width: float, small: bool) -> float:
         if self.brand == "seaport":
-            r = _logo("seaport-mark.png" if small else "seaport-logo.png")
+            fill = self.design.page_fill
+            tint = "#%02x%02x%02x" % tuple(round(v * 255) for v in fill.rgb()) if fill is not None else ""
+            r = _logo("seaport-mark.png" if small else "seaport-logo.png", tint)
             iw, ih = r.getSize()
             h = width * ih / iw
             if not self.measure:
                 self.c.drawImage(r, x, H - top - h, width, h, mask="auto")
             return h
         size = 15 if small else 34
-        self.t.draw(x, top + size, "NAFA", size, NAVY)
+        self.t.draw(x, top + size, "NAFA", size, self.ink)
         return size + 4
 
-    def rule(self, y: float, color=RULE, width: float = 0.8, x1: float = LEFT, x2: float = RIGHT) -> None:
-        self.c.setStrokeColor(color)
+    def rule(self, y: float, color=None, width: float = 0.8, x1: float = LEFT, x2: float = RIGHT) -> None:
+        self.c.setStrokeColor(color if color is not None else self.line)
         self.c.setLineWidth(width)
         self.c.line(x1, H - y, x2, H - y)
 
     def cover(self) -> None:
         t = self.t
+        self.decorate(cover=True)
         self.logo(LEFT - 1, 59, 136, small=False)
         if self.brand == "seaport":
             t.draw(LEFT + 67, 222, "Dadlı Həyatın Fəlsəfəsi", 12.5, LOGO_NAVY, align="center")
         if self.snap.get("example"):
-            t.draw(RIGHT, 70, "NÜMUNƏ PAKET", 8, GREY, tracking=1.2, align="right")
-        self.rule(351, TEAL, 0.9, LEFT, LEFT + 51)
+            t.draw(RIGHT, 70, "NÜMUNƏ PAKET", 8, self.muted, tracking=1.2, align="right")
+        self.use(self.design.cover or self.design.body)   # loqodan aşağı: üz qabığının palitrası
+        self.rule(351, self.accent, 0.9, LEFT, LEFT + 51)
         y = 410
         for line in t.wrap(self.title().upper(), 38, RIGHT - LEFT - 20):
-            t.draw(LEFT - 2, y, line, 38, NAVY)
+            t.draw(LEFT - 2, y, line, 38, self.ink)
             y += 42
         y += 22
         weekly = self.weekly and not self.photo_mode
         t.draw(LEFT, y, "Weekly Executive Dining Proposal" if weekly else "Corporate Dining Proposal", 14.5,
-               NAVY, italic=True)
+               self.ink, italic=True)
         span = self.span()
         second = span[1] if span else (f"Prepared for {self.snap['customer_name']}" if self.snap.get("customer_name") else "")
         if second:
-            t.draw(LEFT, y + 20, second, 14.5, GREY, italic=True)
+            t.draw(LEFT, y + 20, second, 14.5, self.muted, italic=True)
 
         self.rule(647)
         y = 683
         if len(self.packages) == 1:
             p = self.packages[0]
-            t.draw(LEFT, y, f"{p.name} paket", 14.5, TEAL)
+            t.draw(LEFT, y, f"{p.name} paket", 14.5, self.accent)
             desc = p.description or (
                 "Hər gün üçün ayrıca tərtib olunmuş, sevilən klassik yeməklərdən ibarət balanslı nahar menyusu. "
                 "Komandanız üçün sadə, səliqəli və etibarlı gündəlik həll." if p.weekly and not self.photo_mode else
@@ -431,44 +551,50 @@ class Doc:
                 "Komandanız üçün sadə, səliqəli və etibarlı gündəlik həll.")
             yy = y
             for line in t.wrap(desc, 11, 292)[:4]:
-                t.draw(COL2, yy, line, 11, NAVY)
+                t.draw(COL2, yy, line, 11, self.ink)
                 yy += 16.5
             summary = summary_line(p, daily=not self.photo_mode)
             if summary:
                 for line in t.wrap(summary, 8.5, 300)[:2]:
-                    t.draw(COL2, yy + 10, line, 8.5, GREY)
+                    t.draw(COL2, yy + 10, line, 8.5, self.muted)
                     yy += 12
         else:
-            t.draw(LEFT, y, "Paketlər", 14.5, TEAL)
+            t.draw(LEFT, y, "Paketlər", 14.5, self.accent)
             yy = y
             for p in self.packages[:5]:
-                t.draw(COL2, yy, p.name, 11, NAVY)
+                t.draw(COL2, yy, p.name, 11, self.ink)
                 if p.price:
-                    t.draw(RIGHT, yy, f"{p.price} / {p.unit}" if p.unit else p.price, 11, GREY, align="right")
+                    t.draw(RIGHT, yy, f"{p.price} / {p.unit}" if p.unit else p.price, 11, self.muted, align="right")
                 yy += 16.5
 
         left, right = self.running_head(), (span[0] if span else (self.snap.get("customer_name") or ""))
 
         def footer(n: int, total: int) -> None:
-            t.draw(LEFT, 795, left, 7.5, GREY, tracking=0.5)
+            t.draw(LEFT, 795, left, 7.5, self.muted, tracking=0.5)
             if right:
-                t.draw(RIGHT, 795, right, 7.5, GREY, tracking=0.5, align="right")
+                t.draw(RIGHT, 795, right, 7.5, self.muted, tracking=0.5, align="right")
         self.finish_page(footer)
+        self.use(self.design.body)
 
     def page_header(self) -> None:
+        self.decorate()
         self.logo(LEFT, 45, 47, small=True)
-        self.t.draw(RIGHT, 69, self.running_head(), 8.5, GREY, italic=True, align="right")
-        self.rule(83, NAVY, 0.7)
+        self.t.draw(RIGHT, 69, self.running_head(), 8.5, self.muted, italic=True, align="right")
+        self.rule(83, self.ink, 0.7)
         self.y = 106.0
 
     def body_footer(self) -> Callable[[int, int], None]:
         label = self.title()
 
         def footer(n: int, total: int) -> None:
-            self.rule(FOOTER_RULE)
-            self.t.draw(LEFT, 801, label, 7.5, GREY, tracking=0.4)
-            w = self.t.draw(RIGHT, 801, f" / {total:02d}", 7.5, GREY, align="right")
-            self.t.draw(RIGHT - w, 801, f"{n:02d}", 10, NAVY, align="right")
+            # Alt zolaqlı dizaynda (decorate) yazı zolağın üstündədir — üz qabığının açıq rəngləri ilə
+            on_fill = self.design.foot_fill is not None and self.design.cover is not None
+            pal = self.design.cover if on_fill else self.pal
+            if not on_fill:
+                self.rule(FOOTER_RULE)
+            self.t.draw(LEFT, 801, label, 7.5, pal.muted, tracking=0.4)
+            w = self.t.draw(RIGHT, 801, f" / {total:02d}", 7.5, pal.muted, align="right")
+            self.t.draw(RIGHT - w, 801, f"{n:02d}", 10, pal.ink, align="right")
         return footer
 
     def new_body_page(self) -> None:
@@ -481,10 +607,10 @@ class Doc:
             self.new_body_page()
 
     def section_title(self, eyebrow: str, title: str, right: str = "") -> None:
-        self.t.draw(LEFT, self.y + 17, eyebrow, 11.5, TEAL, italic=True)
+        self.t.draw(LEFT, self.y + 17, eyebrow, 11.5, self.accent, italic=True)
         if right:
-            self.t.draw(RIGHT, self.y + 17, right, 8, GREY, tracking=0.6, align="right")
-        self.t.draw(LEFT - 2, self.y + 66, title, 44, NAVY)
+            self.t.draw(RIGHT, self.y + 17, right, 8, self.muted, tracking=0.6, align="right")
+        self.t.draw(LEFT - 2, self.y + 66, title, self.fit(title, 44, RIGHT - LEFT), self.ink)
         self.y += 99
         self.rule(self.y)
 
@@ -526,23 +652,23 @@ class Doc:
         self.ensure(self.block_height(b))
         t = self.t
         y = self.y + 29
-        w = t.draw(LEFT - 1, y, b.title, 18.5, NAVY)
+        w = t.draw(LEFT - 1, y, b.title, 18.5, self.ink)
         if b.accent:
-            t.draw(LEFT + w + 12, y, b.accent, 10.5, TEAL, italic=True)
+            t.draw(LEFT + w + 12, y, b.accent, 10.5, self.accent, italic=True)
         top = y + 22
         bottom = top
         for x, col in zip(DAY_COLS, self.columns(b)):
             yy = top
             for g in col:
                 if g.label:
-                    t.draw(x, yy, g.label, 8.5, GREY, italic=True)
+                    t.draw(x, yy, g.label, 8.5, self.muted, italic=True)
                     yy += 15
                 for lines, notes, _ in self.item_rows(g):
                     for line in lines:
-                        t.draw(x, yy, line, 11, NAVY)
+                        t.draw(x, yy, line, 11, self.ink)
                         yy += LEAD
                     for line in notes:
-                        t.draw(x, yy - 3, line, 8.5, GREY)
+                        t.draw(x, yy - 3, line, 8.5, self.muted)
                         yy += NOTE_LEAD
                 yy += 5
             bottom = max(bottom, yy)
@@ -578,9 +704,10 @@ class Doc:
         running = self.running_head
 
         def page() -> None:
+            self.decorate()
             self.logo(LEFT, 45, 50, small=True)
-            t.draw(RIGHT, 66, header, 8.5, GREY, italic=True, align="right")
-            self.rule(83, NAVY, 0.7)
+            t.draw(RIGHT, 66, header, 8.5, self.muted, italic=True, align="right")
+            self.rule(83, self.ink, 0.7)
             self.y = 100.0
 
         self.running_head = lambda: header     # type: ignore[method-assign]
@@ -593,9 +720,9 @@ class Doc:
                 self.finish_page(self.body_footer())
                 page()
             head = self.y + (6 if first or self.y <= 100 else 10)
-            w = t.draw(LEFT, head + 17.5, az, 17.5, NAVY)
+            w = t.draw(LEFT, head + 17.5, az, 17.5, self.ink)
             if en:
-                t.draw(LEFT + w + 9, head + 17.5, en, 9.5, TEAL, italic=True)
+                t.draw(LEFT + w + 9, head + 17.5, en, 9.5, self.accent, italic=True)
             self.rule(head + 27)
             self.y = head + 46
             first = False
@@ -609,9 +736,9 @@ class Doc:
                     if img is not None:
                         self.c.drawImage(img, x, H - self.y - GAL_H, GAL_W, GAL_H)
                     line = t.wrap(name, 10.8, GAL_W)[0]
-                    t.draw(x, self.y + GAL_H + 15, line, 10.8, NAVY)
+                    t.draw(x, self.y + GAL_H + 15, line, 10.8, self.ink)
                     if note:
-                        t.draw(x, self.y + GAL_H + 27, t.wrap(note, 8.5, GAL_W)[0], 8.5, GREY)
+                        t.draw(x, self.y + GAL_H + 27, t.wrap(note, 8.5, GAL_W)[0], 8.5, self.muted)
                 self.y += GAL_ROW
             self.y -= 4
         self.running_head = running             # type: ignore[method-assign]
@@ -624,18 +751,18 @@ class Doc:
         self.ensure(40 + rows * 42)
         t = self.t
         top = self.y + 36
-        t.draw(LEFT, top, "Gündəlik seçim", 15.5, NAVY)
-        t.draw(LEFT, top + 16, "Daily selection", 8, GREY, tracking=0.5)
+        t.draw(LEFT, top, "Gündəlik seçim", 15.5, self.ink)
+        t.draw(LEFT, top + 16, "Daily selection", 8, self.muted, tracking=0.5)
         xs = (COL2, COL2 + 114, COL2 + 228)
         for i, (n, label) in enumerate(sel):
             x, y = xs[i % 3], top + (i // 3) * 42
             if n is not None:
-                t.draw(x, y + 6, str(n), 26, TEAL)
+                t.draw(x, y + 6, str(n), 26, self.accent)
                 for j, line in enumerate(t.wrap(label, 10.5, 75)[:2]):
-                    t.draw(x + 30, y + 3 + j * 13, line, 10.5, NAVY)
+                    t.draw(x + 30, y + 3 + j * 13, line, 10.5, self.ink)
             else:
                 for j, line in enumerate(t.wrap(label, 10.5, 105)[:2]):
-                    t.draw(x, y - 2 + j * 13, line, 10.5, NAVY)
+                    t.draw(x, y - 2 + j * 13, line, 10.5, self.ink)
         self.y = top + rows * 42 + 18
         self.rule(self.y)
 
@@ -643,51 +770,75 @@ class Doc:
               value: str = "", note: str = "", value_size: float = 17) -> None:
         """Nümunədəki kimi: "Etiket / Label", altında dəyər və xətt (line_y — xəttin yeri)."""
         t = self.t
-        w = t.draw(x, label_y, label, 8.5, NAVY)
+        w = t.draw(x, label_y, label, 8.5, self.ink)
         rest = f" / {label_en}" if label_en else ""
         if rest and w + t.width(rest, 8.5) > width:
-            t.draw(x, label_y + 10.5, label_en, 8.5, GREY)       # uzun etiket — ingiliscəsi ikinci sətirdə
+            t.draw(x, label_y + 10.5, label_en, 8.5, self.muted)       # uzun etiket — ingiliscəsi ikinci sətirdə
         elif rest:
-            t.draw(x + w, label_y, rest, 8.5, GREY)
+            t.draw(x + w, label_y, rest, 8.5, self.muted)
         if value:
             lines = t.wrap(value, value_size, width - 6)[:3]
             step = value_size + 2
             vy = line_y - 9 - (len(lines) - 1) * step
             vw = 0.0
             for k, line in enumerate(lines):
-                vw = t.draw(x, vy + k * step, line, value_size, NAVY)
+                vw = t.draw(x, vy + k * step, line, value_size, self.ink)
             if note:
-                t.draw(x + vw + 10, vy + (len(lines) - 1) * step, note, 9.5, GREY, italic=True)
-        self.rule(line_y, GREY, 0.8, x, x + width)
+                t.draw(x + vw + 10, vy + (len(lines) - 1) * step, note, 9.5, self.muted, italic=True)
+        self.rule(line_y, self.muted, 0.8, x, x + width)
 
     def proposal(self) -> None:
         snap = self.snap
         totals = snap.get("totals") or {}
         notes = [n for n in ([snap.get("notes")] + list(snap.get("assumptions") or [])) if isinstance(n, str) and n.strip()]
-        self.ensure(175)
+        # Qiymət şərti (hər təklifdə yazılır): qiymət 1 nəfərlik yemək üçündür; ƏDV qiymətə daxil deyil
+        # (paket qiymətləri ƏDV xaric saxlanılır). Agent ƏDV-ni qiymətə daxil sayıbsa — "daxildir".
+        vat_in = totals.get("vat_included") is True
+        terms_az = ["Qiymət 1 nəfərlik yemək üçündür.", "Qiymətə ƏDV daxildir." if vat_in else "Qiymətə ƏDV daxil deyil."]
+        terms_en = ["The price is for one person's meal.", "VAT is included." if vat_in else "VAT is not included."]
+        has_total = totals.get("total") not in (None, "")
+        net = totals.get("subtotal") if not vat_in and totals.get("subtotal") not in (None, "") else None
+        if has_total and net is not None and _money(net, self.currency) != _money(totals.get("total"), self.currency):
+            with_vat = _money(totals.get("total"), self.currency)
+            terms_az.append(f"ƏDV ilə cəmi: {with_vat}.")
+            terms_en.append(f"Total with VAT: {with_vat}.")
         t = self.t
+        self.ensure(175)
         r = self.y
-        t.draw(LEFT, r + 38, "Təklif məlumatları", 15.5, NAVY)
-        t.draw(LEFT, r + 54, "Proposal details", 8, GREY, tracking=0.5)
+        t.draw(LEFT, r + 38, "Təklif məlumatları", 15.5, self.ink)
+        t.draw(LEFT, r + 54, "Proposal details", 8, self.muted, tracking=0.5)
         wl, xr = 155, COL2 + 184
         customer = " ".join(x for x in (snap.get("customer_name"), snap.get("contact_person")) if x)
         self.field(COL2, r + 34, r + 72, wl, "Müştəri", "Client", customer, value_size=13)
         if len(self.packages) == 1:
-            p = self.packages[0]
-            unit_note = "gündəlik" if p.weekly or not p.unit else p.unit
-            self.field(xr, r + 39, r + 72, RIGHT - xr, "Qiymət", "Price", p.price, unit_note)
+            self.field(xr, r + 39, r + 72, RIGHT - xr, "Qiymət", "Price", self.packages[0].price, "1 nəfər")
         else:
-            self.field(xr, r + 39, r + 72, RIGHT - xr, "Qiymət", "Price",
+            self.field(xr, r + 39, r + 72, RIGHT - xr, "Qiymət (1 nəfər)", "Price per person",
                        "; ".join(f"{p.name} {p.price}" for p in self.packages if p.price), value_size=11)
-        if totals.get("total") not in (None, ""):
-            vat = "ƏDV daxil" if totals.get("vat_included", True) or totals.get("vat") else "ƏDV-siz"
-            self.field(COL2, r + 108, r + 156, wl, "Cəmi məbləğ", "Total", _money(totals.get("total"), self.currency),
-                       vat, 13)
+        if has_total:
+            if net is not None:
+                amount, vat = _money(net, self.currency), "ƏDV daxil deyil"
+            else:  # yalnız yekun məbləğ var: ƏDV daxildirsə (və ya ayrıca göstərilibsə) elə də yazılır
+                amount = _money(totals.get("total"), self.currency)
+                vat = "ƏDV daxil" if vat_in or totals.get("vat") else "ƏDV daxil deyil"
+            self.field(COL2, r + 108, r + 156, wl, "Cəmi məbləğ", "Total", amount, vat, 13)
         else:
             self.field(COL2, r + 108, r + 156, wl, "Təklifin qüvvədə olma müddəti", "Proposal validity")
         self.field(xr, r + 117, r + 156, RIGHT - xr, "Əlavə şərtlər", "Additional terms", "; ".join(notes),
                    value_size=9.5)
-        self.y = r + 170
+        # Qiymət şərti sol sütunda, başlığın altında (blokun hündürlüyü dəyişmir — səhifə sayı əvvəlki kimi)
+        # Hər cümlə öz sətrində (sığmasa ikiyə bölünür): azərbaycanca, altında ingiliscə
+        yy, width = r + 80, COL2 - LEFT - 8
+        for sentence in terms_az:
+            for line in t.wrap(sentence, 8.5, width)[:2]:
+                t.draw(LEFT, yy, line, 8.5, self.ink)
+                yy += 11
+        yy += 3
+        for sentence in terms_en:
+            for line in t.wrap(sentence, 7.5, width)[:2]:
+                t.draw(LEFT, yy, line, 7.5, self.muted)
+                yy += 9.5
+        self.y = max(r + 170, yy - 4)
 
     def build(self) -> bytes:
         self.photo_mode = bool(self.photos and self.gallery_sections())
@@ -720,12 +871,14 @@ class Doc:
         return self.buf.getvalue()
 
 
-def render(snapshot: dict, photos: dict[str, bytes] | None = None, plans: dict[int, Package] | None = None) -> bytes:
+def render(snapshot: dict, photos: dict[str, bytes] | None = None, plans: dict[int, Package] | None = None,
+           design: str = DEFAULT_DESIGN) -> bytes:
     """Agentin təklif snapshot-u → PDF baytları. `photos` — {dish_key: JPEG} (şəkilli təklif; app/dishes.py),
-    `plans` — menyu planından qurulmuş paketlər (app/package_menus.py). Footer-də "02 / 03" üçün iki keçid."""
-    first = Doc(snapshot, photos=photos, plans=plans, measure=True)
+    `plans` — menyu planından qurulmuş paketlər (app/package_menus.py), `design` — DESIGNS-dəki kod.
+    Footer-də "02 / 03" üçün iki keçid."""
+    first = Doc(snapshot, photos=photos, plans=plans, measure=True, design=design)
     first.build()
-    return Doc(snapshot, total=len(first.pages), photos=photos, plans=plans).build()
+    return Doc(snapshot, total=len(first.pages), photos=photos, plans=plans, design=design).build()
 
 
 # --- Paketin menyu kitabçası (Alətlər → Paketlər → "PDF-ə bax") -----------------------------------
@@ -755,10 +908,10 @@ class MenuDoc(Doc):
         self.logo(LEFT, 61, 129, small=False)
         if self.brand == "seaport":
             t.draw(LEFT + 64, 222, "Dadlı Həyatın Fəlsəfəsi", 12.5, LOGO_NAVY, align="center")
-        self.rule(351, TEAL, 2, LEFT, LEFT + 51)
+        self.rule(351, self.accent, 2, LEFT, LEFT + 51)
         y = 402
         for line in t.wrap(self.title().upper(), 40, RIGHT - LEFT)[:3]:
-            t.draw(LEFT, y, line, 40, NAVY)
+            t.draw(LEFT, y, line, 40, self.ink)
             y += 44.5
         has_photos = bool(self.gallery_sections())
         menu_en, menu_az = ("Weekly Menu", "Həftəlik menyu") if self.weekly else ("Lunch Menu", "Nahar menyusu")
@@ -766,31 +919,31 @@ class MenuDoc(Doc):
               menu_en if self.schedule else "Dish Photography")
         az = (f"{menu_az} və yemək şəkilləri" if self.schedule and has_photos else
               menu_az if self.schedule else "Yemək şəkilləri")
-        t.draw(LEFT, y - 2, en, 14, NAVY, italic=True)
-        t.draw(LEFT, y + 19, az, 14, GREY, italic=True)
+        t.draw(LEFT, y - 2, en, 14, self.ink, italic=True)
+        t.draw(LEFT, y + 19, az, 14, self.muted, italic=True)
         self.rule(647.5)
-        t.draw(LEFT, 677, f"{p.name} paket", 13, TEAL)
+        t.draw(LEFT, 677, f"{p.name} paket", 13, self.accent)
         sections = [az_lower(section_name(g.label)[0]) for g in _unique_groups(p)]
         desc = p.description or (f"{p.name} menyusunda təqdim olunan yeməklər" +
                                  (": " + ", ".join(sections[:-1]) + (" və " if len(sections) > 1 else "") + sections[-1] + "."
                                   if sections else "."))
         yy = 678
         for line in t.wrap(desc, 10, 300)[:4]:
-            t.draw(COL2, yy, line, 10, NAVY)
+            t.draw(COL2, yy, line, 10, self.ink)
             yy += 15
         summary = summary_line(p)
         if summary:
             for line in t.wrap(summary, 8.5, 300)[:2]:
-                t.draw(COL2, yy + 6, line, 8.5, GREY)
+                t.draw(COL2, yy + 6, line, 8.5, self.muted)
                 yy += 12
         if self.note:
-            t.draw(COL2, max(yy + 18, 731), t.wrap(self.note, 8, 300)[0], 8, GREY)
+            t.draw(COL2, max(yy + 18, 731), t.wrap(self.note, 8, 300)[0], 8, self.muted)
         span = p.days_span
 
         def footer(n: int, total: int) -> None:
-            t.draw(LEFT, 795, self.running_head(), 7.5, GREY)
+            t.draw(LEFT, 795, self.running_head(), 7.5, self.muted)
             if span:
-                t.draw(RIGHT, 795, span[0], 7.5, GREY, align="right")
+                t.draw(RIGHT, 795, span[0], 7.5, self.muted, align="right")
         self.finish_page(footer)
 
     def build(self) -> bytes:

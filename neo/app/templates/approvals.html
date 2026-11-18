@@ -4,7 +4,7 @@
 {% block content %}
   <header class="ld-head">
     <h1 class="mc-title">Təsdiq gözləyənlər</h1>
-    <p class="ld-sub">Satış komandasının “Təsdiqə göndər” basdığı məktublar. Lazım olsa mətni düzəlt, sonra təsdiqlə və ya səbəb yazıb rədd et — qərar göndərənə bildiriş kimi gedir. <b>{{ pending|length }} məktub gözləyir.</b></p>
+    <p class="ld-sub">Satış komandasının “Təsdiqə göndər” basdığı məktublar. Qoşulmuş fayllara (təklif PDF-i, menyu) bax, lazım olsa mətni düzəlt, sonra təsdiqlə və ya səbəb yazıb rədd et — qərar göndərənə bildiriş kimi gedir. <b>{{ pending|length }} məktub gözləyir.</b></p>
   </header>
 
   {% if pending %}
@@ -12,6 +12,19 @@
     <section class="od-card" id="a{{ a.id }}">
       <h2><a href="/opportunities/{{ opp.id }}">{{ opp.title[:120] }}</a></h2>
       <p class="od-hint">Göndərən: <b>{{ author.full_name }}</b> · {{ a.created_at|baku_time }} · kimə: {{ a.to_address }}</p>
+      {% set attached = files.get(a.id, []) %}
+      <div class="ap-attach">
+        <b>Qoşulmuş fayllar{% if attached %} ({{ attached|length }}){% endif %}</b>
+        {% if attached %}
+        <ul>
+          {% for f in attached %}
+          <li><a class="mc-btn mc-btn-sm" href="/approvals/files/{{ f.id }}" target="_blank" rel="noopener">{{ f.name }} ↗</a> <small>{{ f.size }}</small></li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <span class="od-hint">Bu məktuba fayl qoşulmayıb.</span>
+        {% endif %}
+      </div>
       <form method="post" action="/approvals/{{ a.id }}/decide">
         {{ csrf_field(request) }}
         <label class="kw-f">Mövzu<input name="subject" maxlength="200" value="{{ a.subject }}"></label>
@@ -38,6 +51,7 @@
           <b><a href="/opportunities/{{ opp.id }}#approvals">{{ a.subject }}</a></b>
           <span class="ct-role">{{ author.full_name }} · <span class="ap ap-{{ a.status }}">{{ approval_names[a.status] }}</span> · {{ a.decided_at|baku_time }}{% if a.sent_at %} · göndərilib{% endif %}</span>
           {% if a.decision_note %}<span class="ct-role">Qeyd: {{ a.decision_note }}</span>{% endif %}
+          {% if files.get(a.id) %}<span class="ct-role ap-files">Fayllar: {% for f in files[a.id] %}<a href="/approvals/files/{{ f.id }}" target="_blank" rel="noopener">{{ f.name }}</a> <small>{{ f.size }}</small>{% if not loop.last %} · {% endif %}{% endfor %}</span>{% endif %}
         </div>
       </li>
       {% endfor %}

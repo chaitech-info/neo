@@ -211,7 +211,11 @@ def test_company_analysis_uses_db_facts(factory, monkeypatch):
     client = TestClient(web.app)
     assert client.get("/tools/company").status_code == 200
     page = client.post("/tools/company", data={"name": "Sahil MMC"}).text
-    assert "Sahil logistika şirkətidir." in page and "HR-a yaz" in page and "Yüksək" in page
+    assert "Sahil logistika şirkətidir." in page and "Yüksək" in page
+    # Satış məsləhəti bölmələri bu səhifədə göstərilmir (şirkət kartında qalır)
+    for gone in ("Ehtimal olunan ehtiyaclar", "Necə yanaşmalı", "İlk söhbətdə deyiləcəklər", "Risklər",
+                 "HR-a yaz", "işçi naharı", "isti nahar"):
+        assert gone not in page, gone
     assert "Sahil MMC yeni zavod açır" in seen["user"]  # bazadakı lead AI-yə gedir
 
 

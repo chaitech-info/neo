@@ -362,6 +362,7 @@ class OfferRecord(Base):
     currency: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
     sample: Mapped[bool] = mapped_column(Boolean, default=False)
     pictures: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())  # şəkilli PDF (0014)
+    design: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)  # PDF dizaynı (0018); boş — klassik
     created_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), index=True, nullable=True)
     lead_id: Mapped[Optional[str]] = mapped_column(ForeignKey("leads.dedupe_key"), index=True, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
@@ -561,6 +562,21 @@ class LetterApproval(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class LetterApprovalFile(Base):
+    """Təsdiqə göndərilən məktuba qoşulmuş fayl (təklif PDF-i, menyu …) — CEO təsdiq səhifəsində açır,
+    təsdiqdən sonra məktubla birlikdə göndərilir (0018). Məzmun bazadadır: Vercel-də disk yoxdur."""
+
+    __tablename__ = "letter_approval_files"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    approval_id: Mapped[int] = mapped_column(ForeignKey("letter_approvals.id"), index=True)
+    filename: Mapped[str] = mapped_column(String(120))
+    content_type: Mapped[str] = mapped_column(String(100))
+    size: Mapped[int] = mapped_column(Integer)
+    data: Mapped[bytes] = mapped_column(LargeBinary, deferred=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class ClientContract(Base):

@@ -375,3 +375,91 @@ def test_created_offer_preview_uses_the_full_offer_when_lines_have_no_menu(app_d
     assert r.status_code == 200 and fetched == ["SP-20261016-003"]
     pdf = base64.b64decode(r.json()["pdf_base64"])
     assert _pages(pdf) == 3 and drawn  # həftəlik menyu çəkilib
+
+
+# --- dizaynlar, qiymət şərti, paketin təsviri -------------------------------------------
+
+
+def _texts(monkeypatch, fn):
+    texts = []
+    original = offer_pdf.Text.draw
+    monkeypatch.setattr(offer_pdf.Text, "draw", lambda self, x, y, s, *a, **k: (texts.append(s), original(self, x, y, s, *a, **k))[1])
+    fn()
+    monkeypatch.setattr(offer_pdf.Text, "draw", original)
+    return " | ".join(texts)
+
+
+def test_five_designs_render_the_same_pages_in_their_own_look():
+    assert list(offer_pdf.DESIGNS) == ["classic", "midnight", "garden", "terra", "mono"]
+    assert offer_pdf.design_code("zzz") == offer_pdf.design_code(None) == "classic"
+    sizes = set()
+    for code, d in offer_pdf.DESIGNS.items():
+        pdf = offer_pdf.render(WEEKLY, design=code)
+        assert pdf.startswith(b"%PDF") and _pages(pdf) == 3, code   # dizayn səhifə düzümünü dəyişmir
+        assert (b"NotoSans" in pdf) == d.sans and (b"NotoSerif" in pdf) != d.sans, code
+        sizes.add(len(pdf))
+    assert len(sizes) == 5                                          # beşi də fərqli PDF-dir
+    assert _pages(offer_pdf.render(WEEKLY, design="yox")) == 3      # tanınmayan kod sınmır — klassik
+
+
+def test_pdf_states_price_is_per_person_and_vat_is_not_included(monkeypatch):
+    drawn = _texts(monkeypatch, lambda: offer_pdf.render(WEEKLY))
+    assert "1 nəfərlik" in drawn and "Qiymətə ƏDV daxil deyil." in drawn and "1 nəfər" in drawn.split(" | ")
+    assert "VAT is not included." in drawn
+
+    with_totals = dict(WEEKLY, totals=dict(OK["totals"]))           # ƏDV xaric 53 592, ƏDV ilə 63 238.56
+    drawn = _texts(monkeypatch, lambda: offer_pdf.render(with_totals))
+    assert "53 592 AZN" in drawn and "ƏDV daxil deyil" in drawn     # cəmi məbləğ ƏDV-siz göstərilir
+    assert "63 238.56" in drawn                                     # ƏDV ilə məbləğ qeyddədir
+
+    included = dict(WEEKLY, totals=dict(total="100.00", currency="AZN", vat_included=True))
+    drawn = _texts(monkeypatch, lambda: offer_pdf.render(included))
+    assert "daxildir" in drawn and "daxil deyil" not in drawn       # agent ƏDV daxil deyibsə — yalan yazılmır
+
+
+def test_pdf_cover_uses_the_package_description(app_db, monkeypatch):
+    """Agentin təklifindəki sətirdə təsvir yoxdursa, paketin öz təsviri götürülür (əvvəl ümumi mətn yazılırdı)."""
+    described = dict(az="Ofis üçün isti nahar.")
+    monkeypatch.setattr(agent, "list_packages", lambda brand, client=None: dict(packages=[
+        dict(id="standart", description=described), dict(id="other", description="x")]))
+    filled = offer_routes.with_descriptions(WEEKLY)
+    assert filled["lines"][0]["description"] == described and "description" not in WEEKLY["lines"][0]
+    drawn = _texts(monkeypatch, lambda: offer_routes.render_pdf(WEEKLY))
+    assert "Ofis üçün isti nahar." in drawn and "Sevilən klassik" not in drawn
+
+    own = dict(WEEKLY, lines=[dict(WEEKLY["lines"][0], description="Təklifin öz təsviri")])
+    assert offer_routes.with_descriptions(own) is own               # təklifdə təsvir varsa — toxunulmur
+
+    def down(brand, client=None):
+        raise agent.OfferAgentError("yox", 502)
+    monkeypatch.setattr(agent, "list_packages", down)
+    assert offer_routes.render_pdf(WEEKLY).startswith(b"%PDF")      # agent cavab verməsə PDF yenə qurulur
+
+
+def test_design_is_chosen_stored_and_can_be_changed(app_db, monkeypatch):
+    import base64
+
+    created = dict(OK, **WEEKLY, status="ok", offer_id=OK["offer_id"])
+    monkeypatch.setattr(agent, "create_offer", lambda body, client=None: dict(created))
+    monkeypatch.setattr(agent, "get_offer", lambda oid, client=None: WEEKLY)
+    c = TestClient(web.app)
+    page = c.get("/tools/offers").text
+    for d in offer_pdf.DESIGNS.values():
+        assert f'name="design" value="{d.code}"' in page and d.name in page
+    r = c.post("/api/offers", json=dict(brand="seaport", message="a", design="garden"))
+    assert b"NotoSans" in base64.b64decode(r.json()["pdf_base64"])
+    with app_db() as s:
+        assert s.scalar(select(OfferRecord.design)) == "garden"
+    oid = OK["offer_id"]
+    assert b"NotoSans" in c.get(f"/api/offers/{oid}/pdf").content                  # tarixçədən — saxlanmış dizayn
+    assert b"NotoSerif" in c.get(f"/api/offers/{oid}/pdf?design=terra").content    # başqa dizaynda açmaq
+    assert c.post(f"/api/offers/{oid}/design", json=dict(design="zzz")).status_code == 422
+    assert c.post("/api/offers/SP-0-000/design", json=dict(design="mono")).status_code == 404
+    assert c.post(f"/api/offers/{oid}/design", json=dict(design="midnight")).json() == dict(ok=True, design="midnight")
+    with app_db() as s:
+        assert s.scalar(select(OfferRecord.design)) == "midnight"
+        s.query(OfferRecord).delete()
+        s.commit()
+    c.post("/api/offers", json=dict(brand="seaport", message="a", design="<script>"))  # tanınmayan dizayn — klassik
+    with app_db() as s:
+        assert s.scalar(select(OfferRecord.design)) == "classic"

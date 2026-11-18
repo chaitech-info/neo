@@ -208,6 +208,12 @@
       var price = bind(h('input', { type: 'number', min: '0.01', step: '0.01', inputmode: 'decimal', placeholder: '10.00' }), cur, 'price');
       var active = h('input', { type: 'checkbox' }); active.checked = !!cur.active; active.addEventListener('change', function () { cur.active = active.checked; dirty = true; });
       f.appendChild(h('div', { class: 'kw-row' }, [field('Paketin adı *', nameIn, 'kw-g'), field('Qiymət, AZN (ƏDV xaric) *', price, 'kw-s mp-price')]));
+      // Təsvir: təklif PDF-inin üz qabığında paketin adının yanında yazılır. Agentdə mətn və ya {az, en, ru} ola bilər —
+      // hansı formada gəlibsə elə də saxlanılır.
+      var descObj = cur.description && typeof cur.description === 'object';
+      var desc = bind(h('textarea', { rows: '3', maxlength: '400', placeholder: 'məs. Hər gün 1 şorba, 2 əsas yemək, qarnir və salat seçimi ilə balanslı nahar menyusu.' }),
+                      descObj ? cur.description : cur, descObj ? 'az' : 'description');
+      f.appendChild(field('Təsvir (qiymət təklifinin PDF-ində, üz qabığında yazılır)', desc));
       f.appendChild(h('label', { class: 'kw-chk' }, [active, 'Aktiv — agent bu paketi təkliflərdə seçə bilər']));
 
       // İstəyə görə: id, sıra, digər dillər, vahid — ehtiyac olanda açılır

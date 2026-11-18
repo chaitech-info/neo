@@ -2,19 +2,22 @@
 
 Təsdiqləyici mətni düzəldib təsdiqləyir və ya səbəb yazıb rədd edir; qərar göndərənə bildiriş kimi
 gedir, status fürsət səhifəsinin "Təsdiq" bölməsində görünür. Təsdiqlənmiş məktubu göndərən özü
-"Göndərməyə hazırla" ilə göndərir (fayllar təsdiqə getmir — göndərərkən əlavə olunur).
+"Göndərməyə hazırla" ilə göndərir. Məktuba qoşulmuş fayllar (təklif PDF-i, menyu) da təsdiqə gedir:
+təsdiqləyici onları bu səhifədə açır, təsdiqdən sonra məktubla birlikdə göndərilir (letter_approval_files).
 """
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Form, Request
+from fastapi.responses import Response
 from sqlalchemy import select
 
 from app.auth import security
-from app.auth.security import REQUIRE_APPROVER, verify_csrf
-from app.crm_routes import APPROVAL_NAMES, _go, _render
-from app.db.models import LetterApproval, Opportunity, User
+from app.auth.security import REQUIRE, REQUIRE_APPROVER, verify_csrf
+from app.crm_routes import APPROVAL_NAMES, _go, _render, approval_files
+from app.db.models import LetterApproval, LetterApprovalFile, Opportunity, User
 from app.notify import notify
 
 router = APIRouter()
@@ -37,9 +40,30 @@ def approvals_page(request: Request, me: User = Depends(REQUIRE_APPROVER)):
             .where(LetterApproval.status != "pending",
                    LetterApproval.decided_at >= datetime.utcnow() - timedelta(days=DECIDED_SHOWN_DAYS))
             .order_by(LetterApproval.decided_at.desc())).all()
+        files = approval_files(db, [a.id for a, _, _ in pending + decided])
     return _render(request, "approvals.html", {
         "active": "approvals", "pending": pending, "decided": decided, "approval_names": APPROVAL_NAMES,
+        "files": files,
     })
+
+
+# Brauzerdə açılan növlər (tip uzantıdan təyin olunur, yükləyənin göndərdiyi tipdən yox); qalanları yüklənir.
+INLINE_TYPES = {"pdf": "application/pdf", "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg"}
+
+
+@router.get("/approvals/files/{file_id}")
+def approval_file(file_id: int, me: User = Depends(REQUIRE["sales"])):
+    """Təsdiqə göndərilən məktubun faylı: CEO təsdiq səhifəsində, satış fürsət səhifəsində açır."""
+    with security.SessionLocal() as db:
+        row = db.get(LetterApprovalFile, file_id)
+        if row is None:
+            return Response("Fayl tapılmadı", status_code=404, media_type="text/plain; charset=utf-8")
+        name, data = row.filename, row.data
+    inline = INLINE_TYPES.get(name.rsplit(".", 1)[-1].lower())
+    ascii_name = name.encode("ascii", "ignore").decode().replace('"', "").replace("\\", "") or "fayl"
+    disposition = f"{'inline' if inline else 'attachment'}; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(name)}"
+    return Response(data, media_type=inline or "application/octet-stream", headers={
+        "Content-Disposition": disposition, "X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"})
 
 
 @router.post("/approvals/{approval_id}/decide", dependencies=[Depends(verify_csrf)])

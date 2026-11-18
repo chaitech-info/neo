@@ -35,6 +35,19 @@
           <label class="kw-f">Əlaqədar şəxs (ixtiyari)<input id="of-contact" name="contact_person" maxlength="200" autocomplete="off"></label>
         </div>
         <label class="kw-chk of-pics"><input type="checkbox" id="of-pictures" name="pictures">Şəkilli təklif (yeməklərin şəkli ilə)</label>
+        <fieldset class="of-designs" id="of-designs">
+          <legend>PDF dizaynı</legend>
+          <div class="of-design-list">
+            {% for d in designs %}
+            <label class="of-design">
+              <input type="radio" name="design" value="{{ d.code }}" {% if loop.first %}checked{% endif %}>
+              <span class="of-sw" style="--a: {{ d.swatch[0] }}; --b: {{ d.swatch[1] }}" aria-hidden="true"></span>
+              <span><b>{{ d.name }}</b><small>{{ d.hint }}</small></span>
+            </label>
+            {% endfor %}
+          </div>
+          <p class="of-note of-design-status" id="of-design-status" role="status">Təklif yaranandan sonra da dizaynı dəyişmək olar — PDF dərhal yenilənir.</p>
+        </fieldset>
         <button class="mc-btn mc-btn-hero" id="of-submit" type="submit">PDF yarat</button>
       </form>
     </section>
@@ -126,6 +139,44 @@
     var busy = false;
     var lastText = '';        // son uğurlu sorğunun mətni — "Yenidən yarat" onu düzəlişlə təkrar göndərir
     var lastOffer = null;     // son təklif (sətirlər) — düzəliş istəyinə kontekst kimi qoşulur
+    var lastPictures = false; // son təklif şəkilli yaradılıb? (dizayn dəyişəndə PDF eyni cür qurulur)
+    var DESIGN_KEY = 'neo.offer.design';
+
+    function design() {
+      var r = document.querySelector('#of-designs input[name=design]:checked');
+      return r ? r.value : '';
+    }
+    function pdfUrl(id, d, pics) {
+      return '/api/offers/' + encodeURIComponent(id) + '/pdf?design=' + encodeURIComponent(d) + '&pictures=' + (pics ? '1' : '0');
+    }
+    function setPdf(url, id) {
+      $('of-frame').src = url;
+      var dl = $('of-download'); dl.href = url; dl.setAttribute('download', id + '.pdf');
+      $('of-open').href = url;
+    }
+    // Son seçilmiş dizayn yadda qalır (yalnız bu brauzerdə)
+    try {
+      var saved = localStorage.getItem(DESIGN_KEY);
+      var pick = saved && document.querySelector('#of-designs input[value="' + saved.replace(/[^a-z]/g, '') + '"]');
+      if (pick) pick.checked = true;
+    } catch (e) { /* yaddaş bağlıdır — ilk dizayn seçili qalır */ }
+    /* Dizayn dəyişdi: yeni təkliflər bu dizaynla yaranır; açıq təklifin PDF-i dərhal yenilənir və seçim
+       təklifdə saxlanılır (tarixçədən açanda da belə açılsın). */
+    $('of-designs').addEventListener('change', function () {
+      var d = design(), st = $('of-design-status');
+      try { localStorage.setItem(DESIGN_KEY, d); } catch (e) { /* vacib deyil */ }
+      if (!lastOffer || $('of-ok').hidden) return;
+      var id = lastOffer.offer_id, url = pdfUrl(id, d, lastPictures);
+      if (blobUrl) { URL.revokeObjectURL(blobUrl); blobUrl = null; }
+      setPdf(url, id);
+      if (lastOffer.histLink) lastOffer.histLink.href = url;
+      st.textContent = 'PDF bu dizaynda yenilənir…';
+      fetch('/api/offers/' + encodeURIComponent(id) + '/design', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF }, body: JSON.stringify({ design: d })
+      }).then(function (r) { if (!r.ok) throw new Error(); st.textContent = 'Dizayn dəyişdi və təklifdə saxlandı.'; })
+        .catch(function () { st.textContent = 'PDF yeniləndi, amma seçim saxlanmadı — tarixçədə əvvəlki dizayn açılacaq.'; });
+    });
 
     function fmt(v, cur) {
       if (v === null || v === undefined || v === '') return '—';
@@ -175,7 +226,7 @@
         clearTimeout(t);
         if (!res.ok) { onFail(errorText(res)); return; }
         setBusy(false);
-        if (res.data.status === 'needs_clarification') renderChat(res.data.question); else renderOk(res.data);
+        if (res.data.status === 'needs_clarification') renderChat(res.data.question); else renderOk(res.data, !!body.pictures);
       }).catch(function (err) {
         clearTimeout(t);
         onFail(err && err.name === 'AbortError' ? 'Cavab gecikdi. Yenidən cəhd edin.' : 'Serverə qoşulmaq alınmadı. Yenidən cəhd edin.');
@@ -190,7 +241,7 @@
 
     function baseBody() {
       var b = { brand: $('of-brand').value, customer_name: $('of-customer').value, contact_person: $('of-contact').value,
-                pictures: $('of-pictures').checked };
+                pictures: $('of-pictures').checked, design: design() };
       if (leadId) b.lead_id = leadId;
       var pk = $('of-package');
       if (pk.value) { b.package_id = pk.value; b.package_name = pk.options[pk.selectedIndex].dataset.name || ''; }
@@ -225,9 +276,9 @@
       $('of-reply').focus();
     }
 
-    function renderOk(d) {
+    function renderOk(d, pics) {
       lastText = conv.filter(function (m) { return m.role === 'user'; }).map(function (m) { return m.content; }).join('\n\n') || lastText;
-      lastOffer = d;
+      lastOffer = d; lastPictures = !!pics;
       $('of-regen').value = '';
       conv = [];
       $('of-ok-title').textContent = d.customer_name ? d.customer_name : 'Qiymət təklifi';
@@ -242,9 +293,7 @@
         blobUrl = URL.createObjectURL(new Blob([arr], { type: 'application/pdf' }));
         url = blobUrl;
       } else { url = '/api/offers/' + encodeURIComponent(d.offer_id) + '/pdf'; }
-      $('of-frame').src = url;
-      var dl = $('of-download'); dl.href = url; dl.setAttribute('download', d.offer_id + '.pdf');
-      $('of-open').href = url;
+      setPdf(url, d.offer_id);
 
       var body = $('of-lines'); body.textContent = '';
       var anyQty = false;
@@ -288,6 +337,7 @@
       tr.appendChild(el('td', '', new Date().toLocaleString('az-AZ', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })));
       var a = el('a', '', 'PDF-i aç'); a.href = '/api/offers/' + encodeURIComponent(d.offer_id) + '/pdf'; a.target = '_blank'; a.rel = 'noopener';
       var c6 = document.createElement('td'); c6.appendChild(a); tr.appendChild(c6);
+      d.histLink = a;
       var tb = $('of-hist'); tb.insertBefore(tr, tb.firstChild);
       show('of-hist-empty', false); show('of-hist-wrap', true);
       $('of-hist-n').textContent = tb.children.length;

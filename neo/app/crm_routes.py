@@ -23,8 +23,8 @@ from app.contacts import EMAIL_RE, contacts_for, normalize_phone, opportunity_em
 from app.notify import notify
 from app.outreach import LANGUAGES, OutreachError, detect_language
 from app.outreach import linkedin_comment, mail
-from app.db.models import (REPLY_STATUSES, Contact, InboundEmail, LeadRecord, LetterApproval, LetterTemplate,
-                           Opportunity, Organization, Outreach, Task, Tender, User)
+from app.db.models import (REPLY_STATUSES, Contact, InboundEmail, LeadRecord, LetterApproval, LetterApprovalFile,
+                           LetterTemplate, Opportunity, Organization, Outreach, Task, Tender, User)
 
 router = APIRouter()
 
@@ -110,17 +110,55 @@ def _templates_for(db, user: User | None) -> list[LetterTemplate]:
         (LetterTemplate.user_id == user.id) | LetterTemplate.is_shared.is_(True)).order_by(LetterTemplate.name)))
 
 
+def _size_text(size: int) -> str:
+    return f"{size / 1024 / 1024:.1f} MB".replace(".", ",") if size >= 1024 * 1024 else f"{max(1, round(size / 1024))} KB"
+
+
+def approval_files(db, approval_ids) -> dict[int, list[dict]]:
+    """Təsdiqə göndərilən məktubların faylları: {təsdiq id: [{id, name, size}]} — məzmun (data) oxunmur."""
+    ids = [i for i in approval_ids if i]
+    out: dict[int, list[dict]] = {}
+    if not ids:
+        return out
+    rows = db.execute(select(LetterApprovalFile.id, LetterApprovalFile.approval_id, LetterApprovalFile.filename,
+                             LetterApprovalFile.size)
+                      .where(LetterApprovalFile.approval_id.in_(ids)).order_by(LetterApprovalFile.id)).all()
+    for fid, aid, name, size in rows:
+        out.setdefault(aid, []).append({"id": fid, "name": name, "size": _size_text(size)})
+    return out
+
+
+def _stored_files(db, opp_id: int, files_from: str) -> list[dict]:
+    """Qaralama formunda göstərilən "təsdiqlə gedən fayllar" — yalnız bu fürsətin təsdiq sorğusundan."""
+    row = db.get(LetterApproval, int(files_from)) if files_from.isdigit() else None
+    if row is None or row.opportunity_id != opp_id:
+        return []
+    return approval_files(db, [row.id]).get(row.id, [])
+
+
+def _kept_attachments(db, opp_id: int, files_from: str, keep_files: list[str]) -> list[tuple[str, bytes, str]]:
+    """Formda işarəli qalan saxlanmış fayllar → (ad, məzmun, MIME). Başqa fürsətin faylı götürülə bilməz."""
+    row = db.get(LetterApproval, int(files_from)) if files_from.isdigit() else None
+    ids = [int(x) for x in keep_files if x.isdigit()]
+    if row is None or row.opportunity_id != opp_id or not ids:
+        return []
+    rows = db.scalars(select(LetterApprovalFile).where(LetterApprovalFile.approval_id == row.id,
+                                                       LetterApprovalFile.id.in_(ids)).order_by(LetterApprovalFile.id))
+    return [(f.filename, f.data, f.content_type) for f in rows]
+
+
 def _opp_context(db, opp: Opportunity, me: User | None = None) -> dict:
     lead = db.get(LeadRecord, opp.lead_key) if opp.lead_key else None
     users = _active_users(db)
     contacts = contacts_for(db, opp.lead_key, opp.organization_id)
     org = db.get(Organization, opp.organization_id) if opp.organization_id else None
     default = mailboxes.default_sender()
+    approvals = list(db.scalars(select(LetterApproval).where(LetterApproval.opportunity_id == opp.id)
+                                .order_by(LetterApproval.created_at.desc())))
     return {
         "emails": opportunity_emails(lead, org, contacts),
         "mailbox_list": mailboxes.active(db), "default_sender": default, "templates": _templates_for(db, me),
-        "approvals": list(db.scalars(select(LetterApproval).where(LetterApproval.opportunity_id == opp.id)
-                                     .order_by(LetterApproval.created_at.desc()))),
+        "approvals": approvals, "approval_files": approval_files(db, [a.id for a in approvals]),
         "replies": list(db.scalars(select(InboundEmail).where(InboundEmail.opportunity_id == opp.id)
                                    .order_by(InboundEmail.received_at.desc()))),
         "reply_status_names": mailboxes.REPLY_STATUS_NAMES, "sentiment_names": mailboxes.SENTIMENT_NAMES,
@@ -160,6 +198,8 @@ def opportunity_page(request: Request, opp_id: int, approval: str = "", me: User
             context["draft"] = {"to": ok.to_address, "subject": ok.subject, "body": ok.body,
                                 "language": ok.language or "az", "contact_id": ok.contact_id or "",
                                 "mailbox_id": ok.mailbox_id or "", "approval_id": ok.id,
+                                # Təsdiqə göndərilən fayllar məktubla birlikdə gedir (formda işarəli gəlir)
+                                "files_from": ok.id, "files": context["approval_files"].get(ok.id, []),
                                 "send_key": secrets.token_urlsafe(24)}
     return _render(request, "opportunity.html", context)
 
@@ -178,10 +218,10 @@ def _template(db, template_id: str, me: User) -> LetterTemplate | None:
 def opportunity_email_draft(request: Request, opp_id: int, contact_id: str = Form(""), language: str = Form("az"),
                             template_id: str = Form(""), mailbox_id: str = Form(""), instructions: str = Form(""),
                             to: str = Form(""), subject: str = Form(""), body: str = Form(""),
-                            send_key: str = Form(""), approval_id: str = Form(""),
+                            send_key: str = Form(""), approval_id: str = Form(""), files_from: str = Form(""),
                             me: User = Depends(REQUIRE["sales"])):
     """AI qaralaması. `instructions` doludursa — "Yenidən yarat": mövcud qaralama istifadəçinin
-    göstərişi ilə yenidən yazılır (mövzu, mətn, alıcı formda qalır)."""
+    göstərişi ilə yenidən yazılır (mövzu, mətn, alıcı formda qalır; təsdiqlə gedən fayllar da qalır)."""
     path = f"/opportunities/{opp_id}"
     language = language if language in LANGUAGES else "az"
     instructions = instructions.strip()
@@ -203,6 +243,8 @@ def opportunity_email_draft(request: Request, opp_id: int, contact_id: str = For
                    "contact_id": contact.id if contact else "", "template_id": tpl.id if tpl else "",
                    "mailbox_id": mailbox_id if mailbox_id.isdigit() else "",
                    "approval_id": approval_id if approval_id.isdigit() else "",
+                   "files_from": files_from if files_from.isdigit() else "",
+                   "files": _stored_files(db, opp.id, files_from),
                    "send_key": send_key if SEND_KEY_RE.fullmatch(send_key) else secrets.token_urlsafe(24)}
         if revising and not instructions:
             return _render(request, "opportunity.html", {
@@ -259,6 +301,7 @@ def opportunity_email_send(request: Request, opp_id: int, to: str = Form(...), s
                            body: str = Form(...), language: str = Form(""), contact_id: str = Form(""),
                            send_key: str = Form(""), mailbox_id: str = Form(""), approval_id: str = Form(""),
                            template_id: str = Form(""), files: list[UploadFile] = File(default=[]),
+                           files_from: str = Form(""), keep_files: list[str] = Form([]),
                            me: User = Depends(REQUIRE["sales"])):
     path = f"/opportunities/{opp_id}"
     # Sətir sonu mövzuda başlıq inyeksiyası / SMTP xətası (500) verirdi.
@@ -271,10 +314,12 @@ def opportunity_email_send(request: Request, opp_id: int, to: str = Form(...), s
             if opp is None:
                 return _go("/opportunities", err="Fürsət tapılmadı")
             context = _opp_context(db, opp, me)
+            stored = _stored_files(db, opp.id, files_from)
         draft = {"to": to, "subject": subject, "body": body, "language": language[:2],
                  "contact_id": contact_id if contact_id.isdigit() else "", "send_key": send_key,
                  "mailbox_id": mailbox_id if mailbox_id.isdigit() else "",
                  "approval_id": approval_id if approval_id.isdigit() else "",
+                 "files_from": files_from if files_from.isdigit() else "", "files": stored,
                  "template_id": template_id if template_id.isdigit() else ""}
         return _render(request, "opportunity.html", {**context, "draft": draft, "page_error": error})
 
@@ -297,6 +342,10 @@ def opportunity_email_send(request: Request, opp_id: int, to: str = Form(...), s
             return back_to_draft("Seçilmiş göndərən poçt tapılmadı və ya söndürülüb")
         contact = db.get(Contact, int(contact_id)) if contact_id.isdigit() else None
         approval = db.get(LetterApproval, int(approval_id)) if approval_id.isdigit() else None
+        # Təsdiqə göndərilmiş (formda işarəli qalan) fayllar + indi əlavə olunanlar
+        attachments = _kept_attachments(db, opp.id, files_from, keep_files) + attachments
+        if len(attachments) > MAX_ATTACHMENTS:
+            return back_to_draft(f"Ən çox {MAX_ATTACHMENTS} fayl göndərmək olar — bir neçəsinin işarəsini götür")
         # Göndərməzdən əvvəl sətir rezerv olunur: ikinci klik eyni send_key-ə dəyib dayanır.
         row = Outreach(kind="email", lead_key=opp.lead_key, opportunity_id=opp.id,
                        contact_id=contact.id if contact else None, to_address=to, subject=subject[:200],
@@ -339,23 +388,38 @@ def approvers(db) -> list[User]:
 def opportunity_email_approval(request: Request, opp_id: int, to: str = Form(""), subject: str = Form(""),
                                body: str = Form(""), language: str = Form(""), contact_id: str = Form(""),
                                mailbox_id: str = Form(""), send_key: str = Form(""), template_id: str = Form(""),
-                               me: User = Depends(REQUIRE["sales"])):
+                               files: list[UploadFile] = File(default=[]), files_from: str = Form(""),
+                               keep_files: list[str] = Form([]), me: User = Depends(REQUIRE["sales"])):
+    """Məktub fayllarla birlikdə təsdiqə gedir: CEO qoşulmuş təklif PDF-ini görür, təsdiqdən sonra həmin
+    fayllar məktubla göndərilir (əvvəl fayllar bu addımda itirdi)."""
     path = f"/opportunities/{opp_id}"
     to, subject, body = to.strip().lower(), " ".join(subject.split()), body.strip()
     with security.SessionLocal() as db:
         opp = db.get(Opportunity, opp_id)
         if opp is None:
             return _go("/opportunities", err="Fürsət tapılmadı")
-        error = None
+        error, attachments = None, []
         if not EMAIL_RE.fullmatch(to) or len(to) > 254:
             error = "Alıcının email ünvanı yanlışdır"
         elif not subject or len(body) < 20:
             error = "Mövzu və məktub mətni boş ola bilməz"
+        else:
+            try:
+                # Əvvəlki təsdiq sorğusundan qalan (işarəli) fayllar + indi seçilənlər
+                attachments = _kept_attachments(db, opp.id, files_from, keep_files) + _read_attachments(files)
+                if len(attachments) > MAX_ATTACHMENTS:
+                    error = f"Ən çox {MAX_ATTACHMENTS} fayl əlavə etmək olar"
+                elif sum(len(data) for _, data, _ in attachments) > MAX_ATTACHMENTS_BYTES:
+                    error = "Fayllar birlikdə 4 MB-dan böyük ola bilməz"
+            except crm.CrmError as exc:
+                error = str(exc)
         if error:
             draft = {"to": to, "subject": subject, "body": body, "language": language[:2],
                      "contact_id": contact_id if contact_id.isdigit() else "",
                      "mailbox_id": mailbox_id if mailbox_id.isdigit() else "",
                      "template_id": template_id if template_id.isdigit() else "",
+                     "files_from": files_from if files_from.isdigit() else "",
+                     "files": _stored_files(db, opp.id, files_from),
                      "send_key": send_key if SEND_KEY_RE.fullmatch(send_key) else secrets.token_urlsafe(24)}
             return _render(request, "opportunity.html", {**_opp_context(db, opp, me), "draft": draft, "page_error": error})
         contact = db.get(Contact, int(contact_id)) if contact_id.isdigit() else None
@@ -366,12 +430,17 @@ def opportunity_email_approval(request: Request, opp_id: int, to: str = Form("")
                              created_at=datetime.utcnow())
         db.add(row)
         db.flush()
+        for name, data, mime in attachments:
+            db.add(LetterApprovalFile(approval_id=row.id, filename=name[:120], content_type=(mime or "")[:100]
+                                      or "application/octet-stream", size=len(data), data=data,
+                                      created_at=datetime.utcnow()))
         for user in approvers(db):
             if user.id != me.id:
                 notify(db, user.id, f"Təsdiq gözləyir: {me.full_name} — {subject[:120]}", f"/approvals#a{row.id}",
                        commit=False)
         db.commit()
-    return _go(path + "#approvals", msg="Məktub təsdiqə göndərildi — cavab bildiriş kimi gələcək")
+    sent = f" ({len(attachments)} faylla)" if attachments else ""
+    return _go(path + "#approvals", msg=f"Məktub təsdiqə göndərildi{sent} — cavab bildiriş kimi gələcək")
 
 
 # --- Məktuba cavablar və status ----------------------------------------------------------

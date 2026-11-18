@@ -66,26 +66,50 @@ def _to_decimal(value: Any) -> Decimal | None:
 
 
 def record_offer(db, data: dict, body: dict, user: User, lead_id: str | None,
-                 pictures: bool = False) -> OfferRecord:
+                 pictures: bool = False, design: str = offer_pdf.DEFAULT_DESIGN) -> OfferRecord:
     totals = data.get("totals") or {}
     record = OfferRecord(
         offer_id=str(data["offer_id"]), brand=body["brand"],
         customer_name=(data.get("customer_name") or body.get("customer_name") or None),
         total=_to_decimal(totals.get("total")), currency=totals.get("currency"),
         sample=bool(data.get("sample")), created_by_id=user.id, lead_id=lead_id, pictures=pictures,
+        design=offer_pdf.design_code(design),
     )
     db.add(record)
     db.commit()
     return record
 
 
-def render_pdf(snapshot: dict, pictures: bool = False) -> bytes:
+def with_descriptions(snapshot: dict) -> dict:
+    """Paketin təsviri (Alətlər → Paketlər → "Təsvir") PDF-in üz qabığına düşsün: agentin təklifindəki sətirdə
+    təsvir yoxdursa, paketin özündən götürülür. Agent cavab verməsə təklif təsvirsiz (ümumi mətnlə) qurulur."""
+    lines = snapshot.get("lines") or []
+    missing = [l for l in lines if isinstance(l, dict) and isinstance(l.get("package_id"), str) and not l.get("description")]
+    if not missing:
+        return snapshot
+    try:
+        data = agent.list_packages(snapshot.get("brand") or "seaport")
+    except (agent.OfferAgentError, ValueError):
+        return snapshot
+    items = data if isinstance(data, list) else (data.get("packages") if isinstance(data, dict) else None) or []
+    found = {p["id"]: p["description"] for p in items
+             if isinstance(p, dict) and isinstance(p.get("id"), str) and p.get("description")}
+    if not any(l["package_id"] in found for l in missing):
+        return snapshot
+    return {**snapshot, "lines": [
+        {**l, "description": found[l["package_id"]]}
+        if any(l is m for m in missing) and l["package_id"] in found else l
+        for l in lines]}
+
+
+def render_pdf(snapshot: dict, pictures: bool = False, design: str = offer_pdf.DEFAULT_DESIGN) -> bytes:
     """Neo dizaynında PDF. Şəkilli təklifdə yeməklərin şəkilləri kataloqdan (app/dishes.py) götürülür;
     kataloqda olmayan yeməklər şəkilsiz əlavə olunur ki, "Yemək şəkilləri"ndə şəkli gözləyən kimi görünsün."""
+    snapshot = with_descriptions(snapshot)
     with security.SessionLocal() as db:
         plans = package_menus.plans_for_snapshot(db, snapshot)   # menyu planı olan paket: vaxtlar, əlavə sahələr
     if not pictures:
-        return offer_pdf.render(snapshot, plans=plans)
+        return offer_pdf.render(snapshot, plans=plans, design=design)
     items = offer_pdf.menu_items(snapshot)
     names = [name for name, _ in items]
     with security.SessionLocal() as db:
@@ -97,16 +121,16 @@ def render_pdf(snapshot: dict, pictures: bool = False) -> bytes:
             log.exception("dish_remember_failed")
         dishes.seed_starter_photos(db)
         photos = dishes.photos_for(db, names + [i for p in plans.values() for b in p.blocks for g in b.groups for i in g.items])
-    return offer_pdf.render(snapshot, photos, plans)
+    return offer_pdf.render(snapshot, photos, plans, design=design)
 
 
-def _render_base64(data: dict, pictures: bool = False) -> str:
+def _render_base64(data: dict, pictures: bool = False, design: str = offer_pdf.DEFAULT_DESIGN) -> str:
     # Agentin "yarat" cavabında sətirlər menyusuz gəlir — PDF boş menyu ilə qurulurdu (tarixçə isə düzgün idi,
     # çünki tam təklifi get_offer ilə alır). Menyusu olmayan sətir varsa tam təklif götürülür.
     lines = [l for l in data.get("lines") or [] if isinstance(l, dict)]
     full = lines and all(l.get("menu") for l in lines)
     snapshot = data if full else agent.get_offer(str(data["offer_id"]))
-    return base64.b64encode(render_pdf(snapshot, pictures)).decode()
+    return base64.b64encode(render_pdf(snapshot, pictures, design)).decode()
 
 
 @router.post("/api/offers")
@@ -120,6 +144,7 @@ async def offers_create(request: Request, me: User = Depends(REQUIRE["sales"]),
         return _error(str(exc), 422)
     lead_id = raw.get("lead_id") if isinstance(raw.get("lead_id"), str) else None
     pictures = raw.get("pictures") is True
+    design = offer_pdf.design_code(raw.get("design"))
 
     # Agent çağırışı (60 s-ə qədər) və DB sinxrondur — threadpool-da, yoxsa async route bütün paneli dondururdu.
     try:
@@ -130,7 +155,7 @@ async def offers_create(request: Request, me: User = Depends(REQUIRE["sales"]),
         return JSONResponse(data)
     # Önizləmə/yükləmə də Neo-nun dizaynında olsun (agentin pdf_base64-ü əvəzinə; alınmasa agentinki qalır).
     try:
-        data["pdf_base64"] = await run_in_threadpool(_render_base64, data, pictures)
+        data["pdf_base64"] = await run_in_threadpool(_render_base64, data, pictures, design)
     except Exception:
         log.exception("offer_pdf_render_failed", offer_id=data.get("offer_id"))
 
@@ -140,7 +165,7 @@ async def offers_create(request: Request, me: User = Depends(REQUIRE["sales"]),
             if lead_id and db.get(LeadRecord, lead_id) is None:
                 lead_id = None
             if db.scalar(select(OfferRecord.id).where(OfferRecord.offer_id == str(data["offer_id"]))) is None:
-                record_offer(db, data, body, me, lead_id, pictures)
+                record_offer(db, data, body, me, lead_id, pictures, design)
 
     try:
         await run_in_threadpool(save)
@@ -149,7 +174,7 @@ async def offers_create(request: Request, me: User = Depends(REQUIRE["sales"]),
         log.exception("offer_record_failed", offer_id=data.get("offer_id"))
     log.info("offer_created", offer_id=data["offer_id"], brand=body["brand"], user=me.email,
              total=(data.get("totals") or {}).get("total"), sample=bool(data.get("sample")), lead=lead_id,
-             pictures=pictures)
+             pictures=pictures, design=design)
     return JSONResponse(data)
 
 
@@ -165,16 +190,18 @@ def _known_offer(offer_id: str) -> bool:
 
 
 @router.get("/api/offers/{offer_id}/pdf")
-def offers_pdf(offer_id: str, pictures: str = "", me: User = Depends(REQUIRE["sales"])):
+def offers_pdf(offer_id: str, pictures: str = "", design: str = "", me: User = Depends(REQUIRE["sales"])):
     record = _offer_record(offer_id)
     if record is None:
         return _error("Təklif tapılmadı", 404)
     # Şəkilli/şəkilsiz: təklif necə yaradılıbsa elə; ?pictures=1/0 ilə o biri variantı da almaq olar.
     with_pictures = pictures == "1" if pictures in ("0", "1") else bool(record.pictures)
+    # Dizayn: təklifdə saxlanmış; ?design=<kod> ilə başqa dizaynda da açmaq olar.
+    design = offer_pdf.design_code(design if design in offer_pdf.DESIGNS else record.design)
     # PDF Neo-da qurulur (Seaport korporativ menyu dizaynı, app/offer_pdf.py) — agentin snapshot-undan.
     # Qurmaq alınmasa, agentin öz PDF-i verilir ki, istifadəçi boş qalmasın.
     try:
-        pdf = render_pdf(agent.get_offer(offer_id), with_pictures)
+        pdf = render_pdf(agent.get_offer(offer_id), with_pictures, design)
     except agent.OfferAgentError as exc:
         return _agent_error(exc)
     except Exception:
@@ -185,6 +212,25 @@ def offers_pdf(offer_id: str, pictures: str = "", me: User = Depends(REQUIRE["sa
             return _agent_error(exc)
     return Response(pdf, media_type="application/pdf",
                     headers={"Content-Disposition": f'inline; filename="{offer_id}.pdf"'})
+
+
+@router.post("/api/offers/{offer_id}/design")
+async def offers_set_design(offer_id: str, request: Request, me: User = Depends(REQUIRE["sales"]),
+                            _csrf: None = Depends(verify_csrf_header)):
+    """Yaradılmış təklifin dizaynını dəyiş: tarixçədən açanda da seçilmiş dizaynda açılır."""
+    raw = await _body(request)
+    design = raw.get("design") if isinstance(raw, dict) else None
+    if design not in offer_pdf.DESIGNS:
+        return _error("Belə dizayn yoxdur", 422)
+    if not agent.OFFER_ID_RE.match(offer_id):
+        return _error("Təklif tapılmadı", 404)
+    with security.SessionLocal() as db:
+        record = db.scalar(select(OfferRecord).where(OfferRecord.offer_id == offer_id))
+        if record is None:
+            return _error("Təklif tapılmadı", 404)
+        record.design = design
+        db.commit()
+    return JSONResponse({"ok": True, "design": design})
 
 
 @router.get("/api/offers/{offer_id}")
@@ -233,6 +279,8 @@ def offers_page(request: Request, lead: str = "", brand: str = "seaport", me: Us
         "request": request, "active": "offers", "brands": agent.BRAND_NAMES,
         "brand": brand if brand in agent.BRANDS else "seaport", "history": history, "prefill": prefill,
         "csrf": csrf_token(request), "can_manage": security.has_role(me, "admin"),
+        "designs": [{"code": d.code, "name": d.name, "hint": d.hint, "swatch": d.swatch}
+                    for d in offer_pdf.DESIGNS.values()],
     })
 
 

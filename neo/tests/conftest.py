@@ -28,6 +28,18 @@ def no_starter_photos(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_real_offer_agent_packages(monkeypatch):
+    """Təklif PDF-i paketin təsvirini agentdən soruşur (offer_routes.with_descriptions) — testlər real agentə
+    getməsin: defolt olaraq paket yoxdur. Təsviri yoxlayan test bunu öz monkeypatch-i ilə əvəz edir;
+    saxta HTTP client verən test (client=...) əsl funksiyanı çağırır."""
+    from app import offer_client
+
+    real = offer_client.list_packages
+    monkeypatch.setattr(offer_client, "list_packages",
+                        lambda brand, client=None: real(brand, client=client) if client is not None else {"packages": []})
+
+
+@pytest.fixture(autouse=True)
 def no_real_ai_triage(monkeypatch):
     """Testlər OpenAI-yə getməsin: triaj defolt olaraq "AI yoxdur" (None) qaytarır,
     scraper-lər yalnız açar sözlərlə işləyir. Triajı yoxlayan test bunu öz

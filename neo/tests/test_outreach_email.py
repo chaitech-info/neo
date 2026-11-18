@@ -200,3 +200,87 @@ def test_viewer_cannot_send(factory, opp_id):
     r = client.post(f"/opportunities/{opp_id}/email/send", data={
         "csrf_token": token, "to": "rauf@sahil.az", "subject": "S", "body": "Kifayət qədər uzun məktub mətni."})
     assert r.status_code == 403
+
+
+LETTER = dict(to="rauf@sahil.az", subject="Nahar təklifi", body="Hörmətli Rauf bəy, sizə təklifimiz var.",
+              language="az", send_key=SEND_KEY)
+
+
+def test_files_go_to_approval_are_shown_to_the_ceo_and_sent_with_the_letter(factory, opp_id, monkeypatch):
+    """"Təsdiqə göndər" faylları da aparır: CEO onları təsdiq səhifəsində açır, təsdiqdən sonra göndərən
+    həmin fayllarla göndərir (əvvəl fayllar təsdiqə getmirdi — CEO qoşulmuş təklif PDF-ini görmürdü)."""
+    from app.db.models import LetterApproval, LetterApprovalFile
+
+    FakeSMTP.sent = []
+    monkeypatch.setenv("SMTP_USER", "sales@dadli.az")
+    monkeypatch.setenv("SMTP_PASSWORD", "app-password")
+    monkeypatch.setattr(mail.send_email, "__kwdefaults__", dict(smtp_factory=FakeSMTP))
+    c = TestClient(web.app)
+    pdf = b"%PDF-1.4 teklif"
+    r = c.post(f"/opportunities/{opp_id}/email/approval", data=LETTER, follow_redirects=False,
+               files=[("files", ("Təklif SP-1.pdf", pdf, "application/pdf")), ("files", ("menyu.docx", b"doc", "text/html"))])
+    assert r.status_code == 303 and "2%20faylla" in r.headers["location"]
+    with factory() as s:
+        approval = s.scalars(select(LetterApproval)).one()
+        stored = list(s.scalars(select(LetterApprovalFile).order_by(LetterApprovalFile.id)))
+        assert [(f.approval_id, f.filename, f.size) for f in stored] == [
+            (approval.id, "Təklif SP-1.pdf", len(pdf)), (approval.id, "menyu.docx", 3)]
+        pdf_id, doc_id = stored[0].id, stored[1].id
+
+    # CEO-nun səhifəsi: fayllar görünür və açılır (PDF brauzerdə, digərləri yüklənir — tip uzantıdan)
+    page = c.get("/approvals").text
+    assert "Qoşulmuş fayllar (2)" in page and f"/approvals/files/{pdf_id}" in page and "Təklif SP-1.pdf" in page
+    got = c.get(f"/approvals/files/{pdf_id}")
+    assert got.content == pdf and got.headers["content-type"] == "application/pdf"
+    assert got.headers["content-disposition"].startswith("inline") and got.headers["x-content-type-options"] == "nosniff"
+    doc = c.get(f"/approvals/files/{doc_id}")
+    assert doc.headers["content-type"] == "application/octet-stream"
+    assert doc.headers["content-disposition"].startswith("attachment")
+    assert c.get("/approvals/files/99999").status_code == 404
+    assert f"/approvals/files/{pdf_id}" in c.get(f"/opportunities/{opp_id}").text  # fürsətin "Təsdiq" bölməsi
+
+    c.post(f"/approvals/{approval.id}/decide", data=dict(decision="approved"), follow_redirects=False)
+    ready = c.get(f"/opportunities/{opp_id}?approval={approval.id}").text
+    assert f'name="keep_files" value="{pdf_id}" checked' in ready and f'name="files_from" value="{approval.id}"' in ready
+
+    # Göndərən bir faylın işarəsini götürür — yalnız işarəli fayl gedir
+    r = c.post(f"/opportunities/{opp_id}/email/send", follow_redirects=False, data=dict(
+        LETTER, approval_id=str(approval.id), files_from=str(approval.id), keep_files=[str(pdf_id)]))
+    assert "msg=" in r.headers["location"] and len(FakeSMTP.sent) == 1
+    sent = [(p.get_filename(), p.get_payload(decode=True)) for p in FakeSMTP.sent[0].iter_attachments()]
+    assert sent == [("Təklif SP-1.pdf", pdf)]
+    with factory() as s:
+        assert s.scalars(select(Outreach.attachments)).one() == "Təklif SP-1.pdf"
+        assert s.get(LetterApproval, approval.id).sent_at is not None
+
+
+def test_approval_rejects_blocked_files_and_ignores_another_opportunitys_files(factory, opp_id):
+    from datetime import datetime
+
+    from app.db.models import LetterApproval, LetterApprovalFile
+
+    c = TestClient(web.app)
+    r = c.post(f"/opportunities/{opp_id}/email/approval", data=LETTER, files=[("files", ("virus.exe", b"x", "x/y"))])
+    assert r.status_code == 200 and "Bu növ fayl göndərilə bilməz" in r.text
+    assert "Hörmətli Rauf bəy" in r.text  # qaralama itmir
+    with factory() as s:
+        assert s.scalars(select(LetterApproval)).first() is None
+        # başqa fürsətin təsdiq faylı bu fürsətin məktubuna qoşula bilməz
+        mine = s.get(Opportunity, opp_id)
+        other = Opportunity(title="Başqa", stage="new", lead_key=None, organization_id=mine.organization_id,
+                            created_at=datetime(2026, 11, 1), updated_at=datetime(2026, 11, 1))
+        s.add(other)
+        s.flush()
+        a = LetterApproval(opportunity_id=other.id, requested_by_id=1, to_address="a@b.az", subject="S", body="B" * 30)
+        s.add(a)
+        s.flush()
+        f = LetterApprovalFile(approval_id=a.id, filename="gizli.pdf", content_type="application/pdf", size=1, data=b"x")
+        s.add(f)
+        s.commit()
+        a_id, f_id = a.id, f.id
+    r = c.post(f"/opportunities/{opp_id}/email/approval", follow_redirects=False,
+               data=dict(LETTER, files_from=str(a_id), keep_files=[str(f_id)]))
+    assert r.status_code == 303
+    with factory() as s:
+        new = s.scalars(select(LetterApproval).where(LetterApproval.opportunity_id == opp_id)).one()
+        assert s.scalars(select(LetterApprovalFile).where(LetterApprovalFile.approval_id == new.id)).first() is None
