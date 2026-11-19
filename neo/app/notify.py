@@ -79,7 +79,7 @@ def fire_due(session: Session, user_id: int, now: datetime | None = None) -> int
         claimed = session.execute(update(Reminder).where(Reminder.id == r.id, Reminder.notified_at.is_(None))
                                   .values(notified_at=now)).rowcount
         if claimed:
-            link = f"/tools/contracts#c{r.contract_id}" if r.contract_id else "/me/reminders"
+            link = f"/contracts#c{r.contract_id}" if r.contract_id else "/me/reminders"
             when = (r.due_at + BAKU_OFFSET).strftime("%d.%m.%Y %H:%M")
             notify(session, user_id, f"Xatırlatma: {r.title} — {when}", link, commit=False)
     if due:

@@ -1,8 +1,9 @@
-"""Alətlər → Şirkət əlavə et: müştəri şirkət + onunla əməkdaşlıq razılaşmaları (bir neçə ola bilər).
+"""Alətlər → Şirkət əlavə et (/tools/contracts) və Satış → Müqavilələr (/contracts).
 
-Şirkət şirkət bazasına düşür (app/companies.py, dublikatsız); razılaşmalar sonra şirkət kartında
-(/companies/{id}) dəyişdirilir. Müddəti bitməyə yaxın olanlar (defolt 90 gün) burada görünür; hər istifadəçi
-özünə xatırlatma qurur (app/notify.py — "X gün/saat əvvəl" saytda bildiriş).
+"Şirkət əlavə et": şirkət analizinin göstərdiyi məlumatı (qısa məlumat, sahə, ölçü, catering uyğunluğu, əlaqə,
+rəhbərlər, xəbərlər, mənbələr) istifadəçi özü yazır — AI-sız. Şirkət şirkət bazasına düşür (app/companies.py,
+dublikatsız); `?org=<id>` ilə eyni forma mövcud şirkətin məlumatını dəyişir. Müqavilə bu səhifədə yoxdur:
+əməkdaşlıq razılaşmaları şirkət kartında (/companies/{id}#agreements) əlavə olunur, hamısı "Müqavilələr"dədir.
 """
 from __future__ import annotations
 
@@ -12,12 +13,12 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Depends, Form, Request
 from sqlalchemy import and_, delete, func, or_, select
 
-from app import companies
+from app import companies, company_analysis
 from app import notify as nt
 from app.auth import security
 from app.auth.security import REQUIRE, verify_csrf
 from app.crm_routes import BAKU_OFFSET, _go, _render
-from app.db.models import ClientContract, Reminder, User
+from app.db.models import ClientContract, Organization, Reminder, User
 
 router = APIRouter()
 
@@ -29,31 +30,27 @@ def _today() -> date:
     return (datetime.utcnow() + BAKU_OFFSET).date()
 
 
-@router.get("/tools/contracts")
-def contracts_page(request: Request, show: str = "soon", me: User = Depends(REQUIRE["sales"])):
-    today = _today()
-    with security.SessionLocal() as db:
-        nt.fire_due(db, me.id)
-        q = select(ClientContract).order_by(ClientContract.contract_end.is_(None), ClientContract.contract_end,
-                                            ClientContract.id.desc())
-        if show != "all":  # bitməyə yaxın: qüvvədə olan / layihə, bitmə tarixi 90 gün içində
-            q = q.where(ClientContract.contract_end <= today + timedelta(days=SOON_DAYS),
-                        ClientContract.status.in_(("active", "draft")))
-        rows = list(db.scalars(q))
-        total = db.scalar(select(func.count()).select_from(ClientContract)) or 0
-        mine: dict[int, list[Reminder]] = {}
-        if rows:
-            for r in db.scalars(select(Reminder).where(Reminder.user_id == me.id, Reminder.done_at.is_(None),
-                                                       Reminder.contract_id.in_([c.id for c in rows]))
-                                .order_by(Reminder.remind_at)):
-                mine.setdefault(r.contract_id, []).append(r)
-        authors = {u.id: u.full_name for u in db.scalars(select(User))}
+def _company_form(request: Request, form: dict, org: Organization | None = None, error: str | None = None):
     return _render(request, "contracts.html", {
-        "active": "contracts", "rows": rows, "show": show, "today": today, "soon_days": SOON_DAYS, "total": total,
-        "mine": mine, "authors": authors, "units": nt.UNIT_NAMES, "describe": nt.describe_before,
-        "remind_hour": REMIND_HOUR, "status_names": companies.AGREEMENT_STATUS_NAMES,
-        "shown_status": companies.shown_status,
+        "active": "contracts", "form": form, "org": org, "page_error": error,
+        "size_names": {k: company_analysis.SIZE_NAMES[k] for k in companies.MANUAL_SIZES},
+        "fit_names": {k: company_analysis.FIT_NAMES[k] for k in companies.MANUAL_FITS},
     })
+
+
+@router.get("/tools/contracts")
+def contracts_page(request: Request, org: str = "", me: User = Depends(REQUIRE["sales"])):
+    """Boş forma; `?org=<id>` — mövcud şirkətin əl ilə daxil edilmiş məlumatı ilə doldurulmuş."""
+    with security.SessionLocal() as db:
+        found = db.get(Organization, int(org)) if org.isdigit() else None
+        if org and found is None:
+            return _go("/companies", err="Şirkət tapılmadı")
+        form = companies.manual_form(companies.manual_of(found) if found else None)
+        if found is not None:
+            form.update(company_name=found.name, website=found.website or "", voen=found.voen or "")
+            for key in ("phone", "email", "industry"):   # kartda yazılmış əlaqə formada da görünsün
+                form[key] = form[key] or getattr(found, key) or ""
+        return _company_form(request, form, found)
 
 
 REGISTER_FILTERS = {"all": "Hamısı", "active": "Qüvvədə", "soon": f"Bitməyə yaxın ({SOON_DAYS} gün)",
@@ -115,67 +112,47 @@ def contracts_register(request: Request, show: str = "all", q: str = "", me: Use
     })
 
 
-def _agreements_from_form(title: list[str], description: list[str], starts_on: list[str], ends_on: list[str],
-                          status: list[str], contact: list[str]) -> list[dict]:
-    """Formdakı razılaşma blokları (eyni adlı sahələr siyahı kimi gəlir); tam boş blok atlanır.
-    Bir blok səhvdirsə — CompanyError, heç nə yazılmır."""
-    out = []
-    for i in range(len(title)):
-        get = lambda values: values[i] if i < len(values) else ""  # noqa: E731
-        if not any(get(v).strip() for v in (title, description, starts_on, ends_on, contact)):
-            continue
-        try:
-            out.append(companies.parse_agreement(get(title), get(description), get(starts_on), get(ends_on),
-                                                 get(status) or "active", get(contact)))
-        except companies.CompanyError as exc:
-            raise companies.CompanyError(f"Razılaşma {i + 1}: {exc}") from exc
-    return out
-
-
 @router.post("/tools/contracts", dependencies=[Depends(verify_csrf)])
-def contracts_add(company_name: str = Form(""), website: str = Form(""), voen: str = Form(""), notes: str = Form(""),
-                  title: list[str] = Form([]), description: list[str] = Form([]), starts_on: list[str] = Form([]),
-                  ends_on: list[str] = Form([]), status: list[str] = Form([]), contact: list[str] = Form([]),
-                  remind: str = Form(""), before: str = Form("30"), unit: str = Form("day"),
+def contracts_add(request: Request, org_id: str = Form(""), company_name: str = Form(""), website: str = Form(""),
+                  voen: str = Form(""), notes: str = Form(""), summary: str = Form(""), industry: str = Form(""),
+                  size: str = Form(""), size_note: str = Form(""), employees: str = Form(""),
+                  fit: str = Form(""), fit_reason: str = Form(""), founded: str = Form(""), phone: str = Form(""),
+                  email: str = Form(""), address: str = Form(""), locations: str = Form(""),
+                  key_people: str = Form(""), news: str = Form(""), sources: str = Form(""),
                   me: User = Depends(REQUIRE["sales"])):
+    """Şirkəti və əl ilə yazılmış məlumatını saxla. Səhv olanda forma yazılanlarla birlikdə geri qayıdır."""
+    raw = {"summary": summary, "industry": industry, "size": size, "size_note": size_note, "employees": employees,
+           "fit": fit, "fit_reason": fit_reason, "founded": founded, "phone": phone, "email": email,
+           "address": address, "locations": locations, "key_people": key_people, "news": news, "sources": sources}
     name = " ".join(company_name.split())[:300]
-    if len(name) < 2:
-        return _go("/tools/contracts", err="Şirkətin adını yaz")
-    try:
-        items = _agreements_from_form(title, description, starts_on, ends_on, status, contact)
-    except companies.CompanyError as exc:
-        return _go("/tools/contracts", err=str(exc))
+    form = {**raw, "company_name": name, "website": website.strip(), "voen": voen.strip(), "notes": notes}
     with security.SessionLocal() as db:
+        editing = db.get(Organization, int(org_id)) if org_id.isdigit() else None
+        if org_id and editing is None:
+            return _go("/companies", err="Şirkət tapılmadı")
+
+        def fail(message: str):
+            db.rollback()
+            return _company_form(request, form, editing, message)
+
+        if editing is None and len(name) < 2:
+            return fail("Şirkətin adını yaz")
         try:
-            org = companies.company_for(db, name, website, voen)
-        except companies.CompanyError as exc:
-            return _go("/tools/contracts", err=str(exc))
-        companies.list_company(org)
-        if notes.strip():  # mövcud şirkətin qeydi itməsin — yeni qeyd sonuna əlavə olunur
-            try:
+            fields = companies.parse_manual(raw)
+            # Dəyişərkən ad sabitdir (şirkət artıq tapılıb); sayt və VÖEN yalnız boşdursa doldurulur.
+            org = companies.company_for(db, editing.name if editing else name, website, voen)
+            if editing is not None and org.id != editing.id:
+                return fail("Bu sayt və ya VÖEN bazada başqa şirkətdədir")
+            if editing is None and notes.strip():  # mövcud şirkətin qeydi itməsin — yeni qeyd sonuna əlavə olunur
                 companies.save_notes(org, "\n\n".join(x for x in (org.notes, notes.strip()) if x), me.id)
-            except companies.CompanyError as exc:
-                db.rollback()
-                return _go("/tools/contracts", err=str(exc))
-        rows = [companies.add_agreement(db, org, fields, me.id) for fields in items]
+        except companies.CompanyError as exc:
+            return fail(str(exc))
+        if editing is None and companies.manual_of(org):
+            # Şirkət bazada var idi: yeni yazılanlar əvvəlkinin üstünə gəlir, toxunulmayan sahələr qalır.
+            fields = {**{k: v for k, v in companies.manual_of(org).items() if k not in ("by", "at")}, **fields}
+        companies.save_manual(org, fields, me.id)
         db.commit()
-        msg = f"«{org.name}» şirkət bazasında" + (f", {len(rows)} razılaşma əlavə olundu" if rows else "")
-        if remind == "1" and any(r.contract_end for r in rows):
-            try:
-                minutes = nt.before_minutes(before or "0", unit)
-                for row in rows:
-                    if row.contract_end is None:
-                        continue
-                    end = row.contract_end
-                    due = datetime(end.year, end.month, end.day, REMIND_HOUR) - BAKU_OFFSET
-                    if due - timedelta(minutes=minutes) < datetime.utcnow():
-                        raise nt.ReminderError(f"«{row.title}» üçün xatırlatma vaxtı keçmişdə qalır")
-                    nt.add_reminder(db, me.id, f"Müqavilə bitir: {org.name} — {row.title}", due, minutes,
-                                    contract_id=row.id)
-                msg += f"; xatırlatma: {nt.describe_before(minutes)}"
-            except nt.ReminderError as exc:
-                return _go(f"/companies/{org.id}#agreements", err=f"{msg}, amma xatırlatma qurulmadı: {exc}")
-    return _go(f"/companies/{org.id}#agreements", msg=msg)
+        return _go(f"/companies/{org.id}#manual", msg=f"«{org.name}» şirkət bazasında — məlumat yadda saxlandı")
 
 
 @router.post("/tools/contracts/{cid}/delete", dependencies=[Depends(verify_csrf)])
@@ -183,10 +160,10 @@ def contracts_delete(cid: int, me: User = Depends(REQUIRE["sales"])):
     with security.SessionLocal() as db:
         row = db.get(ClientContract, cid)
         if row is None:
-            return _go("/tools/contracts", err="Şirkət tapılmadı")
+            return _go("/contracts", err="Müqavilə tapılmadı")
         if row.created_by_id != me.id and not security.has_role(me, "manager"):
-            return _go("/tools/contracts", err="Başqasının əlavə etdiyi şirkəti yalnız menecer silə bilər")
+            return _go("/contracts", err="Başqasının əlavə etdiyi müqaviləni yalnız menecer silə bilər")
         db.execute(delete(Reminder).where(Reminder.contract_id == cid))
         db.delete(row)
         db.commit()
-    return _go("/tools/contracts", msg="Silindi")
+    return _go("/contracts", msg="Silindi")

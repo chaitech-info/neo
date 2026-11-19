@@ -77,6 +77,32 @@
     </details>
   </section>
 
+  {# Əl ilə daxil edilmiş məlumat ("Şirkət əlavə et") — AI analizindən ayrıdır, yenidən analiz onu silmir. #}
+  <section class="od-card" id="manual">
+    <h2>Şirkət haqqında (əl ilə yazılıb)</h2>
+    {% if manual %}
+      {% if manual.summary %}<p>{{ manual.summary }}</p>{% endif %}
+      <dl class="od-kv">
+        {% if manual.industry %}<dt>Sahə</dt><dd>{{ manual.industry }}</dd>{% endif %}
+        {% if manual.size or manual.size_note %}<dt>Ölçü</dt><dd>{{ size_names.get(manual.size, '') }}{% if manual.size and manual.size_note %} — {% endif %}{{ manual.size_note or '' }}</dd>{% endif %}
+        {% if manual.fit or manual.fit_reason %}<dt>Catering uyğunluğu</dt><dd>{% if manual.fit %}<b>{{ fit_names.get(manual.fit, manual.fit) }}</b>{% endif %}{% if manual.fit and manual.fit_reason %} — {% endif %}{{ manual.fit_reason or '' }}</dd>{% endif %}
+        {% if manual.employees %}<dt>İşçi sayı</dt><dd>{{ manual.employees }}</dd>{% endif %}
+        {% if manual.founded %}<dt>Təsis</dt><dd>{{ manual.founded }}</dd>{% endif %}
+        {% if manual.phone %}<dt>Telefon</dt><dd><a href="tel:{{ manual.phone }}">{{ manual.phone }}</a></dd>{% endif %}
+        {% if manual.email %}<dt>Email</dt><dd><a href="mailto:{{ manual.email }}">{{ manual.email }}</a></dd>{% endif %}
+        {% if manual.address %}<dt>Ünvan</dt><dd>{{ manual.address }}</dd>{% endif %}
+        {% if manual.locations %}<dt>Ofis və obyektlər</dt><dd>{{ manual.locations|join(' · ') }}</dd>{% endif %}
+        {% if manual.key_people %}<dt>Rəhbərlər</dt><dd>{% for p in manual.key_people %}{{ p.name }}{% if p.role %} ({{ p.role }}){% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</dd>{% endif %}
+        {% if manual.news %}<dt>Son xəbərlər</dt><dd>{% for n in manual.news %}{% if n.url %}<a href="{{ n.url }}" target="_blank" rel="noopener">{{ n.title }} ↗</a>{% else %}{{ n.title }}{% endif %}{% if not loop.last %}<br>{% endif %}{% endfor %}</dd>{% endif %}
+        {% if manual.sources %}<dt>Mənbələr</dt><dd>{% for u in manual.sources %}<a href="{{ u }}" target="_blank" rel="noopener">{{ u }}</a>{% if not loop.last %}<br>{% endif %}{% endfor %}</dd>{% endif %}
+      </dl>
+      <p class="od-hint">{% if manual.by in users %}{{ users[manual.by] }} · {% endif %}{{ manual.at[:10] if manual.at else '' }}</p>
+    {% else %}
+      <p class="od-empty">Bu şirkət haqqında əl ilə məlumat yazılmayıb.</p>
+    {% endif %}
+    <a class="mc-btn mc-btn-sm" href="/tools/contracts?org={{ org.id }}">{{ 'Məlumatı dəyiş' if manual else '+ Məlumat əlavə et' }}</a>
+  </section>
+
   <h2 class="cd-sec">Analiz</h2>
   {% if analysis %}
     {{ analysis_view(analysis, size_names, fit_names, heading=false) }}

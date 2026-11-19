@@ -106,42 +106,118 @@ def test_company_database_list_search_and_card(factory, fake_ai, monkeypatch):
 # --- Razılaşmalar --------------------------------------------------------------------------
 
 
-def test_add_company_with_several_agreements(factory):
+MANUAL = {
+    "company_name": "Azersun Holding MMC", "website": "azersun.az", "voen": "1234567890",
+    "summary": "Qida istehsalı üzrə holdinq.\nBakıda zavodları var.", "industry": "Qida istehsalı",
+    "size": "large", "size_note": "3 zavod", "employees": "≈4500", "fit": "high", "fit_reason": "Yeni zavod açır",
+    "founded": "1991", "phone": "+994 12 000 00 00", "email": "Info@Azersun.az", "address": "Bakı, Heydər Əliyev pr.",
+    "locations": "Bakı — baş ofis\n\nSumqayıt — zavod", "key_people": "Rauf Əliyev — Baş direktor\nAynur Məmmədova",
+    "news": "Yeni zavod açılır https://example.az/xeber\nİxrac artıb", "sources": "https://azersun.az/haqqimizda\nyox",
+}
+
+
+def test_add_company_page_is_a_manual_form_without_agreements(factory):
+    """"Şirkət əlavə et": analizdə çıxan sahələr əl ilə yazılır; müqavilə sahələri bu səhifədə yoxdur."""
     client = TestClient(web.app)
-    resp = client.post("/tools/contracts", data={
-        "company_name": "Azersun Holding MMC", "website": "azersun.az", "voen": "1234567890",
-        "title": ["Nahar xidməti", "", "Korporativ tədbir"], "description": ["300 nəfər", "", ""],
-        "starts_on": ["2026-01-01", "", "2026-12-20"], "ends_on": ["2027-01-01", "", ""],
-        "status": ["active", "active", "draft"], "contact": ["", "", ""], "remind": "",
-    }, follow_redirects=False)
+    page = client.get("/tools/contracts").text
+    for field in ("company_name", "summary", "industry", "size", "employees", "fit", "fit_reason", "founded",
+                  "phone", "email", "address", "locations", "key_people", "news", "sources", "notes"):
+        assert f'name="{field}"' in page, field
+    for gone in ('name="title"', 'name="starts_on"', 'name="ends_on"', 'name="remind"', "Razılaşmanın adı",
+                 "Bitməyə yaxın"):
+        assert gone not in page, gone
+
+    resp = client.post("/tools/contracts", data=MANUAL, follow_redirects=False)
     assert resp.status_code == 303 and "err=" not in resp.headers["location"]
     assert resp.headers["location"].startswith("/companies/")
     with factory() as s:
         org = s.scalars(select(Organization)).one()
-        rows = s.scalars(select(ClientContract).order_by(ClientContract.id)).all()
-        assert org.voen == "1234567890" and org.domain == "azersun.az"
-        assert [(r.title, r.status, r.contract_end) for r in rows] == [
-            ("Nahar xidməti", "active", date(2027, 1, 1)), ("Korporativ tədbir", "draft", None)]
-        assert all(r.organization_id == org.id for r in rows)
+        manual = companies.manual_of(org)
+        assert (org.voen, org.domain, org.industry, org.phone, org.email) == (
+            "1234567890", "azersun.az", "Qida istehsalı", "+994 12 000 00 00", "info@azersun.az")
+        assert org.listed_at is not None and org.analysed_at is None and companies.analysis_of(org) is None
+        assert not s.scalars(select(ClientContract)).all()
+    assert manual["summary"].startswith("Qida istehsalı") and (manual["size"], manual["fit"]) == ("large", "high")
+    assert manual["locations"] == ["Bakı — baş ofis", "Sumqayıt — zavod"]
+    assert manual["key_people"] == [{"name": "Rauf Əliyev", "role": "Baş direktor"}, {"name": "Aynur Məmmədova", "role": ""}]
+    assert manual["news"] == [{"title": "Yeni zavod açılır", "url": "https://example.az/xeber"}, {"title": "İxrac artıb", "url": ""}]
+    assert manual["sources"] == ["https://azersun.az/haqqimizda"] and manual["by"] == 1
 
-    # Eyni VÖEN ilə yenidən — yeni şirkət yaranmır, razılaşma mövcud şirkətə əlavə olunur.
-    client.post("/tools/contracts", data={"company_name": "Azersun", "voen": "1234567890",
-                                          "title": ["Su təchizatı"], "status": ["active"]})
+    card = client.get(f"/companies/{org.id}").text
+    for shown in ("Şirkət haqqında (əl ilə yazılıb)", "Qida istehsalı üzrə holdinq.", "Böyük", "Yüksək", "≈4500",
+                  "Rauf Əliyev", "Baş direktor", "Sumqayıt — zavod", "https://example.az/xeber",
+                  f"/tools/contracts?org={org.id}"):
+        assert shown in card, shown
+
+    # Eyni VÖEN ilə yenidən — yeni şirkət yaranmır; yeni yazılan üstünə gəlir, toxunulmayan qalır.
+    client.post("/tools/contracts", data={"company_name": "Azersun", "voen": "1234567890", "employees": "5000"})
     assert _org_count(factory) == 1
-    assert "Azersun Holding MMC" in client.get("/companies?show=agreements").text
+    with factory() as s:
+        manual = companies.manual_of(s.scalars(select(Organization)).one())
+    assert manual["employees"] == "5000" and manual["founded"] == "1991"
+
+
+def test_manual_info_is_edited_from_the_card_and_survives_ai_analysis(factory, fake_ai):
+    client = TestClient(web.app)
+    client.post("/tools/contracts", data=MANUAL)
+    with factory() as s:
+        org_id = s.scalars(select(Organization.id)).one()
+    form = client.get(f"/tools/contracts?org={org_id}").text
+    assert f'name="org_id" value="{org_id}"' in form and "Rauf Əliyev — Baş direktor" in form
+    assert "Yeni zavod açılır https://example.az/xeber" in form and 'value="large" selected' in form
+
+    # Dəyişəndə forma əvvəlkini əvəz edir: boş qoyulan sahə silinir.
+    resp = client.post("/tools/contracts", data={"org_id": str(org_id), "company_name": "başqa ad", "summary": "Yeni mətn",
+                                                 "fit": "low"}, follow_redirects=False)
+    assert resp.headers["location"].startswith(f"/companies/{org_id}")
+    with factory() as s:
+        org = s.get(Organization, org_id)
+        manual = companies.manual_of(org)
+        assert org.name == "Azersun Holding MMC" and _org_count(factory) == 1
+    assert {k: v for k, v in manual.items() if k not in ("by", "at")} == {"summary": "Yeni mətn", "fit": "low"}
+
+    client.post("/tools/company", data={"name": "Azersun Holding MMC"})       # AI analizi əl ilə yazılanı silmir
+    with factory() as s:
+        org = s.get(Organization, org_id)
+        assert companies.analysis_of(org)["ai"]["summary"] == AI["summary"]
+        assert companies.manual_of(org)["summary"] == "Yeni mətn"
+    card = client.get(f"/companies/{org_id}").text
+    assert "Yeni mətn" in card and AI["summary"] in card
+    assert "/companies" in client.get("/tools/contracts?org=99999", follow_redirects=False).headers["location"]
+
+
+def test_invalid_manual_form_saves_nothing_and_keeps_what_was_typed(factory):
+    client = TestClient(web.app)
+    bad_email = client.post("/tools/contracts", data={"company_name": "Azersun", "email": "yox", "summary": "Qalmalıdır"})
+    assert bad_email.status_code == 200 and "Email formatı yanlışdır" in bad_email.text
+    assert "Qalmalıdır" in bad_email.text and 'value="Azersun"' in bad_email.text
+    assert "Şirkətin adını yaz" in client.post("/tools/contracts", data={"company_name": " ", "summary": "x"}).text
+    assert "Seçim yanlışdır" in client.post("/tools/contracts", data={"company_name": "Azersun", "size": "huge"}).text
+    assert "VÖEN" in client.post("/tools/contracts", data={"company_name": "Azersun", "voen": "12"}).text
+    assert _org_count(factory) == 0
+
+
+def _agreements(client, factory, company: str, rows: list[dict]) -> int:
+    """Şirkəti əlavə et, razılaşmaları kartında yarat (müqavilə yalnız şirkət kartında əlavə olunur)."""
+    client.post("/tools/contracts", data={"company_name": company})
+    with factory() as s:
+        org_id = s.scalars(select(Organization.id).order_by(Organization.id.desc())).first()
+    for row in rows:
+        client.post(f"/companies/{org_id}/agreements", data=row)
+    return org_id
 
 
 def test_invalid_agreement_saves_nothing(factory):
     client = TestClient(web.app)
-    resp = client.post("/tools/contracts", data={
-        "company_name": "Azersun", "title": ["Nahar"], "starts_on": ["2027-02-01"], "ends_on": ["2027-01-01"],
-        "status": ["active"]}, follow_redirects=False)
+    org_id = _agreements(client, factory, "Azersun", [])
+    resp = client.post(f"/companies/{org_id}/agreements", data={
+        "title": "Nahar", "starts_on": "2027-02-01", "ends_on": "2027-01-01", "status": "active"}, follow_redirects=False)
     assert "err=" in resp.headers["location"]
-    bad_status = client.post("/tools/contracts", data={"company_name": "Azersun", "title": ["Nahar"],
-                                                       "status": ["unknown"]}, follow_redirects=False)
+    bad_status = client.post(f"/companies/{org_id}/agreements", data={"title": "Nahar", "status": "unknown"},
+                             follow_redirects=False)
     assert "err=" in bad_status.headers["location"]
     with factory() as s:
-        assert not s.scalars(select(ClientContract)).all() and _org_count(factory) == 0
+        assert not s.scalars(select(ClientContract)).all()
 
 
 def test_agreement_manage_on_company_card(factory):
@@ -182,12 +258,11 @@ def test_agreement_manage_on_company_card(factory):
 def test_contracts_register_filters_search_and_menu(factory):
     client = TestClient(web.app)
     later = date.today().replace(year=date.today().year + 2)
-    client.post("/tools/contracts", data={
-        "company_name": "Azersun MMC", "title": ["Nahar xidməti", "Tədbir", "Köhnə müqavilə"],
-        "starts_on": ["", "", "2020-01-01"], "ends_on": [later.isoformat(), "", "2021-01-01"],
-        "status": ["active", "draft", "active"], "contact": ["Aynur", "", ""], "remind": ""})
-    client.post("/tools/contracts", data={"company_name": "Sahil MMC", "title": ["Su"],
-                                          "status": ["terminated"], "remind": ""})
+    _agreements(client, factory, "Azersun MMC", [
+        {"title": "Nahar xidməti", "ends_on": later.isoformat(), "status": "active", "contact": "Aynur"},
+        {"title": "Tədbir", "status": "draft"},
+        {"title": "Köhnə müqavilə", "starts_on": "2020-01-01", "ends_on": "2021-01-01", "status": "active"}])
+    _agreements(client, factory, "Sahil MMC", [{"title": "Su", "status": "terminated"}])
 
     page = client.get("/contracts")
     assert page.status_code == 200

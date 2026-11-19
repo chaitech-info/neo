@@ -1081,6 +1081,12 @@ th.num, td.num { text-align: right; white-space: nowrap; font-variant-numeric: t
 .rs-bar select { min-height: 36px; }
 
 /* Təsdiq statusu */
+/* Şirkət əlavə et: əl ilə doldurulan forma (bölmələr kart-kart) */
+.cm-form { display: flex; flex-direction: column; gap: 16px; }
+.cm-form .od-card { margin: 0; }
+.cm-form .od-card > .kw-f { margin-top: 12px; }
+.cm-form textarea { width: 100%; resize: vertical; font: inherit; line-height: 1.5; }
+.cm-form input[readonly] { color: var(--tx2); background: var(--s2); }
 .ap { font-weight: 600; }
 /* Təsdiqə göndərilən məktubun faylları (Təsdiq gözləyənlər, fürsət səhifəsi, göndərmə formu) */
 .ap-attach { margin: 10px 0 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--s2); font-size: 14px; }

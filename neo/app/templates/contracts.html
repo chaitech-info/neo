@@ -1,69 +1,99 @@
 {% extends "base.html" %}
-{% block title %}Şirkət əlavə et — Neo{% endblock %}
-{% block main_class %}mc mc-kw{% endblock %}
+{% block title %}{{ 'Şirkətin məlumatını dəyiş' if org else 'Şirkət əlavə et' }} — Neo{% endblock %}
+{% block main_class %}mc mc-kw mc-opp{% endblock %}
 {% block content %}
-  {% from "_agreements.html" import agreement_fields %}
+  {# Şirkət analizinin göstərdiyi sahələr — əl ilə doldurulur (AI-sız). Müqavilə bu səhifədə yoxdur:
+     razılaşmalar şirkət kartında əlavə olunur. Sahələrin hamısı (addan başqa) istəyə görədir. #}
+  <nav class="od-crumb" aria-label="Yol"><a href="{{ '/companies/' ~ org.id if org else '/companies' }}">← {{ org.name if org else 'Şirkət bazası' }}</a></nav>
   <header class="ld-head">
-    <h1 class="mc-title">Şirkət əlavə et</h1>
-    <p class="ld-sub">Müştəri şirkəti və onunla əməkdaşlıq razılaşmalarını əlavə et — bir şirkətin bir neçə razılaşması ola bilər. Şirkət <a href="/companies">Şirkət bazasına</a> düşür, razılaşmaları sonra orada dəyişmək olar. Müddəti {{ soon_days }} gün ərzində bitənlər burada görünür; özünə xatırlatma qura bilərsən — vaxtı çatanda saytda bildiriş gələcək.</p>
+    <h1 class="mc-title">{{ 'Şirkətin məlumatını dəyiş' if org else 'Şirkət əlavə et' }}</h1>
+    <p class="ld-sub">{% if org %}«{{ org.name }}» haqqında əl ilə yazılmış məlumat. Boş qoyduğun sahə kartda göstərilmir.{% else %}Şirkəti və onun haqqında bildiklərini özün yaz — <a href="/tools/company">Şirkət analizi</a>ndə çıxan məlumatın eynisi, AI-sız. Yalnız ad məcburidir; şirkət <a href="/companies">Şirkət bazasına</a> düşür, qalanını sonra da əlavə etmək olar.{% endif %}</p>
   </header>
 
-  <section class="kw-sec">
-    <details class="kw-new" {% if not total or request.query_params.get('new') %}open{% endif %}>
-      <summary>+ Şirkət əlavə et</summary>
-      <form method="post" action="/tools/contracts" id="company-new">
-        {{ csrf_field(request) }}
-        <div class="kw-row" style="margin-top:0">
-          <label class="kw-f kw-g">Şirkətin adı<input name="company_name" required minlength="2" maxlength="300" placeholder="məs. Azersun MMC"></label>
-          <label class="kw-f">Sayt (istəyə görə)<input name="website" maxlength="300" placeholder="azersun.az"></label>
-          <label class="kw-f">VÖEN (istəyə görə)<input name="voen" maxlength="10" pattern="\d{10}" inputmode="numeric" title="10 rəqəm"></label>
-        </div>
-        <label class="kw-f">Əlavə qeydlər (istəyə görə)<textarea name="notes" rows="2" maxlength="10000" placeholder="şirkət haqqında istənilən qeyd"></textarea></label>
-        <p class="od-hint">Bu şirkət bazada varsa (eyni VÖEN, sayt və ya ad), yenisi yaranmır — razılaşmalar və qeyd mövcud şirkətə əlavə olunur.</p>
+  <form method="post" action="/tools/contracts" id="company-new" class="cm-form" data-once>
+    {{ csrf_field(request) }}
+    {% if org %}<input type="hidden" name="org_id" value="{{ org.id }}">{% endif %}
 
-        <div data-agreements>
-          <fieldset class="ag-set" data-agreement>
-            <legend>Əməkdaşlıq razılaşması <span data-agreement-n>1</span> <small>(istəyə görə — boş qalsa yalnız şirkət əlavə olunur)</small></legend>
-            {{ agreement_fields(status_names, required=false) }}
-          </fieldset>
-        </div>
-        <button class="mc-btn mc-btn-sm" type="button" data-agreement-add>+ Daha bir razılaşma</button>
+    <section class="od-card">
+      <h2>Şirkət</h2>
+      <div class="kw-row" style="margin-top:0">
+        <label class="kw-f kw-g">Şirkətin adı{% if not org %} *{% endif %}<input name="company_name" {% if org %}readonly{% else %}required minlength="2" autofocus{% endif %} maxlength="300" value="{{ form.company_name or '' }}" placeholder="məs. Azersun MMC"></label>
+        <label class="kw-f">Sayt<input name="website" maxlength="300" value="{{ form.website or '' }}" placeholder="azersun.az" {% if org and org.website %}readonly{% endif %}></label>
+        <label class="kw-f">VÖEN<input name="voen" maxlength="10" pattern="\d{10}" inputmode="numeric" title="10 rəqəm" value="{{ form.voen or '' }}" {% if org and org.voen %}readonly{% endif %}></label>
+      </div>
+      {% if org %}<p class="od-hint">Ad, mövcud sayt və VÖEN burada dəyişmir — saytı və VÖEN-i şirkət kartında “Məlumatı dəyiş”dən düzəlt.</p>
+      {% else %}<p class="od-hint">Bu şirkət bazada varsa (eyni VÖEN, sayt və ya ad), yenisi yaranmır — yazdıqların mövcud şirkətə əlavə olunur.</p>{% endif %}
+      <label class="kw-f">Qısa məlumat — kimdir, nə iş görür, harada<textarea name="summary" rows="3" maxlength="2000" placeholder="məs. Qida istehsalı və pərakəndə satış üzrə holdinq; Bakıda və regionlarda zavodları var.">{{ form.summary or '' }}</textarea></label>
+      <div class="kw-row">
+        <label class="kw-f kw-g">Sahə<input name="industry" maxlength="300" value="{{ form.industry or '' }}" placeholder="məs. Qida istehsalı"></label>
+        <label class="kw-f">Təsis ili<input name="founded" maxlength="50" value="{{ form.founded or '' }}" placeholder="1991"></label>
+      </div>
+    </section>
 
-        <div class="kw-row ct-remind">
-          <label class="kw-chk"><input type="checkbox" name="remind" value="1" checked>Bitmə tarixindən əvvəl mənə xatırlat</label>
-          <label class="kw-f"><span class="sr">Neçə</span><input type="number" name="before" min="0" max="365" value="30" inputmode="numeric" aria-label="Neçə əvvəl"></label>
-          <label class="kw-f"><span class="sr">Vahid</span><select name="unit" aria-label="Vahid">{% for k, v in units.items() %}<option value="{{ k }}" {% if k == 'day' %}selected{% endif %}>{{ v }} əvvəl</option>{% endfor %}</select></label>
-        </div>
-        <button class="mc-btn mc-btn-hero" type="submit">Əlavə et</button>
-      </form>
-    </details>
-  </section>
+    <section class="od-card">
+      <h2>Ölçü və catering uyğunluğu</h2>
+      <div class="kw-row" style="margin-top:0">
+        <label class="kw-f">Ölçü<select name="size"><option value="">— seçilməyib —</option>{% for k, v in size_names.items() %}<option value="{{ k }}" {% if form.size == k %}selected{% endif %}>{{ v }}</option>{% endfor %}</select></label>
+        <label class="kw-f">İşçi sayı<input name="employees" maxlength="200" value="{{ form.employees or '' }}" placeholder="məs. ≈450"></label>
+        <label class="kw-f kw-g">Ölçü haqqında qeyd<input name="size_note" maxlength="300" value="{{ form.size_note or '' }}" placeholder="məs. 3 zavod, 2 ofis"></label>
+      </div>
+      <div class="kw-row">
+        <label class="kw-f">Catering uyğunluğu<select name="fit"><option value="">— seçilməyib —</option>{% for k, v in fit_names.items() %}<option value="{{ k }}" {% if form.fit == k %}selected{% endif %}>{{ v }}</option>{% endfor %}</select></label>
+        <label class="kw-f kw-g">Niyə belə qiymətləndirirsən<input name="fit_reason" maxlength="1000" value="{{ form.fit_reason or '' }}" placeholder="məs. Yeni zavod açır, işçi naharı lazım olacaq"></label>
+      </div>
+    </section>
 
-  <div class="ld-filter" role="group" aria-label="Hansı razılaşmalar">
-    <a class="{{ 'on' if show != 'all' else '' }}" href="/tools/contracts">Bitməyə yaxın ({{ soon_days }} gün)</a>
-    <a class="{{ 'on' if show == 'all' else '' }}" href="/tools/contracts?show=all">Hamısı <i>{{ total }}</i></a>
-  </div>
+    <section class="od-card">
+      <h2>Əlaqə və ünvanlar</h2>
+      <div class="kw-row" style="margin-top:0">
+        <label class="kw-f">Telefon<input name="phone" maxlength="64" value="{{ form.phone or '' }}" placeholder="+994 12 000 00 00"></label>
+        <label class="kw-f kw-g">Email<input type="email" name="email" maxlength="254" value="{{ form.email or '' }}" placeholder="info@sirket.az"></label>
+      </div>
+      <label class="kw-f">Ünvan<input name="address" maxlength="500" value="{{ form.address or '' }}" placeholder="baş ofisin ünvanı"></label>
+      <label class="kw-f">Ofis və obyektlər — hər sətirdə biri<textarea name="locations" rows="3" placeholder="Bakı, Babək pr. — baş ofis&#10;Sumqayıt — zavod">{{ form.locations or '' }}</textarea></label>
+    </section>
 
-  {% if rows %}
-  {% set back = "/tools/contracts?show=" ~ show %}
-  {% include "_contract_list.html" %}
-  {% else %}
-    <div class="empty"><b>{{ 'Yaxın ' ~ soon_days ~ ' gündə bitən razılaşma yoxdur' if show != 'all' else 'Hələ razılaşma əlavə edilməyib' }}</b>{% if show != 'all' and total %}<a href="/tools/contracts?show=all">Hamısına bax</a>{% endif %}</div>
-  {% endif %}
+    <section class="od-card">
+      <h2>Rəhbərlər və qərar verənlər</h2>
+      <label class="kw-f">Hər sətirdə bir nəfər: Ad — vəzifə<textarea name="key_people" rows="4" placeholder="Rauf Əliyev — Baş direktor&#10;Aynur Məmmədova — HR rəhbəri">{{ form.key_people or '' }}</textarea></label>
+    </section>
+
+    <section class="od-card">
+      <h2>Xəbərlər və mənbələr</h2>
+      <label class="kw-f">Son xəbərlər — hər sətirdə biri: başlıq və (varsa) link<textarea name="news" rows="3" placeholder="Yeni zavod açılır https://example.az/xeber">{{ form.news or '' }}</textarea></label>
+      <label class="kw-f">Mənbələr — hər sətirdə bir link<textarea name="sources" rows="2" placeholder="https://sirket.az/haqqimizda">{{ form.sources or '' }}</textarea></label>
+    </section>
+
+    {% if not org %}
+    <section class="od-card">
+      <h2>Əlavə qeydlər</h2>
+      <label class="kw-f"><span class="sr">Əlavə qeydlər</span><textarea name="notes" rows="3" maxlength="10000" placeholder="Şirkət haqqında istənilən qeyd: kimlə danışılıb, nə razılaşdırılıb…">{{ form.notes or '' }}</textarea></label>
+    </section>
+    {% endif %}
+
+    <div class="em-act">
+      <button class="mc-btn mc-btn-hero" type="submit" data-busy="Saxlanılır…">{{ 'Yadda saxla' if org else 'Şirkəti əlavə et' }}</button>
+      <a class="mc-btn" href="{{ '/companies/' ~ org.id if org else '/companies' }}">Ləğv et</a>
+    </div>
+    {% if not org %}<p class="od-hint">Müqavilə (əməkdaşlıq razılaşması) şirkət əlavə olunandan sonra onun kartında əlavə edilir.</p>{% endif %}
+  </form>
 
   <script>
-    /* "+ Daha bir razılaşma": ilk blokun boş nüsxəsi əlavə olunur (sahələr eyni adla — server siyahı kimi oxuyur). */
-    (function () {
-      var box = document.querySelector('[data-agreements]'), add = document.querySelector('[data-agreement-add]');
-      if (!box || !add) return;
-      add.addEventListener('click', function () {
-        var first = box.querySelector('[data-agreement]'), copy = first.cloneNode(true);
-        copy.querySelectorAll('input, textarea').forEach(function (el) { el.value = ''; });
-        copy.querySelectorAll('select').forEach(function (el) { el.value = 'active'; });
-        copy.querySelector('[data-agreement-n]').textContent = box.children.length + 1;
-        box.appendChild(copy);
-        copy.querySelector('input').focus();
+    document.querySelectorAll('form[data-once]').forEach(function (f) {
+      f.addEventListener('submit', function (e) {
+        if (f.dataset.sent) { e.preventDefault(); return; }
+        f.dataset.sent = '1';
+        var b = f.querySelector('button[type=submit]');
+        if (b) { b.disabled = true; if (b.dataset.busy) b.textContent = b.dataset.busy; }
       });
-    })();
+    });
+    window.addEventListener('pageshow', function (e) {   // geri düyməsi ilə qayıdanda forma yenidən işləsin
+      if (!e.persisted) return;
+      document.querySelectorAll('form[data-once]').forEach(function (f) {
+        delete f.dataset.sent;
+        var b = f.querySelector('button[type=submit]');
+        if (b) { b.disabled = false; b.textContent = {{ ('Yadda saxla' if org else 'Şirkəti əlavə et')|tojson }}; }
+      });
+    });
   </script>
 {% endblock %}

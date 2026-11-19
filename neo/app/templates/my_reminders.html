@@ -33,7 +33,7 @@
       <li class="tk {{ 'is-late' if late else '' }} {{ 'is-done' if r.done_at else '' }}">
         <div class="tk-main">
           <b>{{ r.title }}</b>
-          {% if r.contract_id %}<a href="/tools/contracts#c{{ r.contract_id }}">Müqavilə →</a>{% endif %}
+          {% if r.contract_id %}<a href="/contracts#c{{ r.contract_id }}">Müqavilə →</a>{% endif %}
           {% if r.note %}<details class="od-more"><summary>Qeyd</summary>{{ r.note }}</details>{% endif %}
         </div>
         <div class="tk-side">

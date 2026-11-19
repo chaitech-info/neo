@@ -38,6 +38,7 @@ def _card_context(db, org: Organization) -> dict:
     users = {u.id: u.full_name for u in db.scalars(select(User))}
     return {
         "active": "company_db", "org": org, "analysis": companies.analysis_of(org),
+        "manual": companies.manual_of(org),
         "agreements": companies.agreements_of(db, org.id),
         "opportunities": list(db.scalars(select(Opportunity).where(Opportunity.organization_id == org.id)
                                          .order_by(Opportunity.updated_at.desc()).limit(20))),

@@ -105,7 +105,9 @@ def save_analysis(session: Session, result: dict, website: str | None, user_id: 
     org = company_for(session, result["name"], website or result.get("site"))
     ai = result.get("ai") or {}
     facts = result.get("facts") or {}
+    manual = manual_of(org)   # əl ilə daxil edilmiş məlumat AI analizi ilə silinmir
     org.analysis = json.dumps({
+        **({"manual": manual} if manual else {}),
         "name": result["name"], "ai": ai, "site": result.get("site") or "", "site_ok": bool(result.get("site_ok")),
         "found": [_plain(f) for f in result.get("found") or []],
         "facts": {"leads": len(facts.get("leads") or []), "opportunities": facts.get("opportunities") or 0},
@@ -145,6 +147,102 @@ def analysis_of(org: Organization) -> dict | None:
     except ValueError:
         return None
     return data if isinstance(data, dict) and isinstance(data.get("ai"), dict) else None
+
+
+# --- Əl ilə daxil edilən məlumat ("Şirkət əlavə et") -------------------------------------
+# Şirkət analizinin göstərdiyi sahələri istifadəçi özü yazır. `organizations.analysis` JSON-unda "manual"
+# açarı altında saxlanılır — AI analizi ("ai") ilə yanaşı, biri o birini silmir.
+
+MANUAL_TEXT = {"summary": 2000, "industry": 300, "size_note": 300, "fit_reason": 1000, "employees": 200,
+               "founded": 50, "phone": 64, "email": 254, "address": 500}
+MANUAL_SIZES = ("small", "medium", "large")
+MANUAL_FITS = ("high", "medium", "low")
+MANUAL_LIST_MAX = 20
+_URL_RE = re.compile(r"https?://\S+")
+_ROLE_SPLIT_RE = re.compile(r"\s+[—–-]\s+|\s*[|;]\s*|,\s+")
+
+
+def _lines(text: str | None, width: int = 300) -> list[str]:
+    return [" ".join(x.split())[:width] for x in (text or "").replace("\r", "").split("\n") if x.strip()][:MANUAL_LIST_MAX]
+
+
+def parse_manual(form: dict) -> dict:
+    """Formadan gələn mətnlər → saxlanılan məlumat (yalnız doldurulmuş sahələr). Səhvdə CompanyError.
+    Siyahılar hər sətirdə bir maddədir: rəhbər — "Ad — vəzifə", xəbər — "Başlıq https://link"."""
+    from app.contacts import EMAIL_RE
+
+    out: dict = {}
+    for key, width in MANUAL_TEXT.items():
+        value = (form.get(key) or "").strip() if key == "summary" else " ".join((form.get(key) or "").split())
+        if value:
+            out[key] = value[:width]
+    if "email" in out:
+        out["email"] = out["email"].lower()
+        if not EMAIL_RE.fullmatch(out["email"]):
+            raise CompanyError("Email formatı yanlışdır")
+    for key, allowed in (("size", MANUAL_SIZES), ("fit", MANUAL_FITS)):
+        value = (form.get(key) or "").strip()
+        if value and value not in allowed:
+            raise CompanyError("Seçim yanlışdır — səhifəni yeniləyib yenidən cəhd et")
+        if value:
+            out[key] = value
+    locations = _lines(form.get("locations"), 160)
+    people = []
+    for line in _lines(form.get("key_people")):
+        parts = _ROLE_SPLIT_RE.split(line, 1)
+        people.append({"name": parts[0].strip()[:120], "role": parts[1].strip()[:120] if len(parts) > 1 else ""})
+    news = []
+    for line in _lines(form.get("news"), 700):
+        url = _URL_RE.search(line)
+        title = (line[:url.start()] + line[url.end():]).strip(" -—–|") if url else line
+        news.append({"title": (title or (url.group(0) if url else ""))[:200], "url": url.group(0)[:500] if url else ""})
+    sources = [u.group(0)[:500] for u in (_URL_RE.search(x) for x in _lines(form.get("sources"), 500)) if u]
+    for key, value in (("locations", locations), ("key_people", people), ("news", news), ("sources", sources)):
+        if value:
+            out[key] = value
+    return out
+
+
+def save_manual(org: Organization, fields: dict, user_id: int | None) -> None:
+    """Əl ilə daxil edilmiş məlumatı yaz (əvvəlkini əvəz edir; boşdursa silinir). Telefon, email və sahə
+    şirkətin öz sahələrinə də yazılır (kartın "Məlumat" bölməsi, axtarış)."""
+    try:
+        data = json.loads(org.analysis) if org.analysis else {}
+    except ValueError:
+        data = {}
+    data = data if isinstance(data, dict) else {}
+    if fields:
+        data["manual"] = {**fields, "by": user_id, "at": datetime.utcnow().isoformat(timespec="seconds")}
+    else:
+        data.pop("manual", None)
+    org.analysis = json.dumps(data, ensure_ascii=False) if data else None
+    for key in ("phone", "email", "industry"):
+        if fields.get(key):
+            setattr(org, key, fields[key])
+    list_company(org)
+
+
+def manual_of(org: Organization) -> dict | None:
+    if not org.analysis:
+        return None
+    try:
+        data = json.loads(org.analysis)
+    except ValueError:
+        return None
+    manual = data.get("manual") if isinstance(data, dict) else None
+    return manual if isinstance(manual, dict) and manual else None
+
+
+def manual_form(manual: dict | None) -> dict:
+    """Saxlanmış məlumat → formanın sahələri (siyahılar yenidən sətir-sətir mətnə çevrilir)."""
+    m = manual or {}
+    form = {k: m.get(k, "") for k in (*MANUAL_TEXT, "size", "fit")}
+    form["locations"] = "\n".join(m.get("locations") or [])
+    form["key_people"] = "\n".join(f"{p['name']} — {p['role']}" if p.get("role") else p.get("name", "")
+                                   for p in m.get("key_people") or [])
+    form["news"] = "\n".join(" ".join(x for x in (n.get("title"), n.get("url")) if x) for n in m.get("news") or [])
+    form["sources"] = "\n".join(m.get("sources") or [])
+    return form
 
 
 # --- Əlavə qeydlər ----------------------------------------------------------------------
