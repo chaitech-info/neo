@@ -12,7 +12,8 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import inspect
+from alembic.script import ScriptDirectory
+from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 
 BASELINE = "0001"
@@ -28,8 +29,30 @@ def alembic_config(connection=None) -> Config:
     return cfg
 
 
+def head_revision() -> str | None:
+    return ScriptDirectory.from_config(alembic_config()).get_current_head()
+
+
+def upgrade_if_behind(engine: Engine) -> bool:
+    """Vercel-də soyuq başlanğıc üçün: bir sorğu ilə bazanın versiyası yoxlanılır, yalnız geridədirsə miqrasiya
+    işləyir (True). Əvvəl Vercel-də miqrasiya heç işləmirdi — yeni sütunlu kod deploy olunanda səhifələr 500
+    verirdi (0018). Paralel instansiyalar üst-üstə düşməsin deyə miqrasiya advisory lock altında gedir."""
+    try:
+        with engine.connect() as connection:
+            current = connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
+    except Exception:
+        current = None   # cədvəl yoxdur (boş / köhnə baza) — upgrade_to_head özü həll edir
+    if current is not None and current == head_revision():
+        return False
+    upgrade_to_head(engine)
+    return True
+
+
 def upgrade_to_head(engine: Engine) -> None:
     with engine.begin() as connection:
+        if connection.dialect.name == "postgresql":
+            # Eyni anda başlayan ikinci proses gözləyir, sonra bazanı artıq yenilənmiş tapır (upgrade boş keçir).
+            connection.execute(text("SELECT pg_advisory_xact_lock(81500118)"))
         tables = set(inspect(connection).get_table_names())
         cfg = alembic_config(connection)
         if "leads" in tables and "alembic_version" not in tables:

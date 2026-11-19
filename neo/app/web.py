@@ -249,8 +249,8 @@ def on_startup() -> None:
     # Baza Alembic miqrasiyaları ilə ən son sxemə gətirilir (köhnə baza da
     # itkisiz yenilənir) — bax app/db/migrate.py. Sonra köhnə lead-lər yeni
     # sahələrlə (son tarix, tender) doldurulur — idempotent, bax app/db/backfill.py.
-    # Vercel-də hər soyuq başlanğıcda miqrasiya etmirik (yavaş, paralel instansiyalar
-    # üst-üstə düşər) — orada baza bir dəfə `python -m scripts.init_db` ilə hazırlanır.
+    # Vercel-də hər soyuq başlanğıcda tam miqrasiya etmirik (yavaş): orada api/index.py modul yüklənəndə bir
+    # sorğu ilə versiyanı yoxlayır və yalnız baza geridədirsə yeniləyir (app/db/migrate.py::upgrade_if_behind).
     if SERVERLESS:
         return
     upgrade_to_head(engine)

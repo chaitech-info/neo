@@ -76,6 +76,23 @@ def test_legacy_database_is_upgraded_without_data_loss(engine):
         assert c.execute(text("SELECT is_active FROM sources WHERE key='oldsource'")).scalar() == 0
 
 
+def test_serverless_start_migrates_only_a_database_that_is_behind(engine, monkeypatch):
+    """Vercel-də soyuq başlanğıc: baza geridədirsə (yeni miqrasiyalı deploy) yenilənir, deyilsə toxunulmur.
+    Əvvəl Vercel-də miqrasiya işləmirdi — 0018-dən sonra /tools/offers 500 verirdi."""
+    from app.db import migrate
+
+    assert migrate.upgrade_if_behind(engine) is True          # boş baza
+    assert _version(engine) == migrate.head_revision() == "0018"
+    with engine.begin() as c:
+        command.downgrade(alembic_config(c), "0017")
+    assert "design" not in {c["name"] for c in inspect(engine).get_columns("offers")}
+    assert migrate.upgrade_if_behind(engine) is True          # bir miqrasiya geridə
+    assert "design" in {c["name"] for c in inspect(engine).get_columns("offers")}
+    assert "letter_approval_files" in inspect(engine).get_table_names()
+    monkeypatch.setattr(migrate, "upgrade_to_head", lambda e: pytest.fail("yenilənmiş bazaya toxunulmamalıdır"))
+    assert migrate.upgrade_if_behind(engine) is False
+
+
 def test_models_match_migrations(engine):
     """Model dəyişib miqrasiya yazılmayıbsa (və ya əksinə) — bu test düşür."""
     upgrade_to_head(engine)
