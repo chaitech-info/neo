@@ -45,7 +45,7 @@ def test_fresh_database_gets_full_schema_and_seed(engine):
 
     tables = set(inspect(engine).get_table_names())
     assert CRM_TABLES | {"leads", "alembic_version"} <= tables
-    assert _version(engine) == "0018"
+    assert _version(engine) == "0019"
     assert "items_fetched" in {c["name"] for c in inspect(engine).get_columns("scrape_runs")}
     with engine.connect() as c:
         assert c.execute(text("SELECT code FROM roles ORDER BY code")).scalars().all() == [
@@ -66,7 +66,7 @@ def test_legacy_database_is_upgraded_without_data_loss(engine):
     upgrade_to_head(engine)
     upgrade_to_head(engine)  # ikinci dəfə — heç nə etməməlidir
 
-    assert _version(engine) == "0018"
+    assert _version(engine) == "0019"
     cols = {c["name"] for c in inspect(engine).get_columns("leads")}
     assert NEW_LEAD_COLUMNS <= cols
     with engine.connect() as c:
@@ -82,7 +82,7 @@ def test_serverless_start_migrates_only_a_database_that_is_behind(engine, monkey
     from app.db import migrate
 
     assert migrate.upgrade_if_behind(engine) is True          # boş baza
-    assert _version(engine) == migrate.head_revision() == "0018"
+    assert _version(engine) == migrate.head_revision() == "0019"
     with engine.begin() as c:
         command.downgrade(alembic_config(c), "0017")
     assert "design" not in {c["name"] for c in inspect(engine).get_columns("offers")}

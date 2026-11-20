@@ -40,6 +40,13 @@ def no_real_offer_agent_packages(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_real_offer_price_ai(monkeypatch):
+    """Sorğudakı qiyməti AI oxuyur (app/offer_price.py) — testlər OpenAI-yə getməsin: "cavab yoxdur", yəni
+    sadə qayda işləyir. AI yolunu yoxlayan test bunu öz monkeypatch-i ilə əvəz edir."""
+    monkeypatch.setattr("app.offer_price._by_ai", lambda text: (False, None))
+
+
+@pytest.fixture(autouse=True)
 def no_real_ai_triage(monkeypatch):
     """Testlər OpenAI-yə getməsin: triaj defolt olaraq "AI yoxdur" (None) qaytarır,
     scraper-lər yalnız açar sözlərlə işləyir. Triajı yoxlayan test bunu öz

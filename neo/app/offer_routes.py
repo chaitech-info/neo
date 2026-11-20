@@ -6,6 +6,7 @@ JSON çağırışlarında CSRF tokeni `X-CSRF-Token` başlığı ilə gəlir.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import hmac
 from decimal import Decimal, InvalidOperation
@@ -18,7 +19,7 @@ from sqlalchemy import select
 from starlette.concurrency import run_in_threadpool
 
 from app import offer_client as agent
-from app import dishes, offer_pdf, package_menus
+from app import dishes, offer_pdf, offer_price, package_menus
 from app.auth import security
 from app.auth.security import REQUIRE, csrf_token
 from app.db.models import Dish, LeadRecord, OfferRecord, User
@@ -66,14 +67,16 @@ def _to_decimal(value: Any) -> Decimal | None:
 
 
 def record_offer(db, data: dict, body: dict, user: User, lead_id: str | None,
-                 pictures: bool = False, design: str = offer_pdf.DEFAULT_DESIGN) -> OfferRecord:
+                 pictures: bool = False, design: str = offer_pdf.DEFAULT_DESIGN,
+                 price: Decimal | None = None) -> OfferRecord:
+    """`price` — sorğuda istənən 1 nəfərlik qiymət (app/offer_price.py); `data` artıq onunla hesablanıb."""
     totals = data.get("totals") or {}
     record = OfferRecord(
         offer_id=str(data["offer_id"]), brand=body["brand"],
         customer_name=(data.get("customer_name") or body.get("customer_name") or None),
         total=_to_decimal(totals.get("total")), currency=totals.get("currency"),
         sample=bool(data.get("sample")), created_by_id=user.id, lead_id=lead_id, pictures=pictures,
-        design=offer_pdf.design_code(design),
+        design=offer_pdf.design_code(design), unit_price_override=price,
     )
     db.add(record)
     db.commit()
@@ -124,13 +127,23 @@ def render_pdf(snapshot: dict, pictures: bool = False, design: str = offer_pdf.D
     return offer_pdf.render(snapshot, photos, plans, design=design)
 
 
-def _render_base64(data: dict, pictures: bool = False, design: str = offer_pdf.DEFAULT_DESIGN) -> str:
+def _render_base64(data: dict, pictures: bool = False, design: str = offer_pdf.DEFAULT_DESIGN,
+                   price: Decimal | None = None) -> str:
     # Agentin "yarat" cavabında sətirlər menyusuz gəlir — PDF boş menyu ilə qurulurdu (tarixçə isə düzgün idi,
     # çünki tam təklifi get_offer ilə alır). Menyusu olmayan sətir varsa tam təklif götürülür.
     lines = [l for l in data.get("lines") or [] if isinstance(l, dict)]
     full = lines and all(l.get("menu") for l in lines)
-    snapshot = data if full else agent.get_offer(str(data["offer_id"]))
+    snapshot = data if full else offer_price.apply_price(agent.get_offer(str(data["offer_id"])), price)
     return base64.b64encode(render_pdf(snapshot, pictures, design)).decode()
+
+
+def _request_text(raw: dict) -> str:
+    """İstifadəçinin yazdığı sorğu (söhbətdə — bütün öz mesajları): qiymət göstərişi buradan oxunur."""
+    messages = raw.get("messages")
+    if isinstance(messages, list) and messages:
+        return "\n\n".join(m["content"] for m in messages
+                           if isinstance(m, dict) and m.get("role") == "user" and isinstance(m.get("content"), str))
+    return raw.get("message") if isinstance(raw.get("message"), str) else ""
 
 
 @router.post("/api/offers")
@@ -147,17 +160,35 @@ async def offers_create(request: Request, me: User = Depends(REQUIRE["sales"]),
     design = offer_pdf.design_code(raw.get("design"))
 
     # Agent çağırışı (60 s-ə qədər) və DB sinxrondur — threadpool-da, yoxsa async route bütün paneli dondururdu.
+    # Sorğuda qiymət yazılıbsa ("8 yox 5 azn et") — agent onu nəzərə almır, Neo tətbiq edir. Agentlə paralel
+    # oxunur ki, Vercel-in 60 saniyəsinə əlavə vaxt düşməsin.
+    price_task = asyncio.ensure_future(run_in_threadpool(offer_price.requested_price, _request_text(raw)))
     try:
         data = await run_in_threadpool(agent.create_offer, body)
     except agent.OfferAgentError as exc:
+        price_task.cancel()
         return _agent_error(exc)
     if data["status"] != "ok":
+        price_task.cancel()
         return JSONResponse(data)
+    price = await price_task
+    priced = offer_price.apply_price(data, price)
+    if priced is data:
+        price = None            # bir neçə paketli təklif — qiymət tətbiq olunmadı, saxlanmır
+    else:
+        old = next((l.get("unit_price") for l in data.get("lines") or [] if isinstance(l, dict)), None)
+        data = priced
     # Önizləmə/yükləmə də Neo-nun dizaynında olsun (agentin pdf_base64-ü əvəzinə; alınmasa agentinki qalır).
     try:
-        data["pdf_base64"] = await run_in_threadpool(_render_base64, data, pictures, design)
+        data["pdf_base64"] = await run_in_threadpool(_render_base64, data, pictures, design, price)
     except Exception:
         log.exception("offer_pdf_render_failed", offer_id=data.get("offer_id"))
+        if price is not None:
+            data.pop("pdf_base64", None)   # agentin PDF-i köhnə qiymətlədir — brauzer PDF-i Neo-dan ayrıca alır
+    if price is not None:   # nəticə panelində görünsün (PDF-ə düşmür)
+        data["assumptions"] = [*(data.get("assumptions") or []),
+                               f"Qiymət sorğudakı kimi götürüldü: 1 nəfər üçün {price.normalize():f} AZN"
+                               + (f" (paketdə {old} AZN)" if old not in (None, "") else "") + "."]
 
     def save() -> None:
         nonlocal lead_id
@@ -165,7 +196,7 @@ async def offers_create(request: Request, me: User = Depends(REQUIRE["sales"]),
             if lead_id and db.get(LeadRecord, lead_id) is None:
                 lead_id = None
             if db.scalar(select(OfferRecord.id).where(OfferRecord.offer_id == str(data["offer_id"]))) is None:
-                record_offer(db, data, body, me, lead_id, pictures, design)
+                record_offer(db, data, body, me, lead_id, pictures, design, price)
 
     try:
         await run_in_threadpool(save)
@@ -174,7 +205,7 @@ async def offers_create(request: Request, me: User = Depends(REQUIRE["sales"]),
         log.exception("offer_record_failed", offer_id=data.get("offer_id"))
     log.info("offer_created", offer_id=data["offer_id"], brand=body["brand"], user=me.email,
              total=(data.get("totals") or {}).get("total"), sample=bool(data.get("sample")), lead=lead_id,
-             pictures=pictures, design=design)
+             pictures=pictures, design=design, price=str(price) if price is not None else None)
     return JSONResponse(data)
 
 
@@ -201,7 +232,9 @@ def offers_pdf(offer_id: str, pictures: str = "", design: str = "", me: User = D
     # PDF Neo-da qurulur (Seaport korporativ menyu dizaynı, app/offer_pdf.py) — agentin snapshot-undan.
     # Qurmaq alınmasa, agentin öz PDF-i verilir ki, istifadəçi boş qalmasın.
     try:
-        pdf = render_pdf(agent.get_offer(offer_id), with_pictures, design)
+        # Sorğuda istənən qiymət təklifdə saxlanılıb — PDF hər dəfə onunla qurulur.
+        snapshot = offer_price.apply_price(agent.get_offer(offer_id), record.unit_price_override)
+        pdf = render_pdf(snapshot, with_pictures, design)
     except agent.OfferAgentError as exc:
         return _agent_error(exc)
     except Exception:
@@ -235,10 +268,11 @@ async def offers_set_design(offer_id: str, request: Request, me: User = Depends(
 
 @router.get("/api/offers/{offer_id}")
 def offers_snapshot(offer_id: str, me: User = Depends(REQUIRE["sales"])):
-    if not _known_offer(offer_id):
+    record = _offer_record(offer_id)
+    if record is None:
         return _error("Təklif tapılmadı", 404)
     try:
-        return JSONResponse(agent.get_offer(offer_id))
+        return JSONResponse(offer_price.apply_price(agent.get_offer(offer_id), record.unit_price_override))
     except agent.OfferAgentError as exc:
         return _agent_error(exc)
 

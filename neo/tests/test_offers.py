@@ -463,3 +463,95 @@ def test_design_is_chosen_stored_and_can_be_changed(app_db, monkeypatch):
     c.post("/api/offers", json=dict(brand="seaport", message="a", design="<script>"))  # tanınmayan dizayn — klassik
     with app_db() as s:
         assert s.scalar(select(OfferRecord.design)) == "classic"
+
+
+# --- sorğuda yazılmış qiymət ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize("text, price", [
+    ("STP ucun qiymeti 1 nefer ucun 8 yox 5 azn et", "5.00"),
+    ("Qiyməti 6,50 manat olsun, 120 nəfər", "6.50"),
+    ("8 azn deyil 7 azn hesabla", "7.00"),
+    ("qiymət 5 azn et. Sonra: qiyməti 4 azn et", "4.00"),          # sonuncu göstəriş
+    ("Azersun MMC, gündə 120 nəfər, 22 gün", None),                # qiymət yoxdur
+    ("büdcə 3000 azn, 120 nəfər", None),                           # ümumi büdcə vahid qiymət deyil
+    ("qiymət neçədir?", None), ("", None), ("qiyməti 0 azn et", None), ("qiyməti 5000 azn et", None),
+])
+def test_requested_price_by_rule(text, price):
+    from decimal import Decimal
+
+    from app import offer_price
+
+    assert offer_price.requested_price(text) == (Decimal(price) if price else None)
+
+
+def test_requested_price_prefers_the_ai_answer(monkeypatch):
+    from decimal import Decimal
+
+    from app import offer_price
+
+    asked = []
+    monkeypatch.setattr(offer_price, "_by_ai", lambda text: (asked.append(text), (True, Decimal("9.00")))[1])
+    assert offer_price.requested_price("bir nəfərə doqquz manat olsun, 9 azn") == Decimal("9.00")
+    monkeypatch.setattr(offer_price, "_by_ai", lambda text: (True, None))     # AI: qiymət istənməyib
+    assert offer_price.requested_price("qiyməti 8 yox 5 azn et") is None
+    asked.clear()
+    assert offer_price.requested_price("Azersun, 120 nəfər") is None and not asked   # qiymət sözü yoxdur — AI çağırılmır
+
+
+def test_apply_price_scales_the_line_and_the_totals():
+    from decimal import Decimal
+
+    from app import offer_price
+
+    snap = {"lines": [{"package_id": "standart", "unit_price": "8.00", "quantity": 100, "days": 22, "line_total": "17600.00"}],
+            "totals": {"subtotal": "17600.00", "vat": "3168.00", "total": "20768.00", "currency": "AZN", "vat_included": False}}
+    out = offer_price.apply_price(snap, Decimal("5.00"))
+    assert out["lines"][0]["unit_price"] == "5.00" and out["lines"][0]["line_total"] == "11000.00"
+    assert out["totals"] == {"subtotal": "11000.00", "vat": "1980.00", "total": "12980.00", "currency": "AZN", "vat_included": False}
+    assert snap["lines"][0]["unit_price"] == "8.00"                                  # əsli dəyişmir
+    assert offer_price.apply_price(snap, None) is snap
+    two = {"lines": [{"unit_price": "8"}, {"unit_price": "10"}]}
+    assert offer_price.apply_price(two, Decimal("5")) is two                          # hansı paketə aiddir — bilinmir
+
+
+def test_price_written_in_the_request_is_used_in_the_offer_and_the_pdf(app_db, monkeypatch):
+    """"8 yox 5 azn et": agent paketin qiymətini (8) qaytarır — təklif, PDF və tarixçə 5 ilə olmalıdır."""
+    import base64
+    from decimal import Decimal
+
+    line = dict(WEEKLY["lines"][0], unit_price="8.00", quantity=1, days=1, line_total="8.00")
+    offer = dict(WEEKLY, lines=[line], totals=dict(subtotal="8.00", vat="1.44", total="9.44", currency="AZN", vat_included=False))
+    created = dict(OK, **offer, status="ok", offer_id=OK["offer_id"])
+    sent = []
+    monkeypatch.setattr(agent, "create_offer", lambda body, client=None: sent.append(body) or dict(created))
+    monkeypatch.setattr(agent, "get_offer", lambda oid, client=None: offer)
+    c = TestClient(web.app)
+
+    def pdf_text(render):
+        return _texts(monkeypatch, render)
+
+    made = {}
+    drawn = pdf_text(lambda: made.update(c.post("/api/offers", json=dict(
+        brand="seaport", message="STP ucun qiymeti 1 nefer ucun 8 yox 5 azn et", package_id="standart")).json()))
+    assert made["lines"][0]["unit_price"] == "5.00" and made["totals"]["subtotal"] == "5.00"
+    assert made["totals"]["total"] == "5.90" and any("5 AZN" in a and "8.00" in a for a in made["assumptions"])
+    assert "5 AZN" in drawn and "8 AZN" not in drawn and "5.90 AZN" in drawn
+    assert base64.b64decode(made["pdf_base64"]).startswith(b"%PDF")
+    with app_db() as s:
+        rec = s.scalar(select(OfferRecord))
+        assert rec.unit_price_override == Decimal("5.00") and rec.total == Decimal("5.90")
+
+    oid = OK["offer_id"]
+    drawn = pdf_text(lambda: c.get(f"/api/offers/{oid}/pdf"))                         # tarixçədən — yenə 5
+    assert "5 AZN" in drawn and "8 AZN" not in drawn
+    assert c.get(f"/api/offers/{oid}").json()["lines"][0]["unit_price"] == "5.00"
+
+    # Qiymət yazılmayan sorğu — paketin qiyməti qalır
+    with app_db() as s:
+        s.query(OfferRecord).delete()
+        s.commit()
+    plain = c.post("/api/offers", json=dict(brand="seaport", message="Azersun, 1 nəfər", package_id="standart")).json()
+    assert plain["lines"][0]["unit_price"] == "8.00" and plain["assumptions"] == []
+    with app_db() as s:
+        assert s.scalar(select(OfferRecord.unit_price_override)) is None

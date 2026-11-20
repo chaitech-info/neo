@@ -363,6 +363,8 @@ class OfferRecord(Base):
     sample: Mapped[bool] = mapped_column(Boolean, default=False)
     pictures: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())  # şəkilli PDF (0014)
     design: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)  # PDF dizaynı (0018); boş — klassik
+    # Sorğuda istənən 1 nəfərlik qiymət (0019, app/offer_price.py); boş — paketin qiyməti
+    unit_price_override: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), nullable=True)
     created_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), index=True, nullable=True)
     lead_id: Mapped[Optional[str]] = mapped_column(ForeignKey("leads.dedupe_key"), index=True, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
