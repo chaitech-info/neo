@@ -187,17 +187,12 @@ def requested_price(text: str) -> Decimal | None:
     return requested_changes(text).price
 
 
-def _scaled(value: Any, factor: Decimal) -> Any:
-    try:
-        d = Decimal(str(value))
-    except (InvalidOperation, ValueError):
-        return value
-    return str((d * factor).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
-
-
 def apply_price(snapshot: dict, price: Decimal | None) -> dict:
-    """Təklifin surəti: tək paketin vahid qiyməti `price` olur, sətrin cəmi və yekunlar (ƏDV-siz, ƏDV, cəmi)
-    eyni nisbətdə dəyişir. Bir neçə paketli təklifdə hansına aid olduğu bilinmir — toxunulmur."""
+    """Təklifin surəti: tək paketin vahid qiyməti `price` olur; sətrin cəmi və yekunlar yeni qiymətdən yenidən
+    hesablanır: qiymət × miqdar × gün (miqdar və ya gün bilinmirsə — 1 nəfərlik qiymətin özü), ƏDV agentin
+    faizi ilə. Agentin cəmini nisbətlə dəyişmək olmur: "8 yox 5 azn" sorğusunda agent bəzən 5-i miqdar kimi
+    oxuyub 8 × 5 = 40 qaytarır və nisbətlə 25 çıxırdı. Bir neçə paketli təklifdə qiymətin hansına aid olduğu
+    bilinmir — toxunulmur."""
     if price is None:
         return snapshot
     lines = snapshot.get("lines") or []
@@ -213,11 +208,40 @@ def apply_price(snapshot: dict, price: Decimal | None) -> dict:
     out = {**snapshot, "lines": [new_line if l is line else l for l in lines]}
     if old is None or old <= 0 or old == price:
         return out
-    factor = price / old
+    quantity, days = _number(line.get("quantity")), _number(line.get("days"))
+    net = price * quantity * days if quantity is not None and days is not None else price
     if line.get("line_total") not in (None, ""):
-        new_line["line_total"] = _scaled(line["line_total"], factor)
+        new_line["line_total"] = _money(net)
     totals = snapshot.get("totals")
     if isinstance(totals, dict):
-        out["totals"] = {k: (_scaled(v, factor) if k in ("subtotal", "vat", "total") and v not in (None, "") else v)
-                         for k, v in totals.items()}
+        new = dict(totals)
+        old_net = _number(totals.get("subtotal"))
+        vat = _number(totals.get("vat"))
+        if old_net is not None and old_net > 0:
+            new["subtotal"] = _money(net)
+            new_vat = net * vat / old_net if vat is not None else None
+            if new_vat is not None:
+                new["vat"] = _money(new_vat)
+            if totals.get("total") not in (None, ""):
+                # ƏDV ayrıca göstərilibsə cəmi = ƏDV-siz + ƏDV; yoxsa cəmi ilə ƏDV-siz arasındakı nisbət saxlanılır
+                total = _number(totals.get("total"))
+                new["total"] = _money(net + new_vat if new_vat is not None else
+                                      net * total / old_net if total is not None else net)
+        elif totals.get("total") not in (None, ""):
+            new["total"] = _money(net)      # yalnız yekun var (ƏDV qiymətin içindədir)
+        out["totals"] = new
     return out
+
+
+def _number(value: Any) -> Decimal | None:
+    if value in (None, ""):
+        return None
+    try:
+        d = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+    return d if d.is_finite() else None
+
+
+def _money(value: Decimal) -> str:
+    return str(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))

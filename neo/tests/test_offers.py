@@ -581,6 +581,17 @@ def test_apply_price_scales_the_line_and_the_totals():
     assert out["lines"][0]["unit_price"] == "5.00" and out["lines"][0]["line_total"] == "11000.00"
     assert out["totals"] == {"subtotal": "11000.00", "vat": "1980.00", "total": "12980.00", "currency": "AZN", "vat_included": False}
     assert snap["lines"][0]["unit_price"] == "8.00"                                  # əsli dəyişmir
+
+    # Agent "8 yox 5 azn"dakı 5-i miqdar kimi oxuyub 8 × 5 = 40 qaytarır, miqdar/gün isə boşdur (prod,
+    # SP-20261120-010: 25 / 4,50 / 29,50 çıxırdı). Miqdar bilinmirsə yekun 1 nəfərlik qiymətin özüdür.
+    odd = {"lines": [{"package_id": "standart", "unit_price": "8.00", "quantity": None, "days": None, "line_total": "40.00"}],
+           "totals": {"subtotal": "40.00", "vat": "7.20", "total": "47.20", "currency": "AZN", "vat_included": False}}
+    out = offer_price.apply_price(odd, Decimal("5.00"))
+    assert out["lines"][0]["line_total"] == "5.00"
+    assert (out["totals"]["subtotal"], out["totals"]["vat"], out["totals"]["total"]) == ("5.00", "0.90", "5.90")
+    inclusive = {"lines": [{"unit_price": "8", "quantity": 10, "days": 2, "line_total": "160"}],
+                 "totals": {"total": "160", "currency": "AZN", "vat_included": True}}
+    assert offer_price.apply_price(inclusive, Decimal("5"))["totals"]["total"] == "100.00"   # 5 × 10 × 2
     assert offer_price.apply_price(snap, None) is snap
     two = {"lines": [{"unit_price": "8"}, {"unit_price": "10"}]}
     assert offer_price.apply_price(two, Decimal("5")) is two                          # hansı paketə aiddir — bilinmir
