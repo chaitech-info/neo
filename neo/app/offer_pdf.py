@@ -49,6 +49,9 @@ COL2, COL3 = 198.0, 391.0           # sağ sütunlar (üz qabığı / bölmə ba
 DAY_COLS = (LEFT, 223.5, 391.0)
 FOOTER_RULE, BODY_BOTTOM = 779.0, 760.0
 COVER_FILL_TOP = 292.0              # tünd üz qabığı: bu xətdən aşağı rəngli fon, yuxarıda loqo ağ fonda
+CENTER_BLOCK = 250.0                # mərkəzləşmiş üz qabığı: yuxarıdakı rəngli blokun hündürlüyü
+SPLIT_PANEL = 214.0                 # panelli üz qabığı: sol panelin eni
+SPLIT_X = SPLIT_PANEL + 34          # panelli üz qabığı: sağ hissədə mətnin sol kənarı
 LEAD = 15.8                         # menyu maddələrinin sətir aralığı
 GAL_W, GAL_H, GAL_GAP = 232.0, 173.0, 18.0   # "Yemək şəkilləri": 2 sütun, şəkil 232×173 pt (nümunədəki kimi)
 GAL_ROW = 204.0                              # şəkil + ad + boşluq
@@ -56,6 +59,7 @@ NOTE_LEAD = 11.0                             # yeməyin əlavə sahələri sətr
 
 LOGO_NAVY = HexColor("#2c3e86")
 WHITE = HexColor("#ffffff")
+PANEL_SOFT = HexColor("#c3cde6")    # tünd göy panelin üstündə köməkçi mətn
 
 
 @dataclass(frozen=True)
@@ -72,39 +76,51 @@ def _pal(ink: str, accent: str, muted: str, line: str) -> Palette:
 
 @dataclass(frozen=True)
 class Design:
-    """Təklif PDF-inin dizaynı (istifadəçi Qiymət təklifi formunda seçir). Məzmun və səhifə düzümü eynidir;
-    rənglər, şrift və səhifə bəzəyi (üz qabığı, zolaq, çərçivə, alt zolaq) fərqlənir."""
+    """Təklif PDF-inin dizaynı (istifadəçi Qiymət təklifi formunda seçir). Məzmun eynidir; dizaynlar rənglə
+    yanaşı quruluşla da fərqlənir: üz qabığının düzümü (`cover_style`) və gün bloklarının görünüşü (`day_style`).
+    Yeni dizaynlarda yalnız Seaport loqosunun rəngləri işlənir (LOGO_* sabitləri) + ağ və neytral boz."""
     code: str
     name: str                      # formdakı ad
     hint: str                      # formdakı qısa izah
     body: Palette
     sans: bool = False             # Noto Sans (yoxsa Noto Serif)
     cover: Palette | None = None   # üz qabığının rəngləri (tünd fonda açıq mətn); None — body
-    cover_fill: Any = None         # üz qabığının aşağı hissəsinin fonu (loqo ağ hissədə qalır)
-    page_fill: Any = None          # bütün səhifələrin fonu
-    side_band: Any = None          # sol kənarda şaquli zolaq
-    top_bar: Any = None            # səhifənin yuxarısında zolaq
-    frame: Any = None              # üz qabığında çərçivə
+    cover_fill: Any = None         # "left": üz qabığının aşağı hissəsinin fonu (loqo ağ hissədə qalır)
     foot_fill: Any = None          # menyu səhifələrinin alt zolağı (səhifə nömrəsi onun üstündə)
+    cover_style: str = "left"      # "left" — sola düzülmüş (klassik); "center" — mərkəzdə; "split" — sol panel
+    cover_block: Any = None        # "center": yuxarıda rəngli blok (loqo ağ lövhədə onun üstündə)
+    panel: Any = None              # "split": sol panelin rəngi; menyu səhifələrində nazik yan zolaq
+    stripe: tuple = ()             # səhifənin yuxarısında (üz qabığında həm də aşağıda) rəngli zolaq
+    day_style: str = "plain"       # gün bloku: "plain" — ad + xətt; "bar" — rəngli zolaqda ad;
+    #                                "card" — açıq fonlu yumru kart; "side" — solda rəngli şaquli xətt
+    day_colors: tuple = ()         # "side": günlərin növbə ilə rəngləri
+    card_fill: Any = None          # "card": kartın fonu
     swatch: tuple[str, str] = ("#ffffff", "#000000")   # formdakı nümunə rənglər (fon, vurğu)
 
 
+# Seaport loqosunun rəngləri (app/static/offer/seaport-logo.png-dən ölçülüb)
+LOGO_DEEP, LOGO_BLUE, LOGO_TEAL, LOGO_PURPLE, LOGO_PINK = "#212c59", "#30417d", "#0999ad", "#7c4182", "#e92478"
+
 DESIGNS: dict[str, Design] = {d.code: d for d in (
-    Design("classic", "Klassik", "tünd göy və firuzəyi, ağ fon",
+    Design("classic", "Klassik", "tünd göy və firuzəyi, sola düzülmüş",
            _pal("#1a365d", "#00a0b2", "#6b7488", "#dfe4eb"), swatch=("#1a365d", "#00a0b2")),
     Design("midnight", "Gecə", "tünd üz qabığı, qızılı vurğu",
            _pal("#16233a", "#a9812f", "#6c7484", "#e3ddd0"),
            cover=_pal("#ffffff", "#d9b56a", "#b4bdcc", "#33435e"), cover_fill=HexColor("#16233a"),
            foot_fill=HexColor("#16233a"), swatch=("#16233a", "#d9b56a")),
-    Design("garden", "Yaşıl", "yaşıl zolaq, müasir şrift",
-           _pal("#1f3d2b", "#5f8f2f", "#66756b", "#dbe5d6"), sans=True, side_band=HexColor("#1f3d2b"),
-           swatch=("#1f3d2b", "#8fbf4a")),
-    Design("terra", "İsti", "krem fon, kərpici vurğu, çərçivə",
-           _pal("#3b2a20", "#b8532c", "#8a7868", "#e4d8c4"), page_fill=HexColor("#fbf6ec"),
-           frame=HexColor("#b8532c"), swatch=("#fbf6ec", "#b8532c")),
-    Design("mono", "Minimal", "qara-ağ, narıncı xətt, müasir şrift",
-           _pal("#15181d", "#e8590c", "#6b7280", "#e2e5e9"), sans=True, top_bar=HexColor("#e8590c"),
-           swatch=("#15181d", "#e8590c")),
+    Design("wave", "Firuzəyi", "mərkəzləşmiş üz qabığı, günlər rəngli zolaqda",
+           _pal(LOGO_DEEP, LOGO_TEAL, "#5d6883", "#d6e6ea"), sans=True, cover_style="center",
+           cover_block=HexColor(LOGO_TEAL), stripe=(HexColor(LOGO_TEAL),), day_style="bar",
+           swatch=(LOGO_TEAL, "#ffffff")),
+    Design("panel", "Panel", "sol tünd göy panel, günlər kartlarda",
+           _pal(LOGO_DEEP, LOGO_TEAL, "#5d6883", "#dbe2ee"), cover_style="split", panel=HexColor(LOGO_BLUE),
+           cover=_pal(LOGO_DEEP, LOGO_TEAL, "#5d6883", "#dbe2ee"), day_style="card",
+           card_fill=HexColor("#eef3f9"), swatch=(LOGO_BLUE, LOGO_TEAL)),
+    Design("color", "Rəngli", "loqonun dörd rəngi, hər gün öz rəngində",
+           _pal(LOGO_BLUE, LOGO_PINK, "#6a6f86", "#e4e1ec"), sans=True, cover_style="center",
+           stripe=tuple(HexColor(c) for c in (LOGO_BLUE, LOGO_TEAL, LOGO_PURPLE, LOGO_PINK)), day_style="side",
+           day_colors=tuple(HexColor(c) for c in (LOGO_BLUE, LOGO_TEAL, LOGO_PURPLE, LOGO_PINK)),
+           swatch=(LOGO_PURPLE, LOGO_PINK)),
 )}
 DEFAULT_DESIGN = "classic"
 
@@ -353,22 +369,9 @@ def menu_items(snapshot: dict) -> list[tuple[str, str]]:
     return out
 
 
-@functools.lru_cache(maxsize=8)
-def _logo(name: str, tint: str = "") -> ImageReader:
-    """Loqo. `tint` — rəngli səhifə fonu ("#fbf6ec"): loqonun ağ fonu səhifənin rənginə qarışsın deyə şəkil
-    fonla vurulur (multiply) — ağ → fon rəngi, loqonun rəngləri demək olar dəyişmir, kənarlar hamar qalır."""
-    path = STATIC / "offer" / name
-    if not tint:
-        return ImageReader(str(path))
-    from PIL import Image, ImageChops
-
-    img = Image.open(path).convert("RGBA")
-    flat = Image.new("RGB", img.size, "white")
-    flat.paste(img, mask=img.split()[3])
-    out = io.BytesIO()
-    ImageChops.multiply(flat, Image.new("RGB", img.size, tint)).save(out, "PNG")
-    out.seek(0)
-    return ImageReader(out)
+@functools.lru_cache(maxsize=4)
+def _logo(name: str) -> ImageReader:
+    return ImageReader(str(STATIC / "offer" / name))
 
 
 def _cover_crop(data: bytes, w: float, h: float) -> ImageReader | None:
@@ -492,6 +495,7 @@ class Doc:
         self.t = Text(self.c, self.design.sans, self.pal.ink)
         self.pages: list[Callable[[int, int], None]] = []
         self.y = 0.0
+        self.block_n = 0        # çəkilmiş gün bloklarının sayı ("side" düzümündə rəng növbəsi)
 
     # Rənglər: cari palitra (üz qabığında dizaynın `cover` palitrası, qalan səhifələrdə `body`)
     ink = property(lambda self: self.pal.ink)
@@ -508,23 +512,39 @@ class Doc:
         self.c.rect(x, H - top - h, w, h, stroke=0, fill=1)
 
     def decorate(self, cover: bool = False) -> None:
-        """Səhifənin bəzəyi — məzmundan əvvəl çəkilir: fon, zolaqlar, çərçivə, alt zolaq."""
+        """Səhifənin bəzəyi — məzmundan əvvəl çəkilir: üz qabığının fonu / bloku / paneli, zolaqlar, alt zolaq."""
         d = self.design
-        if d.page_fill is not None:
-            self.fill(d.page_fill, 0, 0, W, H)
         if cover and d.cover_fill is not None:
             self.fill(d.cover_fill, 0, COVER_FILL_TOP, W, H - COVER_FILL_TOP)
-        if d.side_band is not None:
-            self.fill(d.side_band, 0, 0, 22 if cover else 9, H)
-        if d.top_bar is not None:
-            self.fill(d.top_bar, 0, 0, W, 20 if cover else 7)
-        if cover and d.frame is not None:
-            self.c.setStrokeColor(d.frame)
-            for inset, width in ((24, 1.1), (29, 0.4)):
-                self.c.setLineWidth(width)
-                self.c.rect(inset, inset, W - 2 * inset, H - 2 * inset, stroke=1, fill=0)
+        if cover and d.cover_block is not None:
+            self.fill(d.cover_block, 0, 0, W, CENTER_BLOCK)
+        if d.panel is not None:
+            self.fill(d.panel, 0, 0, SPLIT_PANEL if cover else 9, H)
+        if d.stripe and not (cover and d.cover_block is not None):
+            self.stripes(0, 12 if cover else 6)
+            if cover:
+                self.stripes(H - 12, 12)
         if not cover and d.foot_fill is not None:
             self.fill(d.foot_fill, 0, FOOTER_RULE, W, H - FOOTER_RULE)
+
+    def stripes(self, top: float, height: float) -> None:
+        """Səhifə boyu üfüqi zolaq: dizaynın `stripe` rəngləri bərabər hissələrlə yan-yana."""
+        colors = self.design.stripe
+        for i, color in enumerate(colors):
+            self.fill(color, W * i / len(colors), top, W / len(colors) + 0.5, height)
+
+    def logo_card(self, x: float, top: float, size: float) -> None:
+        """Loqo ağ yumru künclü lövhədə — rəngli fonun üstündə (loqonun öz fonu ağdır)."""
+        self.c.setFillColor(WHITE)
+        self.c.roundRect(x, H - top - size, size, size, size * 0.12, stroke=0, fill=1)
+        pad = size * 0.11
+        if self.brand == "seaport":
+            r = _logo("seaport-logo.png")
+            iw, ih = r.getSize()
+            w = (size - 2 * pad) * min(1.0, iw / ih)
+            self.logo(x + (size - w) / 2, top + pad + ((size - 2 * pad) - w * ih / iw) / 2, w, small=False)
+        else:
+            self.t.draw(x + size / 2, top + size / 2 + 12, "NAFA", 34, self.design.body.ink, align="center")
 
     def fit(self, s: str, size: float, width: float, italic: bool = False) -> float:
         """Böyük başlıq sətrə sığmırsa (uzun paket adı, enli şrift) — sığana qədər kiçilir."""
@@ -560,9 +580,7 @@ class Doc:
 
     def logo(self, x: float, top: float, width: float, small: bool) -> float:
         if self.brand == "seaport":
-            fill = self.design.page_fill
-            tint = "#%02x%02x%02x" % tuple(round(v * 255) for v in fill.rgb()) if fill is not None else ""
-            r = _logo("seaport-mark.png" if small else "seaport-logo.png", tint)
+            r = _logo("seaport-mark.png" if small else "seaport-logo.png")
             iw, ih = r.getSize()
             h = width * ih / iw
             if not self.measure:
@@ -578,8 +596,115 @@ class Doc:
         self.c.line(x1, H - y, x2, H - y)
 
     def cover(self) -> None:
-        t = self.t
+        """Üz qabığı — dizaynın `cover_style`-ına görə üç düzümdən biri; altdakı sətir (footer) ortaqdır."""
+        t, style = self.t, self.design.cover_style
         self.decorate(cover=True)
+        {"center": self._cover_center, "split": self._cover_split}.get(style, self._cover_left)()
+        span = self.span()
+        left, right = self.running_head(), (span[0] if span else (self.snap.get("customer_name") or ""))
+        split = style == "split"
+
+        def footer(n: int, total: int) -> None:
+            t.draw(32 if split else LEFT, 795, left, 7.5, PANEL_SOFT if split else self.muted, tracking=0.5)
+            if right:
+                t.draw(RIGHT, 795, right, 7.5, self.muted, tracking=0.5, align="right")
+        self.finish_page(footer)
+        self.use(self.design.body)
+
+    def _cover_subtitle(self) -> tuple[str, str]:
+        weekly = self.weekly and not self.photo_mode
+        span = self.span()
+        second = span[1] if span else (f"Prepared for {self.snap['customer_name']}" if self.snap.get("customer_name") else "")
+        return ("Weekly Executive Dining Proposal" if weekly else "Corporate Dining Proposal"), second
+
+    def _cover_description(self, p: Package) -> str:
+        return p.description or (
+            "Hər gün üçün ayrıca tərtib olunmuş, sevilən klassik yeməklərdən ibarət balanslı nahar menyusu. "
+            "Komandanız üçün sadə, səliqəli və etibarlı gündəlik həll." if p.weekly and not self.photo_mode else
+            "Sevilən klassik yeməklərdən ibarət balanslı nahar menyusu. "
+            "Komandanız üçün sadə, səliqəli və etibarlı gündəlik həll.")
+
+    def _cover_about(self, x: float, y: float, width: float, align: str) -> None:
+        """Üz qabığının aşağısı (mərkəzləşmiş və panelli düzümlər): paketin adı, altında təsvir və xülasə."""
+        t = self.t
+        if len(self.packages) == 1:
+            p = self.packages[0]
+            t.draw(x, y, f"{p.name} paket", 14.5, self.accent, align=align)
+            yy = y + 24
+            for line in t.wrap(self._cover_description(p), 11, width)[:3]:
+                t.draw(x, yy, line, 11, self.ink, align=align)
+                yy += 16.5
+            summary = summary_line(p, daily=not self.photo_mode)
+            for line in (t.wrap(summary, 8.5, width)[:2] if summary else []):
+                t.draw(x, yy + 6, line, 8.5, self.muted, align=align)
+                yy += 12
+            return
+        t.draw(x, y, "Paketlər", 14.5, self.accent, align=align)
+        yy = y + 24
+        for p in self.packages[:5]:
+            price = f" — {p.price} / {p.unit}" if p.price and p.unit else f" — {p.price}" if p.price else ""
+            t.draw(x, yy, p.name + price, 11, self.ink, align=align)
+            yy += 16.5
+
+    def _cover_center(self) -> None:
+        """Mərkəzləşmiş üz qabığı: loqo yuxarıda ortada (rəngli blok varsa — ağ lövhədə, blokun kənarında)."""
+        t, d, cx = self.t, self.design, W / 2
+        if d.cover_block is not None:
+            self.logo_card(cx - 85, CENTER_BLOCK - 105, 170)
+            slogan_y = CENTER_BLOCK + 95
+        else:
+            self.logo(cx - 75, 62, 150, small=False)
+            slogan_y = 248
+        if self.brand == "seaport":
+            t.draw(cx, slogan_y, "Dadlı Həyatın Fəlsəfəsi", 12.5, LOGO_NAVY, align="center")
+        if self.snap.get("example"):
+            t.draw(RIGHT, 70, "NÜMUNƏ PAKET", 8, WHITE if d.cover_block is not None else self.muted, tracking=1.2,
+                   align="right")
+        self.use(d.cover or d.body)
+        y = slogan_y + 58
+        self.rule(y, self.accent, 1.4, cx - 26, cx + 26)
+        y += 52
+        for line in t.wrap(self.title().upper(), 34, RIGHT - LEFT):
+            t.draw(cx, y, line, 34, self.ink, align="center")
+            y += 40
+        first, second = self._cover_subtitle()
+        t.draw(cx, y + 14, first, 14.5, self.ink, italic=True, align="center")
+        if second:
+            t.draw(cx, y + 34, second, 14.5, self.muted, italic=True, align="center")
+        self.rule(647)
+        self._cover_about(cx, 678, 400, "center")
+
+    def _cover_split(self) -> None:
+        """Panelli üz qabığı: solda rəngli panel (loqo ağ lövhədə, aşağıda müştəri), sağda başlıq və paket."""
+        t, d = self.t, self.design
+        self.logo_card((SPLIT_PANEL - 150) / 2, 56, 150)
+        if self.brand == "seaport":
+            t.draw(SPLIT_PANEL / 2, 234, "Dadlı Həyatın Fəlsəfəsi", 10.5, WHITE, align="center")
+        if self.snap.get("example"):
+            t.draw(RIGHT, 70, "NÜMUNƏ PAKET", 8, self.muted, tracking=1.2, align="right")
+        customer = (self.snap.get("customer_name") or "").strip()
+        if customer:
+            t.draw(32, 664, "MÜŞTƏRİ", 7.5, PANEL_SOFT, tracking=1.2)
+            yy = 684
+            for line in t.wrap(customer, 13, SPLIT_PANEL - 56)[:3]:
+                t.draw(32, yy, line, 13, WHITE)
+                yy += 17
+        self.use(d.cover or d.body)
+        x, width = SPLIT_X, RIGHT - SPLIT_X
+        self.rule(351, self.accent, 1.4, x, x + 51)
+        y = 404
+        for line in t.wrap(self.title().upper(), 30, width):
+            t.draw(x - 1, y, line, 30, self.ink)
+            y += 36
+        first, second = self._cover_subtitle()
+        t.draw(x, y + 12, first, 13.5, self.ink, italic=True)
+        if second:
+            t.draw(x, y + 31, second, 13.5, self.muted, italic=True)
+        self.rule(647, x1=x)
+        self._cover_about(x, 678, width, "left")
+
+    def _cover_left(self) -> None:
+        t = self.t
         self.logo(LEFT - 1, 59, 136, small=False)
         if self.brand == "seaport":
             t.draw(LEFT + 67, 222, "Dadlı Həyatın Fəlsəfəsi", 12.5, LOGO_NAVY, align="center")
@@ -592,11 +717,8 @@ class Doc:
             t.draw(LEFT - 2, y, line, 38, self.ink)
             y += 42
         y += 22
-        weekly = self.weekly and not self.photo_mode
-        t.draw(LEFT, y, "Weekly Executive Dining Proposal" if weekly else "Corporate Dining Proposal", 14.5,
-               self.ink, italic=True)
-        span = self.span()
-        second = span[1] if span else (f"Prepared for {self.snap['customer_name']}" if self.snap.get("customer_name") else "")
+        first, second = self._cover_subtitle()
+        t.draw(LEFT, y, first, 14.5, self.ink, italic=True)
         if second:
             t.draw(LEFT, y + 20, second, 14.5, self.muted, italic=True)
 
@@ -605,13 +727,8 @@ class Doc:
         if len(self.packages) == 1:
             p = self.packages[0]
             t.draw(LEFT, y, f"{p.name} paket", 14.5, self.accent)
-            desc = p.description or (
-                "Hər gün üçün ayrıca tərtib olunmuş, sevilən klassik yeməklərdən ibarət balanslı nahar menyusu. "
-                "Komandanız üçün sadə, səliqəli və etibarlı gündəlik həll." if p.weekly and not self.photo_mode else
-                "Sevilən klassik yeməklərdən ibarət balanslı nahar menyusu. "
-                "Komandanız üçün sadə, səliqəli və etibarlı gündəlik həll.")
             yy = y
-            for line in t.wrap(desc, 11, 292)[:4]:
+            for line in t.wrap(self._cover_description(p), 11, 292)[:4]:
                 t.draw(COL2, yy, line, 11, self.ink)
                 yy += 16.5
             summary = summary_line(p, daily=not self.photo_mode)
@@ -627,15 +744,6 @@ class Doc:
                 if p.price:
                     t.draw(RIGHT, yy, f"{p.price} / {p.unit}" if p.unit else p.price, 11, self.muted, align="right")
                 yy += 16.5
-
-        left, right = self.running_head(), (span[0] if span else (self.snap.get("customer_name") or ""))
-
-        def footer(n: int, total: int) -> None:
-            t.draw(LEFT, 795, left, 7.5, self.muted, tracking=0.5)
-            if right:
-                t.draw(RIGHT, 795, right, 7.5, self.muted, tracking=0.5, align="right")
-        self.finish_page(footer)
-        self.use(self.design.body)
 
     def page_header(self) -> None:
         self.decorate()
@@ -661,7 +769,7 @@ class Doc:
     def new_body_page(self) -> None:
         self.finish_page(self.body_footer())
         self.page_header()
-        self.rule(self.y)
+        self.sep()
 
     def ensure(self, height: float) -> None:
         if self.y + height > BODY_BOTTOM:
@@ -673,7 +781,7 @@ class Doc:
             self.t.draw(RIGHT, self.y + 17, right, 8, self.muted, tracking=0.6, align="right")
         self.t.draw(LEFT - 2, self.y + 66, title, self.fit(title, 44, RIGHT - LEFT), self.ink)
         self.y += 99
-        self.rule(self.y)
+        self.sep()
 
     # Gün bloku: ad + 3 sütun kateqoriya
     def block_height(self, b: Block) -> float:
@@ -709,13 +817,40 @@ class Doc:
     def group_height(self, g: Group) -> float:
         return (15 if g.label else 0) + sum(h for _, _, h in self.item_rows(g)) + 5
 
+    def sep(self) -> None:
+        """Bloklar arasında nazik xətt — zolaqlı və kartlı düzümlərdə lazım deyil (blokun öz sərhədi var)."""
+        if self.design.day_style in ("plain", "side"):
+            self.rule(self.y)
+
     def day_block(self, b: Block) -> None:
-        self.ensure(self.block_height(b))
-        t = self.t
+        height = self.block_height(b)
+        self.ensure(height)
+        t, d, top0 = self.t, self.design, self.y
         y = self.y + 29
-        w = t.draw(LEFT - 1, y, b.title, 18.5, self.ink)
-        if b.accent:
-            t.draw(LEFT + w + 12, y, b.accent, 10.5, self.accent, italic=True)
+        style = d.day_style
+        if style == "bar":       # günün adı rəngli zolaqda, ingiliscəsi sağda
+            self.c.setFillColor(self.accent)
+            self.c.roundRect(LEFT, H - (top0 + 38), RIGHT - LEFT, 29, 4, stroke=0, fill=1)
+            t.draw(LEFT + 11, y, b.title, 14, WHITE)
+            if b.accent:
+                t.draw(RIGHT - 11, y, b.accent, 10, WHITE, italic=True, align="right")
+        elif style == "card":    # bütün blok açıq fonlu yumru kartdadır
+            self.c.setFillColor(d.card_fill)
+            self.c.roundRect(LEFT - 13, H - (top0 + height - 3), RIGHT - LEFT + 26, height - 9, 9, stroke=0, fill=1)
+            w = t.draw(LEFT - 1, y + 2, b.title, 17, self.ink)
+            if b.accent:
+                t.draw(LEFT + w + 12, y + 2, b.accent, 10.5, self.accent, italic=True)
+        elif style == "side":    # solda günün rəngində şaquli xətt, ad da həmin rəngdə
+            color = d.day_colors[self.block_n % len(d.day_colors)] if d.day_colors else self.accent
+            self.fill(color, LEFT - 15, top0 + 13, 4.5, height - 21)
+            w = t.draw(LEFT - 1, y, b.title, 18.5, color)
+            if b.accent:
+                t.draw(LEFT + w + 12, y, b.accent, 10.5, self.muted, italic=True)
+        else:
+            w = t.draw(LEFT - 1, y, b.title, 18.5, self.ink)
+            if b.accent:
+                t.draw(LEFT + w + 12, y, b.accent, 10.5, self.accent, italic=True)
+        self.block_n += 1
         top = y + 22
         bottom = top
         for x, col in zip(DAY_COLS, self.columns(b)):
@@ -734,7 +869,7 @@ class Doc:
                 yy += 5
             bottom = max(bottom, yy)
         self.y = bottom + 5          # son maddənin bazası + 26pt (nümunədəki kimi)
-        self.rule(self.y)
+        self.sep()
 
     # "Yemək şəkilləri" (nümunə: SeaPort_MediumPlus_Menu_Dish_Photos.pdf)
     def gallery_sections(self) -> list[tuple[str, str, list[tuple[str, bytes, str]]]]:

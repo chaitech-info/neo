@@ -166,6 +166,27 @@ def test_send_without_smtp_records_failure(factory, opp_id):
         assert s.get(Opportunity, opp_id).stage == "new"
 
 
+def test_not_connected_failures_disappear_once_mail_is_set_up(factory, opp_id, monkeypatch):
+    """Poçt qurulmamış edilən cəhd "Göndərilmədi: Poçt qoşulmayıb…" kimi qalırdı — poçt qurulandan sonra
+    göstərilmir (başqa səbəbdən alınmayan cəhdlər görünür)."""
+    c = TestClient(web.app)
+    c.post(f"/opportunities/{opp_id}/email/send", data={
+        "to": "rauf@sahil.az", "subject": "Köhnə cəhd", "body": "Kifayət qədər uzun məktub mətni.", "send_key": SEND_KEY})
+    with factory() as s:
+        s.add(Outreach(kind="email", opportunity_id=opp_id, to_address="x@y.az", subject="Başqa xəta", body="b",
+                       status="failed", error="Poçt girişi alınmadı (neo@x.az)", created_at=__import__("datetime").datetime(2026, 11, 20)))
+        s.commit()
+    page = c.get(f"/opportunities/{opp_id}").text
+    assert "Poçt qoşulmayıb" in page and "Köhnə cəhd" in page          # poçt hələ qurulmayıb — xəta görünür
+    monkeypatch.setenv("SMTP_USER", "neo@chaitech.info")
+    monkeypatch.setenv("SMTP_PASSWORD", "x")
+    page = c.get(f"/opportunities/{opp_id}").text
+    assert "Poçt qoşulmayıb" not in page and "Köhnə cəhd" not in page
+    assert "Başqa xəta" in page and "Poçt girişi alınmadı" in page
+    with factory() as s:
+        assert len(list(s.scalars(select(Outreach)))) == 2              # sətir bazadan silinmir
+
+
 def test_send_rejects_bad_address_and_keeps_draft(factory, opp_id):
     r = TestClient(web.app).post(f"/opportunities/{opp_id}/email/send", data={
         "to": "yox", "subject": "S", "body": "Redaktə olunmuş uzun məktub mətni.", "send_key": SEND_KEY},

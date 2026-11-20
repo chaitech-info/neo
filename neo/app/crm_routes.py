@@ -147,6 +147,19 @@ def _kept_attachments(db, opp_id: int, files_from: str, keep_files: list[str]) -
     return [(f.filename, f.data, f.content_type) for f in rows]
 
 
+NOT_CONNECTED = "Poçt qoşulmayıb"   # mail.send_email-in xətası: poçt hələ qurulmayanda edilmiş cəhd
+
+
+def _shown_outreach(rows) -> list[Outreach]:
+    """Fürsətin "Ünsiyyət" tarixçəsi. Poçt qurulandan sonra "Göndərilmədi: Poçt qoşulmayıb…" cəhdləri
+    göstərilmir — o xəta artıq keçmişdir, məktub heç vaxt getməyib (sətir bazada qalır)."""
+    rows = list(rows)
+    if not mail.smtp_configured():
+        return rows
+    return [o for o in rows
+            if not (o.kind == "email" and o.status == "failed" and (o.error or "").startswith(NOT_CONNECTED))]
+
+
 def _opp_context(db, opp: Opportunity, me: User | None = None) -> dict:
     lead = db.get(LeadRecord, opp.lead_key) if opp.lead_key else None
     users = _active_users(db)
@@ -168,8 +181,8 @@ def _opp_context(db, opp: Opportunity, me: User | None = None) -> dict:
         "tender": db.get(Tender, opp.tender_id) if opp.tender_id else None,
         "contacts": contacts, "contact_sources": CONTACT_SOURCE_NAMES,
         "email_contacts": [c for c in contacts if c.email],
-        "outreach": list(db.scalars(select(Outreach).where(Outreach.opportunity_id == opp.id)
-                                    .order_by(Outreach.created_at.desc()))),
+        "outreach": _shown_outreach(db.scalars(select(Outreach).where(Outreach.opportunity_id == opp.id)
+                                               .order_by(Outreach.created_at.desc()))),
         "outreach_kinds": OUTREACH_KIND_NAMES, "languages": LANGUAGES,
         "default_language": detect_language(lead.raw_text if lead else opp.title),
         "smtp_ready": mail.smtp_configured(), "leaders_ready": leaders.enabled(),

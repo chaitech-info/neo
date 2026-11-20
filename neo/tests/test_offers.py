@@ -390,7 +390,11 @@ def _texts(monkeypatch, fn):
 
 
 def test_five_designs_render_the_same_pages_in_their_own_look():
-    assert list(offer_pdf.DESIGNS) == ["classic", "midnight", "garden", "terra", "mono"]
+    assert list(offer_pdf.DESIGNS) == ["classic", "midnight", "wave", "panel", "color"]
+    # Quruluş da fərqlidir: üz qabığının düzümü və gün bloklarının görünüşü təkrarlanmır (klassik/gecə istisna)
+    looks = [(d.cover_style, d.day_style) for d in offer_pdf.DESIGNS.values()]
+    assert looks == [("left", "plain"), ("left", "plain"), ("center", "bar"), ("split", "card"), ("center", "side")]
+    assert offer_pdf.design_code("garden") == "classic"            # çıxarılmış dizaynla saxlanmış təklif — klassik
     assert offer_pdf.design_code("zzz") == offer_pdf.design_code(None) == "classic"
     sizes = set()
     for code, d in offer_pdf.DESIGNS.items():
@@ -451,15 +455,15 @@ def test_design_is_chosen_stored_and_can_be_changed(app_db, monkeypatch):
     page = c.get("/tools/offers").text
     for d in offer_pdf.DESIGNS.values():
         assert f'name="design" value="{d.code}"' in page and d.name in page
-    r = c.post("/api/offers", json=dict(brand="seaport", message="a", design="garden"))
+    r = c.post("/api/offers", json=dict(brand="seaport", message="a", design="wave"))
     assert b"NotoSans" in base64.b64decode(r.json()["pdf_base64"])
     with app_db() as s:
-        assert s.scalar(select(OfferRecord.design)) == "garden"
+        assert s.scalar(select(OfferRecord.design)) == "wave"
     oid = OK["offer_id"]
     assert b"NotoSans" in c.get(f"/api/offers/{oid}/pdf").content                  # tarixçədən — saxlanmış dizayn
-    assert b"NotoSerif" in c.get(f"/api/offers/{oid}/pdf?design=terra").content    # başqa dizaynda açmaq
+    assert b"NotoSerif" in c.get(f"/api/offers/{oid}/pdf?design=panel").content    # başqa dizaynda açmaq
     assert c.post(f"/api/offers/{oid}/design", json=dict(design="zzz")).status_code == 422
-    assert c.post("/api/offers/SP-0-000/design", json=dict(design="mono")).status_code == 404
+    assert c.post("/api/offers/SP-0-000/design", json=dict(design="color")).status_code == 404
     assert c.post(f"/api/offers/{oid}/design", json=dict(design="midnight")).json() == dict(ok=True, design="midnight")
     with app_db() as s:
         assert s.scalar(select(OfferRecord.design)) == "midnight"
