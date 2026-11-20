@@ -284,6 +284,36 @@ def _package(line: dict, lang: str, currency: str) -> Package:
                    description=_tr(line.get("description"), lang), days_span=span)
 
 
+def without(pkg: Package, exclude: dict | None) -> Package:
+    """Paketin surəti: çıxarılması istənən kateqoriyalar ("İçki") və yeməklər olmadan. Boş qalan kateqoriya və
+    gün bloku da düşür — menyu, "Gündəlik seçim", üz qabığındakı xülasə və şəkillər hamısı bundan qurulur."""
+    if not exclude:
+        return pkg
+    from dataclasses import replace
+
+    from app.dishes import category_name, dish_key
+
+    categories = set(exclude.get("categories") or [])
+    dishes = [k for k in (dish_key(d) for d in exclude.get("dishes") or []) if len(k) >= 3]
+
+    def dropped(item: str) -> bool:
+        key = dish_key(item)
+        return any(d in key or key in d for d in dishes)
+
+    blocks = []
+    for b in pkg.blocks:
+        groups = []
+        for g in b.groups:
+            if category_name(g.label) in categories:
+                continue
+            items = [i for i in g.items if not dropped(i)]
+            if items:
+                groups.append(replace(g, items=items, notes={k: v for k, v in g.notes.items() if k in items}))
+        if groups:
+            blocks.append(replace(b, groups=groups))
+    return replace(pkg, blocks=blocks)
+
+
 def menu_items(snapshot: dict) -> list[tuple[str, str]]:
     """Təklifdəki bütün menyu maddələri: [(yemək, kateqoriya)] — şəkilləri tapmaq üçün."""
     lang = snapshot.get("language") if snapshot.get("language") in ("az", "en", "ru") else "az"
@@ -406,10 +436,12 @@ def summary_line(pkg: Package, daily: bool = True) -> str:
 
 class Doc:
     def __init__(self, snapshot: dict, total: int = 0, photos: dict[str, bytes] | None = None,
-                 plans: dict[int, Package] | None = None, measure: bool = False, design: str = DEFAULT_DESIGN):
+                 plans: dict[int, Package] | None = None, measure: bool = False, design: str = DEFAULT_DESIGN,
+                 exclude: dict | None = None):
         """`plans` — {snapshot-dakı sətrin indeksi: menyu planından qurulmuş paket} (app/package_menus.py).
         `measure` — yalnız səhifə sayı üçün keçid: şəkillər çəkilmir (yerləri eynidir, səhifələr eyni bölünür).
-        `design` — DESIGNS-dəki kod (rənglər, şrift, səhifə bəzəyi)."""
+        `design` — DESIGNS-dəki kod (rənglər, şrift, səhifə bəzəyi).
+        `exclude` — sorğuda menyudan çıxarılması istənənlər: {"categories": ["İçki"], "dishes": ["..."]}."""
         _register_fonts()
         self.snap, self.total, self.measure = snapshot, total, measure
         self.design = DESIGNS[design_code(design)]
@@ -422,7 +454,8 @@ class Doc:
         totals = snapshot.get("totals") or {}
         self.currency = totals.get("currency") or "AZN"
         lines = [l for l in snapshot.get("lines") or [] if isinstance(l, dict)]
-        self.packages = [(plans or {}).get(i) or _package(l, self.lang, self.currency) for i, l in enumerate(lines)]
+        self.packages = [without(pkg, exclude) for pkg in
+                         ((plans or {}).get(i) or _package(l, self.lang, self.currency) for i, l in enumerate(lines))]
         self.weekly = bool(self.packages) and all(p.weekly for p in self.packages)
         self.buf = io.BytesIO()
         self.c = Canvas(self.buf, pagesize=A4)
@@ -872,13 +905,13 @@ class Doc:
 
 
 def render(snapshot: dict, photos: dict[str, bytes] | None = None, plans: dict[int, Package] | None = None,
-           design: str = DEFAULT_DESIGN) -> bytes:
+           design: str = DEFAULT_DESIGN, exclude: dict | None = None) -> bytes:
     """Agentin təklif snapshot-u → PDF baytları. `photos` — {dish_key: JPEG} (şəkilli təklif; app/dishes.py),
-    `plans` — menyu planından qurulmuş paketlər (app/package_menus.py), `design` — DESIGNS-dəki kod.
-    Footer-də "02 / 03" üçün iki keçid."""
-    first = Doc(snapshot, photos=photos, plans=plans, measure=True, design=design)
+    `plans` — menyu planından qurulmuş paketlər (app/package_menus.py), `design` — DESIGNS-dəki kod,
+    `exclude` — menyudan çıxarılanlar (app/offer_price.py). Footer-də "02 / 03" üçün iki keçid."""
+    first = Doc(snapshot, photos=photos, plans=plans, measure=True, design=design, exclude=exclude)
     first.build()
-    return Doc(snapshot, total=len(first.pages), photos=photos, plans=plans, design=design).build()
+    return Doc(snapshot, total=len(first.pages), photos=photos, plans=plans, design=design, exclude=exclude).build()
 
 
 # --- Paketin menyu kitabçası (Alətlər → Paketlər → "PDF-ə bax") -----------------------------------

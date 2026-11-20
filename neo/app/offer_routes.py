@@ -68,8 +68,9 @@ def _to_decimal(value: Any) -> Decimal | None:
 
 def record_offer(db, data: dict, body: dict, user: User, lead_id: str | None,
                  pictures: bool = False, design: str = offer_pdf.DEFAULT_DESIGN,
-                 price: Decimal | None = None) -> OfferRecord:
-    """`price` — sorğuda istənən 1 nəfərlik qiymət (app/offer_price.py); `data` artıq onunla hesablanıb."""
+                 price: Decimal | None = None, exclude: dict | None = None) -> OfferRecord:
+    """`price` — sorğuda istənən 1 nəfərlik qiymət (app/offer_price.py); `data` artıq onunla hesablanıb.
+    `exclude` — sorğuda menyudan çıxarılması istənənlər (PDF hər dəfə onlarsız qurulur)."""
     totals = data.get("totals") or {}
     record = OfferRecord(
         offer_id=str(data["offer_id"]), brand=body["brand"],
@@ -77,6 +78,7 @@ def record_offer(db, data: dict, body: dict, user: User, lead_id: str | None,
         total=_to_decimal(totals.get("total")), currency=totals.get("currency"),
         sample=bool(data.get("sample")), created_by_id=user.id, lead_id=lead_id, pictures=pictures,
         design=offer_pdf.design_code(design), unit_price_override=price,
+        menu_exclude=offer_price.dump_exclude(exclude),
     )
     db.add(record)
     db.commit()
@@ -105,14 +107,16 @@ def with_descriptions(snapshot: dict) -> dict:
         for l in lines]}
 
 
-def render_pdf(snapshot: dict, pictures: bool = False, design: str = offer_pdf.DEFAULT_DESIGN) -> bytes:
+def render_pdf(snapshot: dict, pictures: bool = False, design: str = offer_pdf.DEFAULT_DESIGN,
+               exclude: dict | None = None) -> bytes:
     """Neo dizaynında PDF. Şəkilli təklifdə yeməklərin şəkilləri kataloqdan (app/dishes.py) götürülür;
-    kataloqda olmayan yeməklər şəkilsiz əlavə olunur ki, "Yemək şəkilləri"ndə şəkli gözləyən kimi görünsün."""
+    kataloqda olmayan yeməklər şəkilsiz əlavə olunur ki, "Yemək şəkilləri"ndə şəkli gözləyən kimi görünsün.
+    `exclude` — sorğuda menyudan çıxarılması istənən kateqoriyalar / yeməklər (app/offer_price.py)."""
     snapshot = with_descriptions(snapshot)
     with security.SessionLocal() as db:
         plans = package_menus.plans_for_snapshot(db, snapshot)   # menyu planı olan paket: vaxtlar, əlavə sahələr
     if not pictures:
-        return offer_pdf.render(snapshot, plans=plans, design=design)
+        return offer_pdf.render(snapshot, plans=plans, design=design, exclude=exclude)
     items = offer_pdf.menu_items(snapshot)
     names = [name for name, _ in items]
     with security.SessionLocal() as db:
@@ -124,17 +128,17 @@ def render_pdf(snapshot: dict, pictures: bool = False, design: str = offer_pdf.D
             log.exception("dish_remember_failed")
         dishes.seed_starter_photos(db)
         photos = dishes.photos_for(db, names + [i for p in plans.values() for b in p.blocks for g in b.groups for i in g.items])
-    return offer_pdf.render(snapshot, photos, plans, design=design)
+    return offer_pdf.render(snapshot, photos, plans, design=design, exclude=exclude)
 
 
 def _render_base64(data: dict, pictures: bool = False, design: str = offer_pdf.DEFAULT_DESIGN,
-                   price: Decimal | None = None) -> str:
+                   price: Decimal | None = None, exclude: dict | None = None) -> str:
     # Agentin "yarat" cavabında sətirlər menyusuz gəlir — PDF boş menyu ilə qurulurdu (tarixçə isə düzgün idi,
     # çünki tam təklifi get_offer ilə alır). Menyusu olmayan sətir varsa tam təklif götürülür.
     lines = [l for l in data.get("lines") or [] if isinstance(l, dict)]
     full = lines and all(l.get("menu") for l in lines)
     snapshot = data if full else offer_price.apply_price(agent.get_offer(str(data["offer_id"])), price)
-    return base64.b64encode(render_pdf(snapshot, pictures, design)).decode()
+    return base64.b64encode(render_pdf(snapshot, pictures, design, exclude)).decode()
 
 
 def _request_text(raw: dict) -> str:
@@ -160,9 +164,9 @@ async def offers_create(request: Request, me: User = Depends(REQUIRE["sales"]),
     design = offer_pdf.design_code(raw.get("design"))
 
     # Agent çağırışı (60 s-ə qədər) və DB sinxrondur — threadpool-da, yoxsa async route bütün paneli dondururdu.
-    # Sorğuda qiymət yazılıbsa ("8 yox 5 azn et") — agent onu nəzərə almır, Neo tətbiq edir. Agentlə paralel
-    # oxunur ki, Vercel-in 60 saniyəsinə əlavə vaxt düşməsin.
-    price_task = asyncio.ensure_future(run_in_threadpool(offer_price.requested_price, _request_text(raw)))
+    # Sorğuda qiymət ("8 yox 5 azn et") və ya menyudan çıxarmaq ("içkini çıxart") yazılıbsa — agent onları
+    # nəzərə almır, Neo tətbiq edir. Agentlə paralel oxunur ki, Vercel-in 60 saniyəsinə əlavə vaxt düşməsin.
+    price_task = asyncio.ensure_future(run_in_threadpool(offer_price.requested_changes, _request_text(raw)))
     try:
         data = await run_in_threadpool(agent.create_offer, body)
     except agent.OfferAgentError as exc:
@@ -171,7 +175,8 @@ async def offers_create(request: Request, me: User = Depends(REQUIRE["sales"]),
     if data["status"] != "ok":
         price_task.cancel()
         return JSONResponse(data)
-    price = await price_task
+    changes = await price_task
+    price, exclude = changes.price, changes.exclude
     priced = offer_price.apply_price(data, price)
     if priced is data:
         price = None            # bir neçə paketli təklif — qiymət tətbiq olunmadı, saxlanmır
@@ -180,11 +185,14 @@ async def offers_create(request: Request, me: User = Depends(REQUIRE["sales"]),
         data = priced
     # Önizləmə/yükləmə də Neo-nun dizaynında olsun (agentin pdf_base64-ü əvəzinə; alınmasa agentinki qalır).
     try:
-        data["pdf_base64"] = await run_in_threadpool(_render_base64, data, pictures, design, price)
+        data["pdf_base64"] = await run_in_threadpool(_render_base64, data, pictures, design, price, exclude)
     except Exception:
         log.exception("offer_pdf_render_failed", offer_id=data.get("offer_id"))
-        if price is not None:
-            data.pop("pdf_base64", None)   # agentin PDF-i köhnə qiymətlədir — brauzer PDF-i Neo-dan ayrıca alır
+        if price is not None or exclude:
+            data.pop("pdf_base64", None)   # agentin PDF-i düzəlişsizdir — brauzer PDF-i Neo-dan ayrıca alır
+    if exclude:             # nəticə panelində görünsün (PDF-ə düşmür)
+        removed = ", ".join([*exclude["categories"], *exclude["dishes"]])
+        data["assumptions"] = [*(data.get("assumptions") or []), f"Sorğuya görə menyudan çıxarıldı: {removed}."]
     if price is not None:   # nəticə panelində görünsün (PDF-ə düşmür)
         data["assumptions"] = [*(data.get("assumptions") or []),
                                f"Qiymət sorğudakı kimi götürüldü: 1 nəfər üçün {price.normalize():f} AZN"
@@ -196,7 +204,7 @@ async def offers_create(request: Request, me: User = Depends(REQUIRE["sales"]),
             if lead_id and db.get(LeadRecord, lead_id) is None:
                 lead_id = None
             if db.scalar(select(OfferRecord.id).where(OfferRecord.offer_id == str(data["offer_id"]))) is None:
-                record_offer(db, data, body, me, lead_id, pictures, design, price)
+                record_offer(db, data, body, me, lead_id, pictures, design, price, exclude)
 
     try:
         await run_in_threadpool(save)
@@ -205,7 +213,8 @@ async def offers_create(request: Request, me: User = Depends(REQUIRE["sales"]),
         log.exception("offer_record_failed", offer_id=data.get("offer_id"))
     log.info("offer_created", offer_id=data["offer_id"], brand=body["brand"], user=me.email,
              total=(data.get("totals") or {}).get("total"), sample=bool(data.get("sample")), lead=lead_id,
-             pictures=pictures, design=design, price=str(price) if price is not None else None)
+             pictures=pictures, design=design, price=str(price) if price is not None else None,
+             removed=exclude)
     return JSONResponse(data)
 
 
@@ -234,7 +243,7 @@ def offers_pdf(offer_id: str, pictures: str = "", design: str = "", me: User = D
     try:
         # Sorğuda istənən qiymət təklifdə saxlanılıb — PDF hər dəfə onunla qurulur.
         snapshot = offer_price.apply_price(agent.get_offer(offer_id), record.unit_price_override)
-        pdf = render_pdf(snapshot, with_pictures, design)
+        pdf = render_pdf(snapshot, with_pictures, design, offer_price.load_exclude(record.menu_exclude))
     except agent.OfferAgentError as exc:
         return _agent_error(exc)
     except Exception:

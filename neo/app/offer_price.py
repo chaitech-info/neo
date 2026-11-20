@@ -1,46 +1,117 @@
-"""Qiymət təklifi: sorğu mətnində yazılmış qiymət ("qiyməti 1 nəfər üçün 8 yox 5 azn et").
+"""Qiymət təklifi: sorğu mətnində yazılmış dəyişikliklər — agent bunları nəzərə almır, Neo tətbiq edir.
 
-Agent qiyməti həmişə paketdən götürür — sorğuda istənən qiyməti nəzərə almır. Burada sorğudan 1 nəfərlik
-qiymət çıxarılır (`requested_price`: AI, alınmasa sadə qayda) və təklifə tətbiq olunur (`apply_price`:
-vahid qiymət, sətrin cəmi və yekunlar eyni nisbətdə dəyişir). Qiymət təklifdə saxlanılır
-(offers.unit_price_override) — PDF tarixçədən açılanda da həmin qiymətlə qurulur.
+- qiymət: "qiyməti 1 nəfər üçün 8 yox 5 azn et" → 1 nəfərlik qiymət 5 AZN (`apply_price`: vahid qiymət, sətrin
+  cəmi və yekunlar eyni nisbətdə dəyişir);
+- menyudan çıxarmaq: "menyudan içkini çıxart", "desert olmasın", "lobya şorbasını çıxar" → həmin kateqoriya /
+  yemək PDF-də göstərilmir (app/offer_pdf.py — menyu, "Gündəlik seçim", üz qabığındakı xülasə, şəkillər).
+
+`requested_changes` mətni oxuyur (AI, alınmasa sadə qayda). Nəticə təklifdə saxlanılır
+(offers.unit_price_override, offers.menu_exclude) — PDF tarixçədən açılanda da eyni qurulur.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
+from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
 import structlog
 
+from app.dishes import CATEGORIES
+
 log = structlog.get_logger()
 
 MAX_PRICE = Decimal("1000")
+MAX_DISHES = 20
 TIMEOUT_S = 12.0
 _NUM = r"(\d{1,4}(?:[.,]\d{1,2})?)"
 _CUR = r"(?:azn|manat\w*|₼|man\.?)"
-# Mətndə qiymətdən söhbət gedirmi (yoxdursa AI çağırılmır)
-_HINT_RE = re.compile(rf"qiym[əe]t|{_CUR}|price|цен|стоим", re.I)
+# Mətndə qiymətdən söhbət gedirmi
+_PRICE_HINT_RE = re.compile(rf"qiym[əe]t|{_CUR}|price|цен|стоим", re.I)
 # "8 yox 5 azn", "8 deyil 5 manat", "8 əvəzinə 5 azn" → 5
 _INSTEAD_RE = re.compile(rf"{_NUM}\s*(?:{_CUR})?\s*(?:yox|deyil|əvəzinə|evezine|yerinə|yerine)\W+{_NUM}\s*{_CUR}", re.I)
 # "qiymət(i) ... 5 azn et / olsun / qoy / yaz / elə"
 _SET_RE = re.compile(rf"qiym[əe]t\w*[^.\n]{{0,60}}?{_NUM}\s*{_CUR}\s*(?:et|ele|elə|olsun|qoy|yaz|götür|gotur|hesabla)", re.I)
 
+# Menyudan çıxarmaq: kateqoriyanın yazılışları (az, latın hərfləri ilə, ru, en)
+_CATEGORY_WORDS = {
+    "Şorba": r"[şs]orba\w*|суп\w*|soup\w*",
+    "Əsas yemək": r"[əe]sas\s+yem[əe]\w*|основн\w+\s+блюд\w*|main\s+course\w*",
+    "Qarnir": r"qarnir\w*|гарнир\w*|side\s+dish\w*",
+    "Salat": r"salat\w*|салат\w*|salad\w*",
+    "Desert": r"desert\w*|[şs]irniyyat\w*|десерт\w*|dessert\w*",
+    "İçki": r"[iİ][çc]ki\w*|напит\w*|drink\w*|beverage\w*",
+    "Çörək": r"[çc][öo]r[əe][kyğg]\w*|хлеб\w*|bread\w*",
+}
+_REMOVE_VERB = (r"[çc][ıi]xart?\w*|[çc][ıi]xar\w*|sil\w*|olmas[ıi]n|laz[ıi]m\s+deyil|ist[əe]mir\w*|yox\s+olsun|"
+                r"убер\w*|убрать|без|исключ\w*|remove|without|exclude|no")
+_REMOVE_HINT_RE = re.compile(_REMOVE_VERB, re.I)
+
 SCHEMA = {
-    "type": "object", "additionalProperties": False, "required": ["unit_price"],
-    "properties": {"unit_price": {"type": ["number", "null"]}},
+    "type": "object", "additionalProperties": False,
+    "required": ["unit_price", "remove_categories", "remove_dishes"],
+    "properties": {
+        "unit_price": {"type": ["number", "null"]},
+        "remove_categories": {"type": "array", "items": {"type": "string", "enum": CATEGORIES}},
+        "remove_dishes": {"type": "array", "items": {"type": "string"}},
+    },
 }
 PROMPT = """\
-You read a salesperson's request for a catering price offer (Azerbaijani, sometimes Russian or English).
-Return the price PER PERSON (per portion) that the request explicitly asks to USE in the offer, in AZN.
+You read a salesperson's request for a catering price offer (Azerbaijani, often typed without diacritics;
+sometimes Russian or English). Extract the changes the request explicitly asks to make to the offer.
 
-Return a number only when the text clearly sets or changes the unit price, e.g.
+unit_price — the price PER PERSON (per portion) in AZN that the request asks to USE:
 "qiyməti 1 nəfər üçün 8 yox 5 azn et" -> 5, "bir nəfərə 6.50 manat olsun" -> 6.5, "цена 7 манат за человека" -> 7.
-If several are given, the latest instruction wins. Return null when no unit price is requested: a total
-budget ("büdcə 3000 azn"), a number of people or days, a discount in percent, a question about the price,
-or a price that is only mentioned as the current/old one.
+If several are given, the latest instruction wins. null when no unit price is requested: a total budget
+("büdcə 3000 azn"), a number of people or days, a percent discount, a question about the price, or a price
+that is only mentioned as the current/old one.
+
+remove_categories — menu categories the request asks to REMOVE from the menu, from this list only:
+Şorba (soup), Əsas yemək (main course), Qarnir (side dish), Salat (salad), Desert (dessert), İçki (drinks),
+Çörək (bread). "menudan ickini cixart" -> ["İçki"], "desert və çörək olmasın" -> ["Desert", "Çörək"].
+remove_dishes — single dishes the request asks to remove, named as written ("lobya şorbasını çıxar" ->
+["lobya şorbası"]). Do not list a whole category here.
+
+Return [] for both when nothing is to be removed. Requests to ADD or replace dishes are not removals.
 """
+
+
+@dataclass(frozen=True)
+class Changes:
+    price: Decimal | None = None            # 1 nəfərlik qiymət (AZN)
+    categories: tuple[str, ...] = ()        # menyudan çıxarılan kateqoriyalar (app/dishes.CATEGORIES)
+    dishes: tuple[str, ...] = ()            # menyudan çıxarılan yeməklər (yazıldığı kimi)
+
+    def __bool__(self) -> bool:
+        return self.price is not None or bool(self.categories or self.dishes)
+
+    @property
+    def exclude(self) -> dict | None:
+        """PDF üçün: {"categories": [...], "dishes": [...]}; heç nə çıxarılmırsa None."""
+        if not (self.categories or self.dishes):
+            return None
+        return {"categories": list(self.categories), "dishes": list(self.dishes)}
+
+
+def dump_exclude(exclude: dict | None) -> str | None:
+    return json.dumps(exclude, ensure_ascii=False) if exclude else None
+
+
+def load_exclude(value: str | None) -> dict | None:
+    """Bazadakı offers.menu_exclude → {"categories": [...], "dishes": [...]} (xarab / boşdursa None)."""
+    if not value:
+        return None
+    try:
+        data = json.loads(value)
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    out = {"categories": [c for c in data.get("categories") or [] if c in CATEGORIES],
+           "dishes": [str(d)[:200] for d in data.get("dishes") or [] if isinstance(d, str) and d.strip()][:MAX_DISHES]}
+    return out if out["categories"] or out["dishes"] else None
 
 
 def _decimal(value: Any) -> Decimal | None:
@@ -53,7 +124,7 @@ def _decimal(value: Any) -> Decimal | None:
     return d.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
-def _by_rule(text: str) -> Decimal | None:
+def _price_by_rule(text: str) -> Decimal | None:
     """Aydın yazılışlar üçün sadə qayda (AI olmayanda / cavab verməyəndə). Şübhəli hallarda None."""
     found = None
     for m in _INSTEAD_RE.finditer(text):
@@ -64,8 +135,19 @@ def _by_rule(text: str) -> Decimal | None:
     return _decimal(found) if found else None
 
 
-def _by_ai(text: str) -> tuple[bool, Decimal | None]:
-    """(cavab alındı?, qiymət). Açar yoxdursa və ya sorğu alınmasa (False, None) — çağıran qaydaya keçir."""
+def _categories_by_rule(text: str) -> tuple[str, ...]:
+    """"içkini çıxart", "desert olmasın", "без напитков" — kateqoriya sözü ilə çıxarma feli yanaşıdır."""
+    out = []
+    for category, words in _CATEGORY_WORDS.items():
+        near = rf"(?:(?:{words})\W+(?:\w+\W+){{0,2}}?(?:{_REMOVE_VERB})\b|\b(?:{_REMOVE_VERB})\W+(?:\w+\W+){{0,1}}?(?:{words}))"
+        if re.search(near, text, re.I):
+            out.append(category)
+    return tuple(out)
+
+
+def _by_ai(text: str) -> tuple[bool, dict | None]:
+    """(cavab alındı?, {"unit_price", "remove_categories", "remove_dishes"}). Açar yoxdursa və ya sorğu
+    alınmasa (False, None) — çağıran sadə qaydaya keçir."""
     if not os.environ.get("OPENAI_API_KEY"):
         return False, None
     try:
@@ -75,21 +157,34 @@ def _by_ai(text: str) -> tuple[bool, Decimal | None]:
 
         client = OpenAI(api_key=os.environ["OPENAI_API_KEY"], max_retries=0, timeout=TIMEOUT_S)
         model = os.environ.get("OFFER_PRICE_MODEL") or os.environ.get("AI_ANALYSIS_MODEL") or DEFAULT_MODEL
-        out, _ = chat_json(client, model, PROMPT, text[:4000], SCHEMA, "price", max_tokens=30)
-    except Exception as exc:  # noqa: BLE001 — təklif qiymət düzəlişi olmadan da yaranmalıdır
-        log.warning("offer_price_ai_failed", error=type(exc).__name__)
+        out, _ = chat_json(client, model, PROMPT, text[:4000], SCHEMA, "changes", max_tokens=200)
+    except Exception as exc:  # noqa: BLE001 — təklif bu düzəlişlər olmadan da yaranmalıdır
+        log.warning("offer_changes_ai_failed", error=type(exc).__name__)
         return False, None
-    value = out.get("unit_price") if isinstance(out, dict) else None
-    return True, (_decimal(value) if value is not None else None)
+    return (True, out) if isinstance(out, dict) else (False, None)
+
+
+def requested_changes(text: str) -> Changes:
+    """Sorğu mətnində istənən qiymət və menyudan çıxarılacaqlar; heç nə istənməyibsə boş `Changes`."""
+    text = (text or "").strip()
+    wants_price = bool(text and re.search(r"\d", text) and _PRICE_HINT_RE.search(text))
+    wants_removal = bool(text and _REMOVE_HINT_RE.search(text))
+    if not (wants_price or wants_removal):
+        return Changes()
+    answered, out = _by_ai(text)
+    if not answered:
+        return Changes(price=_price_by_rule(text) if wants_price else None,
+                       categories=_categories_by_rule(text) if wants_removal else ())
+    price = out.get("unit_price")
+    categories = tuple(c for c in CATEGORIES if c in (out.get("remove_categories") or []))
+    dishes = tuple(dict.fromkeys(" ".join(str(d).split())[:200] for d in out.get("remove_dishes") or []
+                                 if isinstance(d, str) and len(d.strip()) >= 3))[:MAX_DISHES]
+    return Changes(price=_decimal(price) if price is not None else None, categories=categories, dishes=dishes)
 
 
 def requested_price(text: str) -> Decimal | None:
     """Sorğu mətnində istənən 1 nəfərlik qiymət (AZN); yoxdursa None."""
-    text = (text or "").strip()
-    if not text or not re.search(r"\d", text) or not _HINT_RE.search(text):
-        return None
-    answered, price = _by_ai(text)
-    return price if answered else _by_rule(text)
+    return requested_changes(text).price
 
 
 def _scaled(value: Any, factor: Decimal) -> Any:

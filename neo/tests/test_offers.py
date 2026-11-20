@@ -491,12 +491,83 @@ def test_requested_price_prefers_the_ai_answer(monkeypatch):
     from app import offer_price
 
     asked = []
-    monkeypatch.setattr(offer_price, "_by_ai", lambda text: (asked.append(text), (True, Decimal("9.00")))[1])
-    assert offer_price.requested_price("bir nəfərə doqquz manat olsun, 9 azn") == Decimal("9.00")
-    monkeypatch.setattr(offer_price, "_by_ai", lambda text: (True, None))     # AI: qiymət istənməyib
+    answer = dict(unit_price=9, remove_categories=["İçki", "Bilinməyən"], remove_dishes=["Lobya  şorbası", "x"])
+    monkeypatch.setattr(offer_price, "_by_ai", lambda text: (asked.append(text), (True, dict(answer)))[1])
+    changes = offer_price.requested_changes("bir nəfərə doqquz manat olsun, 9 azn, ickini cixart")
+    assert changes.price == Decimal("9.00") and changes.categories == ("İçki",) and changes.dishes == ("Lobya şorbası",)
+    assert changes.exclude == dict(categories=["İçki"], dishes=["Lobya şorbası"])
+    empty = dict(unit_price=None, remove_categories=[], remove_dishes=[])
+    monkeypatch.setattr(offer_price, "_by_ai", lambda text: (True, dict(empty)))   # AI: heç nə istənməyib
     assert offer_price.requested_price("qiyməti 8 yox 5 azn et") is None
+    assert not offer_price.requested_changes("içkini çıxart") and offer_price.requested_changes("içkini çıxart").exclude is None
     asked.clear()
-    assert offer_price.requested_price("Azersun, 120 nəfər") is None and not asked   # qiymət sözü yoxdur — AI çağırılmır
+    assert offer_price.requested_price("Azersun, 120 nəfər") is None and not asked   # göstəriş yoxdur — AI çağırılmır
+
+
+@pytest.mark.parametrize("text, categories", [
+    ("SGTP ucun qiymeti 1 nefer ucun 8 yox 5 azn et\nmenudan ickini cixart", ("İçki",)),
+    ("Menyudan içkiləri çıxar, desert də olmasın", ("Desert", "İçki")),
+    ("çörək lazım deyil", ("Çörək",)), ("без напитков, 100 человек", ("İçki",)),
+    ("şorbanı sil", ("Şorba",)),
+    ("içki də olsun, 120 nəfər", ()), ("Azersun, gündə 120 nəfər", ()), ("desert əlavə et", ()),
+])
+def test_removed_categories_by_rule(text, categories):
+    from app import offer_price
+
+    assert offer_price.requested_changes(text).categories == categories
+
+
+def test_load_exclude_is_strict():
+    from app import offer_price
+
+    assert offer_price.load_exclude(None) is None and offer_price.load_exclude("not json") is None
+    assert offer_price.load_exclude('{"categories": ["Yox"], "dishes": []}') is None
+    stored = offer_price.dump_exclude(dict(categories=["İçki"], dishes=["Langet"]))
+    assert offer_price.load_exclude(stored) == dict(categories=["İçki"], dishes=["Langet"])
+    assert offer_price.dump_exclude(None) is None
+
+
+DRINKS = {d: items + ["İçki: Alma kompotu", "İçki: Limonad", "İçki: Qazsız su"] for d, items in WEEK.items()}
+WITH_DRINKS = _snapshot([{"title": {"az": d}, "items": [{"az": i} for i in items]} for d, items in DRINKS.items()], "8.00")
+
+
+def test_removed_category_and_dish_leave_the_pdf(monkeypatch):
+    doc = offer_pdf.Doc(WITH_DRINKS)
+    assert "3 içki" in offer_pdf.summary_line(doc.packages[0])
+    drawn = _texts(monkeypatch, lambda: offer_pdf.render(WITH_DRINKS))
+    assert "Limonad" in drawn and "İçki" in drawn
+
+    exclude = dict(categories=["İçki"], dishes=["langet"])
+    doc = offer_pdf.Doc(WITH_DRINKS, exclude=exclude)
+    pkg = doc.packages[0]
+    assert all(g.label != "İçki" for b in pkg.blocks for g in b.groups) and len(pkg.blocks) == 5
+    assert "içki" not in offer_pdf.summary_line(pkg) and "2 əsas yemək" in offer_pdf.summary_line(pkg)
+    drawn = _texts(monkeypatch, lambda: offer_pdf.render(WITH_DRINKS, exclude=exclude))
+    for gone in ("Limonad", "Alma kompotu", "Qazsız su", "İçki", "içki", "Langet"):
+        assert gone not in drawn, gone
+    assert "Yarpaq dolması" in drawn and "Çörək assortisi" in drawn                 # qalanlar yerindədir
+    assert offer_pdf.without(pkg, None) is pkg
+
+
+def test_removal_written_in_the_request_is_applied_and_stored(app_db, monkeypatch):
+    """"menudan ickini cixart": agent menyunu içki ilə qaytarır — PDF (yaradanda və tarixçədən) içkisiz olmalıdır."""
+    offer = dict(WITH_DRINKS, totals=dict(subtotal="8.00", vat="1.44", total="9.44", currency="AZN", vat_included=False))
+    created = dict(OK, **offer, status="ok", offer_id=OK["offer_id"])
+    monkeypatch.setattr(agent, "create_offer", lambda body, client=None: dict(created))
+    monkeypatch.setattr(agent, "get_offer", lambda oid, client=None: offer)
+    c = TestClient(web.app)
+    made = {}
+    drawn = _texts(monkeypatch, lambda: made.update(c.post("/api/offers", json=dict(
+        brand="seaport", message="SGTP ucun qiymeti 1 nefer ucun 8 yox 5 azn et\nmenudan ickini cixart",
+        package_id="standart")).json()))
+    assert "Limonad" not in drawn and "5 AZN" in drawn and "Çoban qovurması" in drawn
+    assert any("menyudan çıxarıldı: İçki" in a for a in made["assumptions"])
+    assert made["lines"][0]["unit_price"] == "5.00"
+    with app_db() as s:
+        rec = s.scalar(select(OfferRecord))
+        assert rec.menu_exclude and "İçki" in rec.menu_exclude
+    drawn = _texts(monkeypatch, lambda: c.get(f"/api/offers/{OK['offer_id']}/pdf"))   # tarixçədən — yenə içkisiz
+    assert "Limonad" not in drawn and "5 AZN" in drawn
 
 
 def test_apply_price_scales_the_line_and_the_totals():
