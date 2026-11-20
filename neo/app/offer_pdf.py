@@ -284,6 +284,35 @@ def _package(line: dict, lang: str, currency: str) -> Package:
                    description=_tr(line.get("description"), lang), days_span=span)
 
 
+_FOLD = str.maketrans("əıöüğşçâîû", "eiougscaiu")
+
+
+def _words(name: str) -> list[str]:
+    """Adın sözləri, Azərbaycan hərfləri latın qarşılığına çevrilmiş: "Mərcimək şorbası" → ["mercimek", "sorbasi"]."""
+    from app.dishes import dish_key
+
+    return [w for w in dish_key(name).translate(_FOLD).split() if len(w) >= 2]
+
+
+def _same_word(a: str, b: str) -> bool:
+    """Eyni söz, şəkilçi fərqi ilə: "sorbasini" ≈ "sorbasi", "langeti" ≈ "langet" (ortaq başlanğıc)."""
+    if a == b:
+        return True
+    common = 0
+    for x, y in zip(a, b):
+        if x != y:
+            break
+        common += 1
+    return common >= 4 and common >= min(len(a), len(b)) - 1 and abs(len(a) - len(b)) <= 4
+
+
+def names_dish(request: str, item: str) -> bool:
+    """Sorğuda yazılan ad ("mercimek sorbasini", diakritiksiz, şəkilçi ilə) menyudakı yeməkdirmi ("Mərcimək
+    şorbası"): sorğudakı hər söz yeməyin adındakı bir sözə uyğun gəlməlidir."""
+    wanted, have = _words(request), _words(item)
+    return bool(wanted) and all(any(_same_word(w, h) for h in have) for w in wanted)
+
+
 def without(pkg: Package, exclude: dict | None) -> Package:
     """Paketin surəti: çıxarılması istənən kateqoriyalar ("İçki") və yeməklər olmadan. Boş qalan kateqoriya və
     gün bloku da düşür — menyu, "Gündəlik seçim", üz qabığındakı xülasə və şəkillər hamısı bundan qurulur."""
@@ -291,14 +320,13 @@ def without(pkg: Package, exclude: dict | None) -> Package:
         return pkg
     from dataclasses import replace
 
-    from app.dishes import category_name, dish_key
+    from app.dishes import category_name
 
     categories = set(exclude.get("categories") or [])
-    dishes = [k for k in (dish_key(d) for d in exclude.get("dishes") or []) if len(k) >= 3]
+    dishes = [d for d in exclude.get("dishes") or [] if isinstance(d, str) and len(d.strip()) >= 3]
 
     def dropped(item: str) -> bool:
-        key = dish_key(item)
-        return any(d in key or key in d for d in dishes)
+        return any(names_dish(d, item) for d in dishes)
 
     blocks = []
     for b in pkg.blocks:
@@ -823,7 +851,6 @@ class Doc:
     def proposal(self) -> None:
         snap = self.snap
         totals = snap.get("totals") or {}
-        notes = [n for n in ([snap.get("notes")] + list(snap.get("assumptions") or [])) if isinstance(n, str) and n.strip()]
         # Qiymət şərti (hər təklifdə yazılır): qiymət 1 nəfərlik yemək üçündür; ƏDV qiymətə daxil deyil
         # (paket qiymətləri ƏDV xaric saxlanılır). Agent ƏDV-ni qiymətə daxil sayıbsa — "daxildir".
         vat_in = totals.get("vat_included") is True
@@ -857,8 +884,10 @@ class Doc:
             self.field(COL2, r + 108, r + 156, wl, "Cəmi məbləğ", "Total", amount, vat, 13)
         else:
             self.field(COL2, r + 108, r + 156, wl, "Təklifin qüvvədə olma müddəti", "Proposal validity")
-        self.field(xr, r + 117, r + 156, RIGHT - xr, "Əlavə şərtlər", "Additional terms", "; ".join(notes),
-                   value_size=9.5)
+        # "Əlavə şərtlər" boş sətirdir (əl ilə doldurmaq üçün). Agentin qeydi və fərziyyələri müştəriyə gedən
+        # PDF-ə yazılmır — onlar daxili mətndir ("Menudan ickini cixart; Seçilmiş paket: «Standart» (id: …)")
+        # və yalnız paneldə, "Agentin fərziyyələri" altında görünür.
+        self.field(xr, r + 117, r + 156, RIGHT - xr, "Əlavə şərtlər", "Additional terms")
         # Qiymət şərti sol sütunda, başlığın altında (blokun hündürlüyü dəyişmir — səhifə sayı əvvəlki kimi)
         # Hər cümlə öz sətrində (sığmasa ikiyə bölünür): azərbaycanca, altında ingiliscə
         yy, width = r + 80, COL2 - LEFT - 8

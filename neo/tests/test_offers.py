@@ -412,6 +412,11 @@ def test_pdf_states_price_is_per_person_and_vat_is_not_included(monkeypatch):
     assert "53 592 AZN" in drawn and "ƏDV daxil deyil" in drawn     # cəmi məbləğ ƏDV-siz göstərilir
     assert "63 238.56" in drawn                                     # ƏDV ilə məbləğ qeyddədir
 
+    # Agentin qeydi və fərziyyələri daxili mətndir — müştəriyə gedən PDF-ə yazılmır ("Əlavə şərtlər" boş qalır)
+    noted = dict(WEEKLY, notes="Menudan ickini cixart", assumptions=["Seçilmiş paket: «Standart» (id: standart)"])
+    drawn = _texts(monkeypatch, lambda: offer_pdf.render(noted))
+    assert "Əlavə şərtlər" in drawn and "ickini" not in drawn and "Seçilmiş paket" not in drawn
+
     included = dict(WEEKLY, totals=dict(total="100.00", currency="AZN", vat_included=True))
     drawn = _texts(monkeypatch, lambda: offer_pdf.render(included))
     assert "daxildir" in drawn and "daxil deyil" not in drawn       # agent ƏDV daxil deyibsə — yalan yazılmır
@@ -515,6 +520,26 @@ def test_removed_categories_by_rule(text, categories):
     from app import offer_price
 
     assert offer_price.requested_changes(text).categories == categories
+
+
+def test_a_named_dish_is_removed_not_its_category(monkeypatch):
+    """Prod: "menudan mercimek sorbasini cixart" — şorba menyuda qalırdı (diakritiksiz, şəkilçili ad menyudakı
+    "Mərcimək şorbası" ilə tutuşmurdu)."""
+    from app import offer_price
+
+    for written in ("mercimek sorbasini", "mərcimək şorbası", "Mercimek sorbasi", "MƏRCİMƏK ŞORBASINI"):
+        assert offer_pdf.names_dish(written, "Mərcimək şorbası"), written
+    assert offer_pdf.names_dish("langeti", "Langet") and offer_pdf.names_dish("toyuq tabakani", "Toyuq tabaka")
+    assert not offer_pdf.names_dish("mercimek sorbasini", "Tərəvəz şorbası")
+    assert not offer_pdf.names_dish("toyuq tabaka", "Toyuq şnitseli") and not offer_pdf.names_dish("", "Langet")
+
+    changes = offer_price.requested_changes("SGTP ucun qiymeti 1 nefer ucun 8 yox 5 azn et\nmenudan mercimek sorbasini cixart")
+    assert changes.dishes == ("mercimek sorbasini",) and changes.categories == ()   # bir şorba, bütün şorbalar yox
+    assert offer_price.requested_changes("menudan sorbani cixart").categories == ("Şorba",)
+    assert offer_price.requested_changes("menyudan şorbasını çıxart").dishes == ()
+
+    drawn = _texts(monkeypatch, lambda: offer_pdf.render(WEEKLY, exclude=changes.exclude))
+    assert "Mərcimək şorbası" not in drawn and "Tərəvəz şorbası" in drawn and "Düyü şorbası" in drawn
 
 
 def test_load_exclude_is_strict():

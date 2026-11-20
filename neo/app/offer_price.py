@@ -71,8 +71,11 @@ that is only mentioned as the current/old one.
 remove_categories — menu categories the request asks to REMOVE from the menu, from this list only:
 Şorba (soup), Əsas yemək (main course), Qarnir (side dish), Salat (salad), Desert (dessert), İçki (drinks),
 Çörək (bread). "menudan ickini cixart" -> ["İçki"], "desert və çörək olmasın" -> ["Desert", "Çörək"].
-remove_dishes — single dishes the request asks to remove, named as written ("lobya şorbasını çıxar" ->
-["lobya şorbası"]). Do not list a whole category here.
+remove_dishes — single dishes the request asks to remove, in dictionary form with Azerbaijani letters
+restored: "lobya şorbasını çıxar" -> ["lobya şorbası"], "menudan mercimek sorbasini cixart" ->
+["mərcimək şorbası"], "toyuq tabaka olmasin" -> ["toyuq tabaka"]. A named dish is NOT its category:
+"mercimek sorbasini cixart" removes one soup, so remove_categories stays [] (only "şorbanı çıxart" /
+"şorba olmasın" removes the whole Şorba category). Do not list a whole category here.
 
 Return [] for both when nothing is to be removed. Requests to ADD or replace dishes are not removals.
 """
@@ -135,9 +138,23 @@ def _price_by_rule(text: str) -> Decimal | None:
     return _decimal(found) if found else None
 
 
+# Konkret yemək: "<ad> şorbasını / salatını / kompotunu … çıxart" — mənsubiyyət şəkilçili söz kateqoriya deyil,
+# yeməyin adının ikinci sözüdür ("mercimek sorbasini cixart" bütün şorbaları yox, bir şorbanı çıxarır).
+_DISH_RE = re.compile(
+    rf"(\w{{3,}})\s+((?:[şs]orbas[ıi]|salat[ıi]|kompotu|plovu|p[üu]resi|sotesi|dolmas[ıi]|kabab[ıi]|kotleti|sousu)\w*)"
+    rf"\W+(?:\w+\W+){{0,1}}?(?:{_REMOVE_VERB})", re.I)
+
+
+def _dishes_by_rule(text: str) -> tuple[str, ...]:
+    skip = {"menyudan", "menudan", "menyuda", "menuda"}
+    return tuple(dict.fromkeys(f"{m.group(1)} {m.group(2)}" for m in _DISH_RE.finditer(text)
+                               if m.group(1).lower() not in skip))
+
+
 def _categories_by_rule(text: str) -> tuple[str, ...]:
     """"içkini çıxart", "desert olmasın", "без напитков" — kateqoriya sözü ilə çıxarma feli yanaşıdır."""
     out = []
+    text = _DISH_RE.sub(lambda m: " " if m.group(1).lower() not in ("menyudan", "menudan", "menyuda", "menuda") else m.group(0), text)
     for category, words in _CATEGORY_WORDS.items():
         near = rf"(?:(?:{words})\W+(?:\w+\W+){{0,2}}?(?:{_REMOVE_VERB})\b|\b(?:{_REMOVE_VERB})\W+(?:\w+\W+){{0,1}}?(?:{words}))"
         if re.search(near, text, re.I):
@@ -174,7 +191,8 @@ def requested_changes(text: str) -> Changes:
     answered, out = _by_ai(text)
     if not answered:
         return Changes(price=_price_by_rule(text) if wants_price else None,
-                       categories=_categories_by_rule(text) if wants_removal else ())
+                       categories=_categories_by_rule(text) if wants_removal else (),
+                       dishes=_dishes_by_rule(text) if wants_removal else ())
     price = out.get("unit_price")
     categories = tuple(c for c in CATEGORIES if c in (out.get("remove_categories") or []))
     dishes = tuple(dict.fromkeys(" ".join(str(d).split())[:200] for d in out.get("remove_dishes") or []
