@@ -200,3 +200,40 @@ def test_notification_polling_writes_starter_photos(db, monkeypatch):
     assert c.get("/api/notifications").status_code == 200
     with db() as s:
         assert s.scalar(select(func.count()).select_from(Dish).where(Dish.image.is_not(None))) == 28
+
+
+def test_missing_dish_names_are_translated_once(tmp_path):
+    from types import SimpleNamespace
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    from app import dishes
+    from app.db.models import Base, Dish
+
+    engine = create_engine(f"sqlite:///{tmp_path}/t.db")
+    Base.metadata.create_all(engine)
+    calls = []
+
+    class FakeClient:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**kw):
+                    calls.append(kw)
+                    import json
+                    items = json.loads(kw["messages"][1]["content"])
+                    out = {"dishes": [{"id": i["id"], "en": "Lentil soup", "ru": "Чечевичный суп"} for i in items]}
+                    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(out)))],
+                                           usage=None)
+
+    with Session(engine) as db:
+        db.add_all([Dish(key="mercimek sorbasi", name="Mərcimək şorbası"),
+                    Dish(key="dolma", name="Dolma", name_en="Dolma", name_ru="Долма")])
+        db.commit()
+        rows = list(db.scalars(select(Dish)))
+        assert dishes.translate_missing(db, rows, "en", client=FakeClient) == 1
+        assert dishes.translate_missing(db, rows, "ru", client=FakeClient) == 0   # ru da birinci çağırışda doldu
+        assert dishes.translate_missing(db, rows, "az", client=FakeClient) == 0
+        soup = db.scalar(select(Dish).where(Dish.key == "mercimek sorbasi"))
+        assert (soup.name_en, soup.name_ru) == ("Lentil soup", "Чечевичный суп") and len(calls) == 1

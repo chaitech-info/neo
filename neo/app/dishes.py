@@ -162,3 +162,64 @@ def seed_starter_photos(db: Session) -> int:
         db.commit()
     _starter_done = True
     return added
+
+
+# --- Tərcümə: ingiliscə / rusca təklif üçün yemək adları ------------------------------------------
+
+TRANSLATE_MODEL = "gpt-4.1-mini"
+TRANSLATE_TIMEOUT_S = 25.0
+_TRANSLATE_SCHEMA = {
+    "type": "object", "additionalProperties": False, "required": ["dishes"],
+    "properties": {"dishes": {"type": "array", "items": {
+        "type": "object", "additionalProperties": False, "required": ["id", "en", "ru"],
+        "properties": {"id": {"type": "integer"}, "en": {"type": "string"}, "ru": {"type": "string"}}}}},
+}
+_TRANSLATE_PROMPT = (
+    "You translate Azerbaijani dish names for a catering company's printed menu. For each dish give the "
+    "natural English and Russian menu name (title case in English, sentence case in Russian). Keep well-known "
+    "local dish names transliterated (e.g. Dolma, Qutab → Kutab / Кутабы) and add nothing else.")
+
+
+def translate_missing(db: Session, rows, lang: str, client=None) -> int:
+    """`lang` (en/ru) adı boş olan yeməkləri GPT ilə tərcümə edib kataloqda saxlayır (həm en, həm ru — bir
+    çağırışda). Tərcümə alınmasa təklif azərbaycanca adlarla qurulur. Neçə yeməyin yeniləndiyini qaytarır."""
+    import os
+
+    import structlog
+
+    if lang not in ("en", "ru"):
+        return 0
+    attr = "name_en" if lang == "en" else "name_ru"
+    missing = [d for d in rows if d is not None and not (getattr(d, attr) or "").strip()]
+    if not missing:
+        return 0
+    if client is None:
+        if not os.environ.get("OPENAI_API_KEY"):
+            return 0
+        from openai import OpenAI
+
+        client = OpenAI(api_key=os.environ["OPENAI_API_KEY"], timeout=TRANSLATE_TIMEOUT_S, max_retries=1)
+    from app.ai_scoring import chat_json
+
+    try:
+        data, _ = chat_json(client, os.environ.get("DISH_TRANSLATE_MODEL") or TRANSLATE_MODEL, _TRANSLATE_PROMPT,
+                            json.dumps([{"id": d.id, "az": d.name} for d in missing], ensure_ascii=False),
+                            _TRANSLATE_SCHEMA, name="dishes", max_tokens=60 * len(missing) + 200)
+    except Exception:
+        structlog.get_logger().exception("dish_translate_failed", lang=lang, count=len(missing))
+        return 0
+    by_id = {d.id: d for d in missing}
+    done = 0
+    for item in data.get("dishes") or []:
+        d = by_id.get(item.get("id"))
+        if d is None:
+            continue
+        en, ru = " ".join(str(item.get("en") or "").split())[:300], " ".join(str(item.get("ru") or "").split())[:300]
+        if en and not (d.name_en or "").strip():
+            d.name_en = en
+        if ru and not (d.name_ru or "").strip():
+            d.name_ru = ru
+        done += 1
+    if done:
+        db.commit()
+    return done

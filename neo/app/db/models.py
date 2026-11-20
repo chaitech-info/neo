@@ -367,6 +367,7 @@ class OfferRecord(Base):
     unit_price_override: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), nullable=True)
     # Sorğuda menyudan çıxarılması istənənlər (0020): JSON {"categories": ["İçki"], "dishes": [...]}
     menu_exclude: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    language: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)  # təklifin dili (0021); boş — az
     created_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), index=True, nullable=True)
     lead_id: Mapped[Optional[str]] = mapped_column(ForeignKey("leads.dedupe_key"), index=True, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)

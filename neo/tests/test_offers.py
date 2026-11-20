@@ -740,3 +740,53 @@ def test_price_written_in_the_request_is_used_in_the_offer_and_the_pdf(app_db, m
     assert plain["lines"][0]["unit_price"] == "8.00" and plain["assumptions"] == []
     with app_db() as s:
         assert s.scalar(select(OfferRecord.unit_price_override)) is None
+
+
+# --- təklifin dili (az / en / ru) ----------------------------------------------------------
+
+
+def test_pdf_is_written_in_english_or_russian(monkeypatch):
+    en = dict(WEEKLY, language="en")
+    drawn = _texts(monkeypatch, lambda: offer_pdf.render(en))
+    parts = drawn.split(" | ")
+    assert "Proposal details" in parts and "Client" in parts and "VAT is not included." in parts
+    assert "Monday" in parts and "Bazar ertəsi" not in drawn and "Standard package" in parts
+    for az in ("Təklif məlumatları", "Müştəri", "ƏDV", "Həftəlik", "Gündəlik seçim", "paket"):
+        assert az not in parts, az
+
+    ru = dict(WEEKLY, language="ru")
+    drawn = _texts(monkeypatch, lambda: offer_pdf.render(ru))
+    parts = drawn.split(" | ")
+    assert "Детали предложения" in parts and "Proposal details" in parts   # rusca, altında ingiliscə
+    assert "Понедельник" in parts and "НДС не включён в цену." in parts and "Пакет «Standart»" in parts
+    assert "Təklif məlumatları" not in drawn and "Bazar ertəsi" not in drawn
+    assert _pages(offer_pdf.render(ru)) == 3
+
+    drawn = _texts(monkeypatch, lambda: offer_pdf.render(WEEKLY))  # azərbaycanca — əvvəlki kimi
+    assert "Təklif məlumatları" in drawn and "Детали" not in drawn
+
+
+def test_offer_language_is_chosen_and_stored(app_db, monkeypatch):
+    created = dict(OK, **WEEKLY, status="ok", offer_id=OK["offer_id"])
+    monkeypatch.setattr(agent, "create_offer", lambda body, client=None: dict(created))
+    monkeypatch.setattr(agent, "get_offer", lambda oid, client=None: WEEKLY)
+    seen = []
+    real = offer_pdf.render
+    monkeypatch.setattr(offer_pdf, "render", lambda snap, *a, **k: (seen.append(snap.get("language")), real(snap, *a, **k))[1])
+    c = TestClient(web.app)
+    page = c.get("/tools/offers").text
+    assert 'id="of-language"' in page and "English" in page and "Русский" in page
+    assert c.post("/api/offers", json=dict(brand="seaport", message="a", language="ru")).status_code == 200
+    with app_db() as s:
+        assert s.scalar(select(OfferRecord.language)) == "ru"
+    oid = OK["offer_id"]
+    c.get(f"/api/offers/{oid}/pdf")                                 # tarixçədən — saxlanmış dil
+    c.get(f"/api/offers/{oid}/pdf?lang=en")                         # başqa dildə açmaq
+    c.get(f"/api/offers/{oid}/pdf?lang=xx")
+    assert seen == ["ru", "ru", "en", "ru"]
+    with app_db() as s:
+        s.query(OfferRecord).delete()
+        s.commit()
+    c.post("/api/offers", json=dict(brand="seaport", message="a", language="de"))  # tanınmayan — azərbaycanca
+    with app_db() as s:
+        assert s.scalar(select(OfferRecord.language)) is None

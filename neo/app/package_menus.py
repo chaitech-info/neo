@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 
 from app import dishes as dish_catalog
 from app.db.models import Dish, PackageMenu
-from app.offer_pdf import WEEKDAYS, Block, Group, Package, _CAT_RE, _money, _weekday, section_name
+from app.offer_pdf import WEEKDAYS, Block, Group, Package, _CAT_RE, _money, _weekday, section_label, section_name
 
 MAX_WEEKS, MAX_MEALS, MAX_COURSES, MAX_FIELDS, MAX_PER_CELL = 4, 6, 15, 8, 12
 ID_RE = re.compile(r"^[a-z0-9_-]{1,24}$")
@@ -264,9 +264,20 @@ def pdf_package(plan: dict, dishes: dict[int, Dish], package: dict, lang: str = 
             return str(v.get(lang) or v.get("az") or "").strip()
         return str(v or "").strip()
 
+    li = {"en": 1, "ru": 2}.get(lang, 0)     # WEEKDAYS: (az, en, ru)
     days = plan["days"]
-    span = (f"{WEEKDAYS[min(days)][0]} – {WEEKDAYS[max(days)][0]}", f"{WEEKDAYS[min(days)][1]} – {WEEKDAYS[max(days)][1]}") \
-        if len(days) > 1 else (WEEKDAYS[days[0]][0], WEEKDAYS[days[0]][1])
+    span = (f"{WEEKDAYS[min(days)][li]} – {WEEKDAYS[max(days)][li]}", f"{WEEKDAYS[min(days)][1]} – {WEEKDAYS[max(days)][1]}") \
+        if len(days) > 1 else (WEEKDAYS[days[0]][li], WEEKDAYS[days[0]][1])
+
+    def course_label(name: str) -> str:
+        if lang == "az":
+            return name
+        pair = COURSE_I18N.get(dish_catalog.category_name(name))
+        return pair[li - 1] if pair else name
+
+    def meal_name(name: str) -> str:
+        pair = MEAL_I18N.get(name) if lang != "az" else None
+        return pair[li - 1] if pair else name
     flat = every_day(plan)
     blocks = []
     for w in range(1, plan["weeks"] + 1):
@@ -276,7 +287,7 @@ def pdf_package(plan: dict, dishes: dict[int, Dish], package: dict, lang: str = 
             for meal in plan["meals"]:
                 groups = []
                 for course in plan["courses"]:
-                    g = Group(section_name(course["name"])[0] if flat else course["name"])
+                    g = Group(section_label(course["name"], lang) if flat else course_label(course["name"]))
                     for e in _cell(plan, w, d, meal["id"], course["id"]):
                         dish = dishes.get(e["dish"])
                         if dish is None:
@@ -291,13 +302,14 @@ def pdf_package(plan: dict, dishes: dict[int, Dish], package: dict, lang: str = 
                         groups.append(g)
                 if not groups:
                     continue
-                meal_label = " ".join(x for x in (meal["name"] if len(plan["meals"]) > 1 or meal.get("time") else "",
+                meal_label = " ".join(x for x in (meal_name(meal["name"]) if len(plan["meals"]) > 1 or meal.get("time") else "",
                                                    meal.get("time") or "") if x)
+                # İngiliscə təklifdə ingiliscə ad başlığın özüdür — yanında təkrar yazılmır
                 if flat:
-                    blocks.append(Block(span[0], " · ".join(x for x in (span[1], meal_label) if x), groups))
+                    blocks.append(Block(span[0], " · ".join(x for x in (span[1] if lang != "en" else "", meal_label) if x), groups))
                     continue
-                accent = " · ".join(x for x in (day[1] + sfx[1], meal_label) if x)
-                blocks.append(Block((day[2] if lang == "ru" else day[0]) + (sfx[2] if lang == "ru" else sfx[0]), accent, groups))
+                accent = " · ".join(x for x in (day[1] + sfx[1] if lang != "en" else "", meal_label) if x)
+                blocks.append(Block(day[li] + sfx[li], accent, groups))
     name = tr(package.get("name")) or str(package.get("id") or package.get("package_id") or "")
     name_en = str((package.get("name") or {}).get("en") or "").strip() if isinstance(package.get("name"), dict) else ""
     price = package.get("unit_price", package.get("price"))
@@ -333,6 +345,8 @@ def plans_for_snapshot(db: Session, snapshot: dict) -> dict[int, Package]:
             continue
         dishes = dish_map(db, plan)
         if same_menu(agent_menu(plan, dishes), line.get("menu")):
+            if lang != "az":    # ingiliscə / rusca adı olmayan yeməklər bir dəfə tərcümə olunub kataloqda qalır
+                dish_catalog.translate_missing(db, list(dishes.values()), lang)
             out[i] = pdf_package(plan, dishes, line, lang, currency)
     return out
 

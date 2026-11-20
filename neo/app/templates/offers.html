@@ -34,6 +34,11 @@
           <label class="kw-f">Müştəri şirkəti (ixtiyari)<input id="of-customer" name="customer_name" maxlength="200" autocomplete="off"></label>
           <label class="kw-f">Əlaqədar şəxs (ixtiyari)<input id="of-contact" name="contact_person" maxlength="200" autocomplete="off"></label>
         </div>
+        <label class="kw-f of-lang">Təklif dili
+          <select id="of-language" name="language">
+            {% for code, name in languages.items() %}<option value="{{ code }}">{{ name }}</option>{% endfor %}
+          </select>
+        </label>
         <label class="kw-chk of-pics"><input type="checkbox" id="of-pictures" name="pictures">Şəkilli təklif (yeməklərin şəkli ilə)</label>
         <fieldset class="of-designs" id="of-designs">
           <legend>PDF dizaynı</legend>
@@ -241,7 +246,7 @@
 
     function baseBody() {
       var b = { brand: $('of-brand').value, customer_name: $('of-customer').value, contact_person: $('of-contact').value,
-                pictures: $('of-pictures').checked, design: design() };
+                pictures: $('of-pictures').checked, design: design(), language: $('of-language').value };
       if (leadId) b.lead_id = leadId;
       var pk = $('of-package');
       if (pk.value) { b.package_id = pk.value; b.package_name = pk.options[pk.selectedIndex].dataset.name || ''; }

@@ -30,6 +30,16 @@ router = APIRouter()
 HISTORY_LIMIT = 50
 MAX_PACKAGES = 200
 MAX_LEAD_TEXT = agent.MAX_MESSAGE_LENGTH
+LANGUAGES = {"az": "Azərbaycanca", "en": "English", "ru": "Русский"}
+
+
+def language_code(value) -> str:
+    return value if value in LANGUAGES else "az"
+
+
+def _in_language(snapshot: dict, lang: str) -> dict:
+    """PDF seçilmiş dildə qurulsun (agentin snapshot-undakı dildən asılı olmayaraq)."""
+    return {**snapshot, "language": language_code(lang)}
 
 
 async def verify_csrf_header(request: Request) -> None:
@@ -68,7 +78,7 @@ def _to_decimal(value: Any) -> Decimal | None:
 
 def record_offer(db, data: dict, body: dict, user: User, lead_id: str | None,
                  pictures: bool = False, design: str = offer_pdf.DEFAULT_DESIGN,
-                 price: Decimal | None = None, exclude: dict | None = None) -> OfferRecord:
+                 price: Decimal | None = None, exclude: dict | None = None, language: str = "az") -> OfferRecord:
     """`price` — sorğuda istənən 1 nəfərlik qiymət (app/offer_price.py); `data` artıq onunla hesablanıb.
     `exclude` — sorğuda menyudan çıxarılması istənənlər (PDF hər dəfə onlarsız qurulur)."""
     totals = data.get("totals") or {}
@@ -79,6 +89,7 @@ def record_offer(db, data: dict, body: dict, user: User, lead_id: str | None,
         sample=bool(data.get("sample")), created_by_id=user.id, lead_id=lead_id, pictures=pictures,
         design=offer_pdf.design_code(design), unit_price_override=price,
         menu_exclude=offer_price.dump_exclude(exclude),
+        language=language_code(language) if language_code(language) != "az" else None,
     )
     db.add(record)
     db.commit()
@@ -132,13 +143,13 @@ def render_pdf(snapshot: dict, pictures: bool = False, design: str = offer_pdf.D
 
 
 def _render_base64(data: dict, pictures: bool = False, design: str = offer_pdf.DEFAULT_DESIGN,
-                   price: Decimal | None = None, exclude: dict | None = None) -> str:
+                   price: Decimal | None = None, exclude: dict | None = None, language: str = "az") -> str:
     # Agentin "yarat" cavabında sətirlər menyusuz gəlir — PDF boş menyu ilə qurulurdu (tarixçə isə düzgün idi,
     # çünki tam təklifi get_offer ilə alır). Menyusu olmayan sətir varsa tam təklif götürülür.
     lines = [l for l in data.get("lines") or [] if isinstance(l, dict)]
     full = lines and all(l.get("menu") for l in lines)
     snapshot = data if full else offer_price.apply_price(agent.get_offer(str(data["offer_id"])), price)
-    snapshot = _with_customer(snapshot, data.get("customer_name"))
+    snapshot = _in_language(_with_customer(snapshot, data.get("customer_name")), language)
     return base64.b64encode(render_pdf(snapshot, pictures, design, exclude)).decode()
 
 
@@ -169,6 +180,7 @@ async def offers_create(request: Request, me: User = Depends(REQUIRE["sales"]),
     lead_id = raw.get("lead_id") if isinstance(raw.get("lead_id"), str) else None
     pictures = raw.get("pictures") is True
     design = offer_pdf.design_code(raw.get("design"))
+    language = language_code(raw.get("language"))
 
     # Agent çağırışı (60 s-ə qədər) və DB sinxrondur — threadpool-da, yoxsa async route bütün paneli dondururdu.
     # Sorğuda qiymət ("8 yox 5 azn et") və ya menyudan çıxarmaq ("içkini çıxart") yazılıbsa — agent onları
@@ -203,7 +215,7 @@ async def offers_create(request: Request, me: User = Depends(REQUIRE["sales"]),
         data = priced
     # Önizləmə/yükləmə də Neo-nun dizaynında olsun (agentin pdf_base64-ü əvəzinə; alınmasa agentinki qalır).
     try:
-        data["pdf_base64"] = await run_in_threadpool(_render_base64, data, pictures, design, price, exclude)
+        data["pdf_base64"] = await run_in_threadpool(_render_base64, data, pictures, design, price, exclude, language)
     except Exception:
         log.exception("offer_pdf_render_failed", offer_id=data.get("offer_id"))
         if price is not None or exclude:
@@ -222,7 +234,7 @@ async def offers_create(request: Request, me: User = Depends(REQUIRE["sales"]),
             if lead_id and db.get(LeadRecord, lead_id) is None:
                 lead_id = None
             if db.scalar(select(OfferRecord.id).where(OfferRecord.offer_id == str(data["offer_id"]))) is None:
-                record_offer(db, data, body, me, lead_id, pictures, design, price, exclude)
+                record_offer(db, data, body, me, lead_id, pictures, design, price, exclude, language)
 
     try:
         await run_in_threadpool(save)
@@ -232,7 +244,7 @@ async def offers_create(request: Request, me: User = Depends(REQUIRE["sales"]),
     log.info("offer_created", offer_id=data["offer_id"], brand=body["brand"], user=me.email,
              total=(data.get("totals") or {}).get("total"), sample=bool(data.get("sample")), lead=lead_id,
              pictures=pictures, design=design, price=str(price) if price is not None else None,
-             removed=exclude)
+             removed=exclude, language=language)
     return JSONResponse(data)
 
 
@@ -248,7 +260,8 @@ def _known_offer(offer_id: str) -> bool:
 
 
 @router.get("/api/offers/{offer_id}/pdf")
-def offers_pdf(offer_id: str, pictures: str = "", design: str = "", me: User = Depends(REQUIRE["sales"])):
+def offers_pdf(offer_id: str, pictures: str = "", design: str = "", lang: str = "",
+               me: User = Depends(REQUIRE["sales"])):
     record = _offer_record(offer_id)
     if record is None:
         return _error("Təklif tapılmadı", 404)
@@ -261,7 +274,8 @@ def offers_pdf(offer_id: str, pictures: str = "", design: str = "", me: User = D
     try:
         # Sorğuda istənən qiymət təklifdə saxlanılıb — PDF hər dəfə onunla qurulur.
         snapshot = offer_price.apply_price(agent.get_offer(offer_id), record.unit_price_override)
-        snapshot = _with_customer(snapshot, record.customer_name)
+        snapshot = _in_language(_with_customer(snapshot, record.customer_name),
+                                lang if lang in LANGUAGES else (record.language or "az"))
         pdf = render_pdf(snapshot, with_pictures, design, offer_price.load_exclude(record.menu_exclude))
     except agent.OfferAgentError as exc:
         return _agent_error(exc)
@@ -341,6 +355,7 @@ def offers_page(request: Request, lead: str = "", brand: str = "seaport", me: Us
         "request": request, "active": "offers", "brands": agent.BRAND_NAMES,
         "brand": brand if brand in agent.BRANDS else "seaport", "history": history, "prefill": prefill,
         "csrf": csrf_token(request), "can_manage": security.has_role(me, "admin"),
+        "languages": LANGUAGES,
         "designs": [{"code": d.code, "name": d.name, "hint": d.hint, "swatch": d.swatch}
                     for d in offer_pdf.DESIGNS.values()],
     })

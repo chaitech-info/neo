@@ -285,8 +285,9 @@ def _package(line: dict, lang: str, currency: str) -> Package:
                 g.items.append(dish)
             day = WEEKDAYS[d]
             suffix = _tr(sec.get("title"), lang).partition(" · ")[2]
-            title = (day[2] if lang == "ru" else day[0]) + (f" · {suffix}" if suffix else "")
-            blocks.append(Block(title, day[1], groups))
+            li = {"en": 1, "ru": 2}.get(lang, 0)
+            title = day[li] + (f" · {suffix}" if suffix else "")
+            blocks.append(Block(title, day[1] if lang != "en" else "", groups))
     else:
         groups = [Group(_tr(s.get("title"), lang), [_tr(it, lang) for it in s.get("items") or [] if _tr(it, lang)])
                   for s in menu]
@@ -294,7 +295,8 @@ def _package(line: dict, lang: str, currency: str) -> Package:
     span = None
     if weekly:
         first, last = WEEKDAYS[min(days)], WEEKDAYS[max(days)]
-        span = (f"{first[0]} – {last[0]}", f"{first[1]} – {last[1]}")
+        li = {"en": 1, "ru": 2}.get(lang, 0)
+        span = (f"{first[li]} – {last[li]}", f"{first[1]} – {last[1]}")
     return Package(name=name, name_en=name_en, weekly=weekly, blocks=blocks,
                    price=_money(line.get("unit_price"), currency), unit=_tr(line.get("unit"), lang),
                    description=_tr(line.get("description"), lang), days_span=span)
@@ -403,12 +405,94 @@ SECTION_NAMES = {
     "Salat": ("Salatlar", "Salads"), "Desert": ("Desertlər", "Desserts"), "İçki": ("İçkilər", "Drinks"),
     "Çörək": ("Çörək", "Bread"),
 }
+SECTION_NAMES_RU = {
+    "Şorba": "Супы", "Əsas yemək": "Основные блюда", "Qarnir": "Гарниры", "Salat": "Салаты", "Desert": "Десерты",
+    "İçki": "Напитки", "Çörək": "Хлеб",
+}
+
+
+# İngiliscə / rusca təklifdə kateqoriya etiketləri o dildə gəlir ("Soup", "Супы") — kataloq kateqoriyasına qaytarmaq üçün
+_CATEGORY_ALIASES = {
+    "Şorba": ("Soup", "Soups", "Суп", "Супы"), "Əsas yemək": ("Main course", "Main courses", "Основное блюдо", "Основные блюда"),
+    "Qarnir": ("Side dish", "Side dishes", "Гарнир", "Гарниры"), "Salat": ("Salad", "Salads", "Салат", "Салаты"),
+    "Desert": ("Dessert", "Desserts", "Десерт", "Десерты"), "İçki": ("Drink", "Drinks", "Напиток", "Напитки"),
+    "Çörək": ("Bread", "Хлеб"),
+}
+
+
+def category_of(label: str) -> str:
+    from app.dishes import category_name, dish_key
+
+    k = dish_key(label)
+    for cat, names in _CATEGORY_ALIASES.items():
+        if any(k == dish_key(n) for n in names):
+            return cat
+    return category_name(label)
 
 
 def section_name(label: str) -> tuple[str, str]:
-    from app.dishes import category_name
+    return SECTION_NAMES.get(category_of(label), (label or "Digər", ""))
 
-    return SECTION_NAMES.get(category_name(label), (label or "Digər", ""))
+
+def section_label(label: str, lang: str = "az") -> str:
+    """Bölmənin adı (cəm) təklifin dilində: "Şorbalar" / "Soups" / "Супы"."""
+    if lang == "ru":
+        return SECTION_NAMES_RU.get(category_of(label)) or section_name(label)[0]
+    az, en = section_name(label)
+    return (en or az) if lang == "en" else az
+
+
+def section_pair(label: str, lang: str = "az") -> tuple[str, str]:
+    """(əsas ad, ingiliscə alt yazı): azərbaycanca və rusca təklifdə altında ingiliscəsi, ingiliscədə — yalnız ad."""
+    en = section_name(label)[1]
+    return section_label(label, lang), ("" if lang == "en" else en)
+
+
+# PDF-in sabit mətnləri: azərbaycanca → (ingiliscə, rusca). Siyahıda olmayan mətn olduğu kimi qalır.
+TEXTS = {
+    "Dadlı Həyatın Fəlsəfəsi": ("The Philosophy of Tasty Life", "Философия вкусной жизни"),
+    "NÜMUNƏ PAKET": ("SAMPLE PACKAGE", "ПРИМЕРНЫЙ ПАКЕТ"),
+    "MÜŞTƏRİ": ("CLIENT", "КЛИЕНТ"),
+    "Paketlər": ("Packages", "Пакеты"),
+    "Həftəlik nahar menyusu": ("Weekly lunch menu", "Меню обедов на неделю"),
+    "Nahar menyusu": ("Lunch menu", "Меню обедов"),
+    "Həftəlik menyu": ("Weekly menu", "Меню на неделю"),
+    "Menyu": ("Menu", "Меню"),
+    "Yemək şəkilləri": ("Dish photos", "Фотографии блюд"),
+    "Gündəlik seçim": ("Daily selection", "Ежедневный выбор"),
+    "Təklif məlumatları": ("Proposal details", "Детали предложения"),
+    "Müştəri": ("Client", "Клиент"),
+    "Qiymət": ("Price", "Цена"),
+    "Qiymət (1 nəfər)": ("Price per person", "Цена (1 человек)"),
+    "1 nəfər": ("per person", "1 человек"),
+    "Cəmi məbləğ": ("Total", "Итоговая сумма"),
+    "Təklifin qüvvədə olma müddəti": ("Proposal validity", "Срок действия предложения"),
+    "Əlavə şərtlər": ("Additional terms", "Дополнительные условия"),
+    "ƏDV daxil": ("incl. VAT", "с НДС"),
+    "ƏDV daxil deyil": ("excl. VAT", "без НДС"),
+    "Qiymət 1 nəfərlik yemək üçündür.": ("The price is for one person's meal.", "Цена указана за питание одного человека."),
+    "Qiymətə ƏDV daxildir.": ("VAT is included.", "НДС включён в цену."),
+    "Qiymətə ƏDV daxil deyil.": ("VAT is not included.", "НДС не включён в цену."),
+    "Hər gün üçün ayrıca tərtib olunmuş, sevilən klassik yeməklərdən ibarət balanslı nahar menyusu. "
+    "Komandanız üçün sadə, səliqəli və etibarlı gündəlik həll.": (
+        "A balanced lunch menu of well-loved classic dishes, planned separately for every day. "
+        "A simple, tidy and reliable daily solution for your team.",
+        "Сбалансированное меню обедов из любимых классических блюд, составленное отдельно на каждый день. "
+        "Простое, аккуратное и надёжное ежедневное решение для вашей команды."),
+    "Sevilən klassik yeməklərdən ibarət balanslı nahar menyusu. "
+    "Komandanız üçün sadə, səliqəli və etibarlı gündəlik həll.": (
+        "A balanced lunch menu of well-loved classic dishes. "
+        "A simple, tidy and reliable daily solution for your team.",
+        "Сбалансированное меню обедов из любимых классических блюд. "
+        "Простое, аккуратное и надёжное ежедневное решение для вашей команды."),
+}
+
+
+def text_in(az: str, lang: str) -> str:
+    pair = TEXTS.get(az)
+    if not pair or lang == "az":
+        return az
+    return pair[0] if lang == "en" else pair[1]
 
 
 def _money(value: Any, currency: str = "AZN") -> str:
@@ -432,7 +516,7 @@ def _singular(label: str) -> str:
     return re.sub(r"(lar|lər)$", "", low) if len(low) > 5 else low
 
 
-def daily_selection(pkg: Package) -> list[tuple[int | None, str]]:
+def daily_selection(pkg: Package, lang: str = "az") -> list[tuple[int | None, str]]:
     """[(say, ad)] — say None: hər gün eyni olan maddə ("Çörək assortisi") mətnlə göstərilir."""
     out: list[tuple[int | None, str]] = []
     labels: list[str] = []
@@ -444,22 +528,28 @@ def daily_selection(pkg: Package) -> list[tuple[int | None, str]]:
         per_day = [next((g.items for g in b.groups if g.label == label), []) for b in pkg.blocks]
         same = all(items == per_day[0] for items in per_day)
         generic = label.casefold() in GENERIC or not label
-        from app.dishes import category_name
-        single = category_name(label) == "Çörək" and max(len(i) for i in per_day) == 1   # "Çörək çeşidləri" — mətnlə
+        single = category_of(label) == "Çörək" and max(len(i) for i in per_day) == 1   # "Çörək çeşidləri" — mətnlə
         if generic or single or (pkg.weekly and same and len(per_day[0]) == 1):
             for item in per_day[0]:
                 out.append((None, item))
         else:  # hər gün eyni çox maddə (məs. 10 içki) də sayla: "10 içki", siyahı üz qabığına sığmır
-            out.append((max(len(i) for i in per_day), _singular(label)))
+            out.append((max(len(i) for i in per_day), _singular(label) if lang == "az" else label))
     return out
 
 
-def summary_line(pkg: Package, daily: bool = True) -> str:
-    parts = [f"{n} {label}" if n else az_lower(label[:1]) + label[1:] for n, label in daily_selection(pkg)]
+def summary_line(pkg: Package, daily: bool = True, lang: str = "az") -> str:
+    sel = daily_selection(pkg, lang)
+    if lang == "az":
+        parts = [f"{n} {label}" if n else az_lower(label[:1]) + label[1:] for n, label in sel]
+    elif lang == "ru":
+        parts = [f"{label.lower()} — {n}" if n else label[:1].lower() + label[1:] for n, label in sel]
+    else:
+        parts = [f"{n} {label.lower()}" if n else label[:1].lower() + label[1:] for n, label in sel]
     if not parts:
         return ""
     text = ", ".join(parts) + "."
-    return ("Hər gün " + text) if pkg.weekly and daily else text[:1].upper() + text[1:]
+    every = {"az": "Hər gün ", "en": "Every day: ", "ru": "Каждый день: "}[lang if lang in ("en", "ru") else "az"]
+    return (every + text) if pkg.weekly and daily else text[:1].upper() + text[1:]
 
 
 # --- Çəkmə ---------------------------------------------------------------------------------------
@@ -551,13 +641,28 @@ class Doc:
         w = self.t.width(s, size, italic)
         return size if w <= width else max(size * width / w, size * 0.55)
 
+    # Dil: azərbaycanca və rusca təklifdə əsas mətn o dildədir, altında ingiliscə alt yazı; ingiliscədə alt yazı yoxdur
+    def tx(self, az: str) -> str:
+        return text_in(az, self.lang)
+
+    def sub(self, en: str) -> str:
+        return "" if self.lang == "en" else en
+
+    def package_title(self, p: Package) -> str:
+        return {"en": f"{p.name} package", "ru": f"Пакет «{p.name}»"}.get(self.lang, f"{p.name} paket")
+
+    def package_menu(self, p: Package) -> str:
+        return {"en": f"{p.name} menu", "ru": f"Меню «{p.name}»"}.get(self.lang, f"{p.name} menyusu")
+
     def title(self) -> str:
+        if self.lang == "ru":    # paketin adı aşağıda ("Пакет «…»") yazılır
+            return "Корпоративное меню обедов"
         if len(self.packages) == 1 and self.packages[0].name_en:
             return f"{self.packages[0].name_en} Corporate Lunch Menu"
         return "Corporate Lunch Menu"
 
     def running_head(self) -> str:
-        return "Həftəlik nahar menyusu" if self.weekly and not self.photo_mode else "Nahar menyusu"
+        return self.tx("Həftəlik nahar menyusu" if self.weekly and not self.photo_mode else "Nahar menyusu")
 
     def span(self) -> tuple[str, str] | None:
         if self.photo_mode:
@@ -614,11 +719,15 @@ class Doc:
     def _cover_subtitle(self) -> tuple[str, str]:
         weekly = self.weekly and not self.photo_mode
         span = self.span()
-        second = span[1] if span else (f"Prepared for {self.snap['customer_name']}" if self.snap.get("customer_name") else "")
+        customer = self.snap.get("customer_name")
+        if self.lang == "ru":
+            second = span[0] if span else (f"Подготовлено для {customer}" if customer else "")
+            return ("Предложение по питанию на неделю" if weekly else "Предложение по корпоративному питанию"), second
+        second = span[1] if span else (f"Prepared for {customer}" if customer else "")
         return ("Weekly Executive Dining Proposal" if weekly else "Corporate Dining Proposal"), second
 
     def _cover_description(self, p: Package) -> str:
-        return p.description or (
+        return p.description or self.tx(
             "Hər gün üçün ayrıca tərtib olunmuş, sevilən klassik yeməklərdən ibarət balanslı nahar menyusu. "
             "Komandanız üçün sadə, səliqəli və etibarlı gündəlik həll." if p.weekly and not self.photo_mode else
             "Sevilən klassik yeməklərdən ibarət balanslı nahar menyusu. "
@@ -629,17 +738,17 @@ class Doc:
         t = self.t
         if len(self.packages) == 1:
             p = self.packages[0]
-            t.draw(x, y, f"{p.name} paket", 14.5, self.accent, align=align)
+            t.draw(x, y, self.package_title(p), 14.5, self.accent, align=align)
             yy = y + 24
             for line in t.wrap(self._cover_description(p), 11, width)[:3]:
                 t.draw(x, yy, line, 11, self.ink, align=align)
                 yy += 16.5
-            summary = summary_line(p, daily=not self.photo_mode)
+            summary = summary_line(p, daily=not self.photo_mode, lang=self.lang)
             for line in (t.wrap(summary, 8.5, width)[:2] if summary else []):
                 t.draw(x, yy + 6, line, 8.5, self.muted, align=align)
                 yy += 12
             return
-        t.draw(x, y, "Paketlər", 14.5, self.accent, align=align)
+        t.draw(x, y, self.tx("Paketlər"), 14.5, self.accent, align=align)
         yy = y + 24
         for p in self.packages[:5]:
             price = f" — {p.price} / {p.unit}" if p.price and p.unit else f" — {p.price}" if p.price else ""
@@ -656,9 +765,9 @@ class Doc:
             self.logo(cx - 75, 62, 150, small=False)
             slogan_y = 248
         if self.brand == "seaport":
-            t.draw(cx, slogan_y, "Dadlı Həyatın Fəlsəfəsi", 12.5, LOGO_NAVY, align="center")
+            t.draw(cx, slogan_y, self.tx("Dadlı Həyatın Fəlsəfəsi"), 12.5, LOGO_NAVY, align="center")
         if self.snap.get("example"):
-            t.draw(RIGHT, 70, "NÜMUNƏ PAKET", 8, WHITE if d.cover_block is not None else self.muted, tracking=1.2,
+            t.draw(RIGHT, 70, self.tx("NÜMUNƏ PAKET"), 8, WHITE if d.cover_block is not None else self.muted, tracking=1.2,
                    align="right")
         self.use(d.cover or d.body)
         y = slogan_y + 58
@@ -679,12 +788,12 @@ class Doc:
         t, d = self.t, self.design
         self.logo_card((SPLIT_PANEL - 150) / 2, 56, 150)
         if self.brand == "seaport":
-            t.draw(SPLIT_PANEL / 2, 234, "Dadlı Həyatın Fəlsəfəsi", 10.5, WHITE, align="center")
+            t.draw(SPLIT_PANEL / 2, 234, self.tx("Dadlı Həyatın Fəlsəfəsi"), 10.5, WHITE, align="center")
         if self.snap.get("example"):
-            t.draw(RIGHT, 70, "NÜMUNƏ PAKET", 8, self.muted, tracking=1.2, align="right")
+            t.draw(RIGHT, 70, self.tx("NÜMUNƏ PAKET"), 8, self.muted, tracking=1.2, align="right")
         customer = (self.snap.get("customer_name") or "").strip()
         if customer:
-            t.draw(32, 664, "MÜŞTƏRİ", 7.5, PANEL_SOFT, tracking=1.2)
+            t.draw(32, 664, self.tx("MÜŞTƏRİ"), 7.5, PANEL_SOFT, tracking=1.2)
             yy = 684
             for line in t.wrap(customer, 13, SPLIT_PANEL - 56)[:3]:
                 t.draw(32, yy, line, 13, WHITE)
@@ -707,9 +816,9 @@ class Doc:
         t = self.t
         self.logo(LEFT - 1, 59, 136, small=False)
         if self.brand == "seaport":
-            t.draw(LEFT + 67, 222, "Dadlı Həyatın Fəlsəfəsi", 12.5, LOGO_NAVY, align="center")
+            t.draw(LEFT + 67, 222, self.tx("Dadlı Həyatın Fəlsəfəsi"), 12.5, LOGO_NAVY, align="center")
         if self.snap.get("example"):
-            t.draw(RIGHT, 70, "NÜMUNƏ PAKET", 8, self.muted, tracking=1.2, align="right")
+            t.draw(RIGHT, 70, self.tx("NÜMUNƏ PAKET"), 8, self.muted, tracking=1.2, align="right")
         self.use(self.design.cover or self.design.body)   # loqodan aşağı: üz qabığının palitrası
         self.rule(351, self.accent, 0.9, LEFT, LEFT + 51)
         y = 410
@@ -726,18 +835,18 @@ class Doc:
         y = 683
         if len(self.packages) == 1:
             p = self.packages[0]
-            t.draw(LEFT, y, f"{p.name} paket", 14.5, self.accent)
+            t.draw(LEFT, y, self.package_title(p), 14.5, self.accent)
             yy = y
             for line in t.wrap(self._cover_description(p), 11, 292)[:4]:
                 t.draw(COL2, yy, line, 11, self.ink)
                 yy += 16.5
-            summary = summary_line(p, daily=not self.photo_mode)
+            summary = summary_line(p, daily=not self.photo_mode, lang=self.lang)
             if summary:
                 for line in t.wrap(summary, 8.5, 300)[:2]:
                     t.draw(COL2, yy + 10, line, 8.5, self.muted)
                     yy += 12
         else:
-            t.draw(LEFT, y, "Paketlər", 14.5, self.accent)
+            t.draw(LEFT, y, self.tx("Paketlər"), 14.5, self.accent)
             yy = y
             for p in self.packages[:5]:
                 t.draw(COL2, yy, p.name, 11, self.ink)
@@ -881,21 +990,23 @@ class Doc:
         for p in self.packages:
             for b in p.blocks:
                 for g in b.groups:
-                    az, en = section_name(g.label)
+                    cat = category_of(g.label)
+                    name, en = section_pair(g.label, self.lang)
                     for item in g.items:
                         k = dish_key(item)
                         if k in seen or k not in self.photos:
                             continue
                         seen.add(k)
-                        out.setdefault(az, (az, en, []))[2].append((item, self.photos[k], g.notes.get(item, "")))
+                        out.setdefault(cat, (name, en, []))[2].append((item, self.photos[k], g.notes.get(item, "")))
         # Menyudakı sıra: şorba, əsas yemək, qarnir, salat …; tanınmayan kateqoriyalar sonda
-        order = [v[0] for v in SECTION_NAMES.values()]
-        return sorted(out.values(), key=lambda sec: order.index(sec[0]) if sec[0] in order else len(order))
+        order = list(SECTION_NAMES)
+        return [v for _, v in sorted(out.items(), key=lambda kv: order.index(kv[0]) if kv[0] in order else len(order))]
 
     def gallery(self, header: str = "Yemək şəkilləri", close_current: bool = True) -> None:
         sections = self.gallery_sections()
         if not sections:
             return
+        header = self.tx(header)
         t = self.t
         running = self.running_head
 
@@ -940,15 +1051,15 @@ class Doc:
         self.running_head = running             # type: ignore[method-assign]
 
     def daily(self, pkg: Package) -> None:
-        sel = daily_selection(pkg) if pkg.daily else []
+        sel = daily_selection(pkg, self.lang) if pkg.daily else []
         if not sel:
             return
         rows = (len(sel) + 2) // 3
         self.ensure(40 + rows * 42)
         t = self.t
         top = self.y + 36
-        t.draw(LEFT, top, "Gündəlik seçim", 15.5, self.ink)
-        t.draw(LEFT, top + 16, "Daily selection", 8, self.muted, tracking=0.5)
+        t.draw(LEFT, top, self.tx("Gündəlik seçim"), 15.5, self.ink)
+        t.draw(LEFT, top + 16, self.sub("Daily selection"), 8, self.muted, tracking=0.5)
         xs = (COL2, COL2 + 114, COL2 + 228)
         for i, (n, label) in enumerate(sel):
             x, y = xs[i % 3], top + (i // 3) * 42
@@ -966,6 +1077,7 @@ class Doc:
               value: str = "", note: str = "", value_size: float = 17) -> None:
         """Nümunədəki kimi: "Etiket / Label", altında dəyər və xətt (line_y — xəttin yeri)."""
         t = self.t
+        label, label_en, note = self.tx(label), self.sub(label_en), self.tx(note)
         w = t.draw(x, label_y, label, 8.5, self.ink)
         rest = f" / {label_en}" if label_en else ""
         if rest and w + t.width(rest, 8.5) > width:
@@ -989,19 +1101,21 @@ class Doc:
         # Qiymət şərti (hər təklifdə yazılır): qiymət 1 nəfərlik yemək üçündür; ƏDV qiymətə daxil deyil
         # (paket qiymətləri ƏDV xaric saxlanılır). Agent ƏDV-ni qiymətə daxil sayıbsa — "daxildir".
         vat_in = totals.get("vat_included") is True
-        terms_az = ["Qiymət 1 nəfərlik yemək üçündür.", "Qiymətə ƏDV daxildir." if vat_in else "Qiymətə ƏDV daxil deyil."]
+        terms_az = [self.tx("Qiymət 1 nəfərlik yemək üçündür."),
+                    self.tx("Qiymətə ƏDV daxildir." if vat_in else "Qiymətə ƏDV daxil deyil.")]
         terms_en = ["The price is for one person's meal.", "VAT is included." if vat_in else "VAT is not included."]
         has_total = totals.get("total") not in (None, "")
         net = totals.get("subtotal") if not vat_in and totals.get("subtotal") not in (None, "") else None
         if has_total and net is not None and _money(net, self.currency) != _money(totals.get("total"), self.currency):
             with_vat = _money(totals.get("total"), self.currency)
-            terms_az.append(f"ƏDV ilə cəmi: {with_vat}.")
+            terms_az.append({"en": f"Total with VAT: {with_vat}.", "ru": f"Итого с НДС: {with_vat}."}
+                            .get(self.lang, f"ƏDV ilə cəmi: {with_vat}."))
             terms_en.append(f"Total with VAT: {with_vat}.")
         t = self.t
         self.ensure(175)
         r = self.y
-        t.draw(LEFT, r + 38, "Təklif məlumatları", 15.5, self.ink)
-        t.draw(LEFT, r + 54, "Proposal details", 8, self.muted, tracking=0.5)
+        t.draw(LEFT, r + 38, self.tx("Təklif məlumatları"), 15.5, self.ink)
+        t.draw(LEFT, r + 54, self.sub("Proposal details"), 8, self.muted, tracking=0.5)
         wl, xr = 155, COL2 + 184
         customer = " ".join(x for x in (snap.get("customer_name"), snap.get("contact_person")) if x)
         self.field(COL2, r + 34, r + 72, wl, "Müştəri", "Client", customer, value_size=13)
@@ -1031,7 +1145,7 @@ class Doc:
                 t.draw(LEFT, yy, line, 8.5, self.ink)
                 yy += 11
         yy += 3
-        for sentence in terms_en:
+        for sentence in (terms_en if self.lang != "en" else []):
             for line in t.wrap(sentence, 7.5, width)[:2]:
                 t.draw(LEFT, yy, line, 7.5, self.muted)
                 yy += 9.5
@@ -1054,11 +1168,12 @@ class Doc:
             if i:
                 self.new_body_page()
             if self.weekly and len(self.packages) == 1:
-                self.section_title("Weekly menu", "Həftəlik menyu", span[0] if span else "")
+                self.section_title(self.sub("Weekly menu"), self.tx("Həftəlik menyu"), span[0] if span else "")
             elif p.weekly:
-                self.section_title(p.name_en or "Weekly menu", f"{p.name} menyusu", p.days_span[0] if p.days_span else "")
+                self.section_title(self.sub(p.name_en or "Weekly menu"), self.package_menu(p),
+                                   p.days_span[0] if p.days_span else "")
             else:
-                self.section_title("Menu", "Menyu" if len(self.packages) == 1 else f"{p.name} menyusu")
+                self.section_title(self.sub("Menu"), self.tx("Menyu") if len(self.packages) == 1 else self.package_menu(p))
             for b in p.blocks:
                 self.day_block(b)
             self.daily(p)
@@ -1104,7 +1219,7 @@ class MenuDoc(Doc):
         t, p = self.t, self.packages[0]
         self.logo(LEFT, 61, 129, small=False)
         if self.brand == "seaport":
-            t.draw(LEFT + 64, 222, "Dadlı Həyatın Fəlsəfəsi", 12.5, LOGO_NAVY, align="center")
+            t.draw(LEFT + 64, 222, self.tx("Dadlı Həyatın Fəlsəfəsi"), 12.5, LOGO_NAVY, align="center")
         self.rule(351, self.accent, 2, LEFT, LEFT + 51)
         y = 402
         for line in t.wrap(self.title().upper(), 40, RIGHT - LEFT)[:3]:
