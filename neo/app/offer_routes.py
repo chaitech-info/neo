@@ -157,6 +157,7 @@ async def offers_create(request: Request, me: User = Depends(REQUIRE["sales"]),
     try:
         body = agent.validate_offer_request(raw)
         body = agent.with_package(body, raw.get("package_id"), raw.get("package_name"))
+        body = agent.without_name_question(body)   # agent "adınız nədir?" soruşmasın — təklifə ad lazım deyil
     except ValueError as exc:
         return _error(str(exc), 422)
     lead_id = raw.get("lead_id") if isinstance(raw.get("lead_id"), str) else None
@@ -169,6 +170,11 @@ async def offers_create(request: Request, me: User = Depends(REQUIRE["sales"]),
     price_task = asyncio.ensure_future(run_in_threadpool(offer_price.requested_changes, _request_text(raw)))
     try:
         data = await run_in_threadpool(agent.create_offer, body)
+        if data["status"] == "needs_clarification":
+            # Göstərişə baxmayaraq ad soruşubsa — bir dəfə Neo özü cavab verir ("ad lazım deyil"), istifadəçi görmür.
+            retry = agent.answer_name_question(body, data["question"])
+            if retry is not None:
+                data = await run_in_threadpool(agent.create_offer, retry)
     except agent.OfferAgentError as exc:
         price_task.cancel()
         return _agent_error(exc)

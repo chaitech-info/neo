@@ -145,6 +145,36 @@ def test_create_offer_stores_metadata_and_never_leaks_key(app_db, monkeypatch):
         assert len(list(s.scalars(select(OfferRecord)))) == 1
 
 
+def test_agent_is_not_allowed_to_ask_for_a_name(app_db, monkeypatch):
+    """Prod: "stp ucun qiymeti 7 azn et…" sorğusuna agent "Sizin adınız nədir?" soruşurdu. Sorğuya göstəriş
+    əlavə olunur; yenə soruşsa Neo bir dəfə özü cavab verir, başqa sual isə istifadəçiyə göstərilir."""
+    for q in ("Sizin adınız nədir?", "Adınızı yaza bilərsiniz?", "What is your name?", "Как вас зовут?"):
+        assert agent.NAME_QUESTION_RE.search(q), q
+    for q in ("Neçə nəfər üçün?", "Hansı paket lazımdır?", "Şirkətin adı nədir?"):
+        assert not agent.NAME_QUESTION_RE.search(q), q
+
+    calls = []
+
+    def asks_name_once(body, client=None):
+        calls.append(body)
+        return {"status": "needs_clarification", "question": "Sizin adınız nədir?"} if len(calls) == 1 else dict(OK)
+
+    monkeypatch.setattr(agent, "create_offer", asks_name_once)
+    c = TestClient(web.app)
+    r = c.post("/api/offers", json={"brand": "seaport", "message": "stp ucun teklif"})
+    assert r.json()["status"] == "ok" and len(calls) == 2                      # istifadəçi sualı görmür
+    assert "adını soruşma" in calls[0]["message"]
+    assert [m["role"] for m in calls[1]["messages"]] == ["user", "assistant", "user"]
+    assert calls[1]["messages"][2]["content"] == agent.NAME_ANSWER and "message" not in calls[1]
+
+    calls.clear()
+    monkeypatch.setattr(agent, "create_offer", lambda body, client=None: calls.append(body) or {
+        "status": "needs_clarification", "question": "Neçə nəfər üçün?"})
+    r = c.post("/api/offers", json={"brand": "seaport", "messages": [{"role": "user", "content": "teklif"}]})
+    assert r.json() == {"status": "needs_clarification", "question": "Neçə nəfər üçün?"} and len(calls) == 1
+    assert calls[0]["messages"][0]["content"].startswith("teklif") and "adını soruşma" in calls[0]["messages"][0]["content"]
+
+
 def test_create_offer_validation_and_agent_error(app_db, monkeypatch):
     c = TestClient(web.app)
     assert c.post("/api/offers", json={"brand": "seaport", "message": ""}).status_code == 422

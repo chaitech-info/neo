@@ -160,6 +160,39 @@ def with_package(body: dict, package_id: Any, package_name: Any = None) -> dict:
     return body
 
 
+NO_NAME_NOTE = ("\n\n[Təklifi hazırlayan işçinin və ya əlaqədar şəxsin adını soruşma — ad lazım deyil. "
+                "Ad verilməyibsə adsız davam et.]")
+# Agentin "adınız nədir?" tipli sualı (az / en / ru) — belə suala Neo özü cavab verir (offer_routes)
+NAME_QUESTION_RE = re.compile(
+    r"\bad[ıi]n[ıi]z\b|\bad[ıi]n[ıi]z[ıi]\b|ad[ıi]n\s+n[əe]dir|kimin\s+ad[ıi]ndan|[əe]laq[əe]dar\s+[şs][əe]xs\w*\s+(?:kim|ad)|"
+    r"your\s+name|contact\s+person'?s?\s+name|ваше\s+имя|как\s+вас\s+зовут", re.I)
+NAME_ANSWER = "Ad lazım deyil — adsız davam et və təklifi hazırla."
+
+
+def without_name_question(body: dict) -> dict:
+    """Agentə göstəriş (sorğunun sonuna): təklif üçün işçinin / əlaqədar şəxsin adını soruşmasın."""
+    room = MAX_MESSAGE_LENGTH - len(NO_NAME_NOTE)
+    if "messages" in body:
+        first = body["messages"][0]
+        if NO_NAME_NOTE not in first["content"]:
+            body["messages"][0] = {**first, "content": first["content"][:room] + NO_NAME_NOTE}
+    elif NO_NAME_NOTE not in body["message"]:
+        body["message"] = body["message"][:room] + NO_NAME_NOTE
+    return body
+
+
+def answer_name_question(body: dict, question: str) -> dict | None:
+    """Agent yenə də ad soruşubsa — söhbətə "ad lazım deyil" cavabı əlavə olunmuş yeni sorğu; başqa sualdırsa
+    (və ya söhbət artıq uzundursa) None — sual istifadəçiyə göstərilir."""
+    if not NAME_QUESTION_RE.search(question or ""):
+        return None
+    messages = list(body.get("messages") or [{"role": "user", "content": body["message"]}])
+    if len(messages) + 2 > MAX_CONVERSATION_TURNS:
+        return None
+    messages += [{"role": "assistant", "content": question}, {"role": "user", "content": NAME_ANSWER}]
+    return {**{k: v for k, v in body.items() if k != "message"}, "messages": messages}
+
+
 def validate_package_id(package_id: str) -> str:
     if not PACKAGE_ID_RE.match(package_id or ""):
         raise ValueError("Paket id-si yanlışdır (kiçik latın hərfləri, rəqəm, - və _)")
