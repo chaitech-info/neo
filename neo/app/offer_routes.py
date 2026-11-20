@@ -138,7 +138,13 @@ def _render_base64(data: dict, pictures: bool = False, design: str = offer_pdf.D
     lines = [l for l in data.get("lines") or [] if isinstance(l, dict)]
     full = lines and all(l.get("menu") for l in lines)
     snapshot = data if full else offer_price.apply_price(agent.get_offer(str(data["offer_id"])), price)
+    snapshot = _with_customer(snapshot, data.get("customer_name"))
     return base64.b64encode(render_pdf(snapshot, pictures, design, exclude)).decode()
+
+
+def _with_customer(snapshot: dict, name: str | None) -> dict:
+    """Agentin təklifində müştəri adı yoxdursa — Neo-nun bildiyi ad (sorğudan oxunmuş / təklifdə saxlanmış)."""
+    return {**snapshot, "customer_name": name} if name and not snapshot.get("customer_name") else snapshot
 
 
 def _request_text(raw: dict) -> str:
@@ -170,18 +176,24 @@ async def offers_create(request: Request, me: User = Depends(REQUIRE["sales"]),
     price_task = asyncio.ensure_future(run_in_threadpool(offer_price.requested_changes, _request_text(raw)))
     try:
         data = await run_in_threadpool(agent.create_offer, body)
-        if data["status"] == "needs_clarification":
-            # Göstərişə baxmayaraq ad soruşubsa — bir dəfə Neo özü cavab verir ("ad lazım deyil"), istifadəçi görmür.
-            retry = agent.answer_name_question(body, data["question"])
-            if retry is not None:
-                data = await run_in_threadpool(agent.create_offer, retry)
+        changes = await price_task
+        # Göstərişə baxmayaraq işçinin adını və ya (sorğuda yazılmış) şirkət adını soruşubsa — Neo özü cavab
+        # verir, istifadəçi sualı görmür. Ən çox iki dəfə (ad, sonra şirkət); başqa sual istifadəçiyə gedir.
+        for _ in range(2):
+            if data["status"] != "needs_clarification":
+                break
+            retry = agent.auto_answer(body, data["question"], changes.customer)
+            if retry is None:
+                break
+            body = retry
+            data = await run_in_threadpool(agent.create_offer, body)
     except agent.OfferAgentError as exc:
         price_task.cancel()
         return _agent_error(exc)
     if data["status"] != "ok":
-        price_task.cancel()
         return JSONResponse(data)
-    changes = await price_task
+    if changes.customer and not data.get("customer_name"):
+        data["customer_name"] = changes.customer    # agent adı götürməyibsə — sorğudakı şirkət adı
     price, exclude = changes.price, changes.exclude
     priced = offer_price.apply_price(data, price)
     if priced is data:
@@ -249,6 +261,7 @@ def offers_pdf(offer_id: str, pictures: str = "", design: str = "", me: User = D
     try:
         # Sorğuda istənən qiymət təklifdə saxlanılıb — PDF hər dəfə onunla qurulur.
         snapshot = offer_price.apply_price(agent.get_offer(offer_id), record.unit_price_override)
+        snapshot = _with_customer(snapshot, record.customer_name)
         pdf = render_pdf(snapshot, with_pictures, design, offer_price.load_exclude(record.menu_exclude))
     except agent.OfferAgentError as exc:
         return _agent_error(exc)

@@ -51,8 +51,9 @@ _REMOVE_HINT_RE = re.compile(_REMOVE_VERB, re.I)
 
 SCHEMA = {
     "type": "object", "additionalProperties": False,
-    "required": ["unit_price", "remove_categories", "remove_dishes"],
+    "required": ["unit_price", "remove_categories", "remove_dishes", "customer"],
     "properties": {
+        "customer": {"type": "string"},
         "unit_price": {"type": ["number", "null"]},
         "remove_categories": {"type": "array", "items": {"type": "string", "enum": CATEGORIES}},
         "remove_dishes": {"type": "array", "items": {"type": "string"}},
@@ -78,7 +79,21 @@ restored: "lobya şorbasını çıxar" -> ["lobya şorbası"], "menudan mercimek
 "şorba olmasın" removes the whole Şorba category). Do not list a whole category here.
 
 Return [] for both when nothing is to be removed. Requests to ADD or replace dishes are not removals.
+
+customer — the client company the offer is for, exactly as written in the request: "STP ucun qiymeti 6.6 azn
+et" -> "STP", "Azersun MMC bizdən qiymət istəyir" -> "Azersun MMC". "" when no company is named (do not use
+our own brand, a package name or a dish as the customer).
 """
+
+# "STP ucun …", "Azersun MMC üçün …" — sorğunun əvvəlində şirkət adı (AI olmayanda / cavab verməyəndə)
+_CUSTOMER_RE = re.compile(r"^\s*([A-ZƏÖÜĞŞÇİI0-9][\w&.\-]*(?:\s+[\w&.\-]+){0,3}?)\s+[üu][çc][üu]n\b")
+_NOT_CUSTOMER = {"bunun", "onun", "bu", "o", "sizin", "bizim", "menyu", "paket", "nahar", "qiymət", "qiymet"}
+
+
+def _customer_by_rule(text: str) -> str:
+    m = _CUSTOMER_RE.match(text)
+    name = " ".join(m.group(1).split()) if m else ""
+    return "" if name.lower() in _NOT_CUSTOMER or len(name) < 2 else name[:200]
 
 
 @dataclass(frozen=True)
@@ -86,6 +101,7 @@ class Changes:
     price: Decimal | None = None            # 1 nəfərlik qiymət (AZN)
     categories: tuple[str, ...] = ()        # menyudan çıxarılan kateqoriyalar (app/dishes.CATEGORIES)
     dishes: tuple[str, ...] = ()            # menyudan çıxarılan yeməklər (yazıldığı kimi)
+    customer: str = ""                      # sorğuda yazılmış müştəri şirkəti ("STP ucun …" → "STP")
 
     def __bool__(self) -> bool:
         return self.price is not None or bool(self.categories or self.dishes)
@@ -187,17 +203,20 @@ def requested_changes(text: str) -> Changes:
     wants_price = bool(text and re.search(r"\d", text) and _PRICE_HINT_RE.search(text))
     wants_removal = bool(text and _REMOVE_HINT_RE.search(text))
     if not (wants_price or wants_removal):
-        return Changes()
+        return Changes(customer=_customer_by_rule(text))
     answered, out = _by_ai(text)
     if not answered:
         return Changes(price=_price_by_rule(text) if wants_price else None,
                        categories=_categories_by_rule(text) if wants_removal else (),
-                       dishes=_dishes_by_rule(text) if wants_removal else ())
+                       dishes=_dishes_by_rule(text) if wants_removal else (),
+                       customer=_customer_by_rule(text))
     price = out.get("unit_price")
     categories = tuple(c for c in CATEGORIES if c in (out.get("remove_categories") or []))
     dishes = tuple(dict.fromkeys(" ".join(str(d).split())[:200] for d in out.get("remove_dishes") or []
                                  if isinstance(d, str) and len(d.strip()) >= 3))[:MAX_DISHES]
-    return Changes(price=_decimal(price) if price is not None else None, categories=categories, dishes=dishes)
+    customer = " ".join(str(out.get("customer") or "").split())[:200]
+    return Changes(price=_decimal(price) if price is not None else None, categories=categories, dishes=dishes,
+                   customer=customer or _customer_by_rule(text))
 
 
 def requested_price(text: str) -> Decimal | None:

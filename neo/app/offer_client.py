@@ -161,7 +161,13 @@ def with_package(body: dict, package_id: Any, package_name: Any = None) -> dict:
 
 
 NO_NAME_NOTE = ("\n\n[Təklifi hazırlayan işçinin və ya əlaqədar şəxsin adını soruşma — ad lazım deyil. "
-                "Ad verilməyibsə adsız davam et.]")
+                "Ad verilməyibsə adsız davam et. Müştəri şirkətinin adı sorğunun mətnində yazılıbsa "
+                "(məs. «STP üçün …» — şirkət STP-dir) onu götür; yazılmayıbsa soruşma, şirkət adı olmadan davam et.]")
+# Agentin "şirkətin adı nədir?" tipli sualı — ad sorğuda yazılıbsa Neo onu özü cavablayır (offer_routes)
+COMPANY_QUESTION_RE = re.compile(
+    r"[şs]irk[əe]t\w*\s+ad|m[üu][şs]t[əe]ri\w*\s+(?:ad|kim)|hans[ıi]\s+[şs]irk[əe]t|kim\s+[üu][çc][üu]n|"
+    r"company(?:'s)?\s+name|which\s+company|name\s+of\s+the\s+(?:company|client)|назван\w+\s+компан|какая\s+компан", re.I)
+COMPANY_SKIP_ANSWER = "Şirkət adı lazım deyil — şirkət adı olmadan davam et və təklifi hazırla."
 # Agentin "adınız nədir?" tipli sualı (az / en / ru) — belə suala Neo özü cavab verir (offer_routes)
 NAME_QUESTION_RE = re.compile(
     r"\bad[ıi]n[ıi]z\b|\bad[ıi]n[ıi]z[ıi]\b|ad[ıi]n\s+n[əe]dir|kimin\s+ad[ıi]ndan|[əe]laq[əe]dar\s+[şs][əe]xs\w*\s+(?:kim|ad)|"
@@ -181,16 +187,25 @@ def without_name_question(body: dict) -> dict:
     return body
 
 
-def answer_name_question(body: dict, question: str) -> dict | None:
-    """Agent yenə də ad soruşubsa — söhbətə "ad lazım deyil" cavabı əlavə olunmuş yeni sorğu; başqa sualdırsa
-    (və ya söhbət artıq uzundursa) None — sual istifadəçiyə göstərilir."""
-    if not NAME_QUESTION_RE.search(question or ""):
+def auto_answer(body: dict, question: str, customer: str = "") -> dict | None:
+    """Agent göstərişə baxmayaraq işçinin adını və ya müştəri şirkətinin adını soruşubsa — söhbətə Neo-nun
+    cavabı əlavə olunmuş yeni sorğu: şirkət adı sorğu mətnindən tapılıbsa (`customer`) o, yoxsa "lazım deyil".
+    Başqa sualdırsa (və ya söhbət artıq uzundursa) None — sual istifadəçiyə göstərilir."""
+    question = question or ""
+    extra = {}
+    if COMPANY_QUESTION_RE.search(question):     # "şirkətin adı" ad sualından əvvəl yoxlanılır ("adı nədir")
+        answer = f"Müştəri şirkəti: {customer}." if customer else COMPANY_SKIP_ANSWER
+        if customer and not body.get("customer_name"):
+            extra["customer_name"] = customer[:200]
+    elif NAME_QUESTION_RE.search(question):
+        answer = NAME_ANSWER
+    else:
         return None
     messages = list(body.get("messages") or [{"role": "user", "content": body["message"]}])
     if len(messages) + 2 > MAX_CONVERSATION_TURNS:
         return None
-    messages += [{"role": "assistant", "content": question}, {"role": "user", "content": NAME_ANSWER}]
-    return {**{k: v for k, v in body.items() if k != "message"}, "messages": messages}
+    messages += [{"role": "assistant", "content": question}, {"role": "user", "content": answer}]
+    return {**{k: v for k, v in body.items() if k != "message"}, **extra, "messages": messages}
 
 
 def validate_package_id(package_id: str) -> str:

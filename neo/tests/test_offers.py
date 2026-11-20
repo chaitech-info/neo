@@ -175,6 +175,50 @@ def test_agent_is_not_allowed_to_ask_for_a_name(app_db, monkeypatch):
     assert calls[0]["messages"][0]["content"].startswith("teklif") and "adını soruşma" in calls[0]["messages"][0]["content"]
 
 
+def test_company_named_in_the_request_is_not_asked_again(app_db, monkeypatch):
+    """Prod: "STP ucun qiymeti 6.6 azn et…" — şirkət sorğuda yazılıb, agent yenə "şirkətin adı?" soruşurdu.
+    Neo adı sorğudan oxuyub özü cavab verir; ad təklifə və PDF-ə düşür."""
+    from app import offer_price
+
+    for text, name in (("STP ucun qiymeti 6.6 azn et, menudan mercimek sorbasini cixart", "STP"),
+                       ("Azersun MMC üçün 120 nəfərlik təklif", "Azersun MMC"),
+                       ("qiyməti 5 azn et", ""), ("Bunun üçün təklif hazırla", ""), ("120 nəfər, 22 gün", "")):
+        assert offer_price.requested_changes(text).customer == name, text
+    for q in ("Şirkətin adı nədir?", "Müştəri şirkətinin adını yazın", "Hansı şirkət üçündür?", "What is the company name?"):
+        assert agent.COMPANY_QUESTION_RE.search(q), q
+    assert not agent.COMPANY_QUESTION_RE.search("Neçə nəfər üçün?")
+
+    calls = []
+    offer = {**OK, **WEEKLY, "status": "ok", "offer_id": OK["offer_id"], "customer_name": None}
+
+    def asks_company_once(body, client=None):
+        calls.append(body)
+        return {"status": "needs_clarification", "question": "Şirkətin adı nədir?"} if len(calls) == 1 else dict(offer)
+
+    monkeypatch.setattr(agent, "create_offer", asks_company_once)
+    drawn = []
+    r = None
+
+    def post():
+        nonlocal r
+        r = TestClient(web.app).post("/api/offers", json={"brand": "seaport", "message": "STP ucun teklif hazirla"})
+    drawn = _texts(monkeypatch, post)
+    assert r.json()["status"] == "ok" and r.json()["customer_name"] == "STP" and len(calls) == 2
+    assert calls[1]["messages"][-1]["content"] == "Müştəri şirkəti: STP." and calls[1]["customer_name"] == "STP"
+    assert "şirkət STP-dir" in calls[0]["message"]                 # göstəriş: adı mətndən götür, soruşma
+    assert "STP" in drawn.split(" | ")                             # PDF-də "Müştəri" sahəsi
+    with app_db() as s:
+        assert s.scalar(select(OfferRecord.customer_name)) == "STP"
+
+    # Sorğuda şirkət yoxdursa — "şirkət adı lazım deyil" cavabı gedir
+    calls.clear()
+    with app_db() as s:
+        s.query(OfferRecord).delete()
+        s.commit()
+    TestClient(web.app).post("/api/offers", json={"brand": "seaport", "message": "teklif hazirla"})
+    assert calls[1]["messages"][-1]["content"] == agent.COMPANY_SKIP_ANSWER and "customer_name" not in calls[1]
+
+
 def test_create_offer_validation_and_agent_error(app_db, monkeypatch):
     c = TestClient(web.app)
     assert c.post("/api/offers", json={"brand": "seaport", "message": ""}).status_code == 422
