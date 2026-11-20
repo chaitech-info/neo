@@ -36,8 +36,7 @@ _LIST = {"type": "array", "items": {"type": "string"}}
 SCHEMA = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["summary", "industry", "size", "size_note", "fit", "fit_reason", "needs", "approach",
-                 "talking_points", "risks"],
+    "required": ["summary", "industry", "size", "size_note", "fit", "fit_reason"],
     "properties": {
         "summary": {"type": "string"},
         "industry": {"type": "string"},
@@ -45,10 +44,6 @@ SCHEMA = {
         "size_note": {"type": "string"},
         "fit": {"type": "string", "enum": ["high", "medium", "low", "unknown"]},
         "fit_reason": {"type": "string"},
-        "needs": _LIST,
-        "approach": _LIST,
-        "talking_points": _LIST,
-        "risks": _LIST,
     },
 }
 
@@ -93,10 +88,6 @@ Fields:
 - news: up to 5 recent news items about the company (title, date YYYY-MM-DD if known, url).
 - sources: the URLs you used (max 10).
 - fit: how likely they need our catering (staff meals, events, facilities); fit_reason: 1-2 sentences.
-- needs: 2-4 concrete catering needs they probably have.
-- approach: 3-5 concrete next steps for our salesperson (whom to contact, what to offer, when).
-- talking_points: 2-4 short points to mention in the first conversation.
-- risks: 0-3 risks or reasons it may not work (own kitchen, competitor, too small...).
 """
 
 PROMPT = """\
@@ -114,10 +105,6 @@ Fields:
 - industry: one short phrase.
 - size: small / medium / large / unknown (by staff size); size_note: the evidence, or "bilinmir".
 - fit: how likely they need our catering (staff meals, events, facilities); fit_reason: 1-2 sentences.
-- needs: 2-4 concrete catering needs they probably have.
-- approach: 3-5 concrete next steps for our salesperson (whom to contact, what to offer, when).
-- talking_points: 2-4 short points to mention in the first conversation.
-- risks: 0-3 risks or reasons it may not work (own kitchen, competitor, too small...).
 """
 
 SIZE_NAMES = {"small": "Kiçik", "medium": "Orta", "large": "Böyük", "unknown": "Bilinmir"}

@@ -1,7 +1,6 @@
 {# Şirkət analizinin nəticəsi — Şirkət analizi (yeni nəticə) və Şirkət bazası (saxlanmış) səhifələri. #}
 {% from "_employees_list.html" import employee_groups %}
-{# advice=false — satış məsləhəti bölmələri (ehtiyaclar, yanaşma, ilk söhbət, risklər) göstərilmir (Alətlər → Şirkət analizi). #}
-{% macro analysis_view(a, size_names, fit_names, heading=true, advice=true) %}
+{% macro analysis_view(a, size_names, fit_names, heading=true) %}
   {% set ai = a.ai %}
   <section class="od-card">
     {% if heading %}<h2>{{ a.name }}</h2>{% endif %}
@@ -39,16 +38,6 @@
   </div>
   {% endif %}
 
-  {% if advice %}
-  <div class="od-grid">
-    {% for title, items in [("Ehtimal olunan ehtiyaclar", ai.needs), ("Necə yanaşmalı", ai.approach), ("İlk söhbətdə deyiləcəklər", ai.talking_points), ("Risklər", ai.risks)] if items %}
-    <section class="od-card">
-      <h2>{{ title }}</h2>
-      <ul>{% for x in items %}<li>{{ x }}</li>{% endfor %}</ul>
-    </section>
-    {% endfor %}
-  </div>
-  {% endif %}
   {% if ai.sources %}
   <details class="od-card od-sources">
     <summary>Mənbələr ({{ ai.sources|length }})</summary>

@@ -34,7 +34,7 @@
   <div data-result>
   {% from "_company_analysis.html" import analysis_view, employees_section, notes_section %}
   {% if saved %}<p class="flash" role="status">Analiz şirkət bazasında saxlanıldı. <a href="/companies/{{ saved.id }}">«{{ saved.name }}» şirkət kartını aç →</a></p>{% endif %}
-  {{ analysis_view(result, size_names, fit_names, advice=false) }}
+  {{ analysis_view(result, size_names, fit_names) }}
 
   {% if saved %}{{ notes_section(request, saved, users) }}{% endif %}
 

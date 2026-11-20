@@ -98,7 +98,10 @@ def test_company_database_list_search_and_card(factory, fake_ai, monkeypatch):
     assert "Sahil MMC" not in client.get("/companies?q=azersun").text
 
     card = client.get(f"/companies/{org_id}").text
-    assert AI["summary"] in card and "HR-a yaz" in card and "Əməkdaşlıq razılaşmaları" in card
+    assert AI["summary"] in card and "Əməkdaşlıq razılaşmaları" in card
+    # Satış məsləhəti bölmələri (köhnə saxlanmış analizlərdə olsa da) heç yerdə göstərilmir
+    for gone in ("Necə yanaşmalı", "İlk söhbətdə deyiləcəklər", "Risklər", "HR-a yaz", "isti nahar"):
+        assert gone not in card, gone
     assert "İşçilər" in card and "APIFY_TOKEN" in card  # LinkedIn qoşulmayıb — açıq yazılır, uydurma yoxdur
     assert client.get("/companies/99999", follow_redirects=False).status_code == 303
 
