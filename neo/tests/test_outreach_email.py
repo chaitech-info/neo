@@ -260,19 +260,39 @@ def test_files_go_to_approval_are_shown_to_the_ceo_and_sent_with_the_letter(fact
     assert c.get("/approvals/files/99999").status_code == 404
     assert f"/approvals/files/{pdf_id}" in c.get(f"/opportunities/{opp_id}").text  # fürsətin "Təsdiq" bölməsi
 
-    c.post(f"/approvals/{approval.id}/decide", data=dict(decision="approved"), follow_redirects=False)
-    ready = c.get(f"/opportunities/{opp_id}?approval={approval.id}").text
-    assert f'name="keep_files" value="{pdf_id}" checked' in ready and f'name="files_from" value="{approval.id}"' in ready
-
-    # Göndərən bir faylın işarəsini götürür — yalnız işarəli fayl gedir
-    r = c.post(f"/opportunities/{opp_id}/email/send", follow_redirects=False, data=dict(
-        LETTER, approval_id=str(approval.id), files_from=str(approval.id), keep_files=[str(pdf_id)]))
+    # "Təsdiqlə" məktubu dərhal göndərir — təsdiqə qoşulmuş fayllarla, göndərənə bildiriş gedir
+    r = c.post(f"/approvals/{approval.id}/decide", data=dict(decision="approved"), follow_redirects=False)
     assert "msg=" in r.headers["location"] and len(FakeSMTP.sent) == 1
     sent = [(p.get_filename(), p.get_payload(decode=True)) for p in FakeSMTP.sent[0].iter_attachments()]
-    assert sent == [("Təklif SP-1.pdf", pdf)]
+    assert sent == [("Təklif SP-1.pdf", pdf), ("menyu.docx", b"doc")]
     with factory() as s:
-        assert s.scalars(select(Outreach.attachments)).one() == "Təklif SP-1.pdf"
+        from app.db.models import Notification
+        out = s.scalars(select(Outreach)).one()
+        assert out.status == "sent" and out.attachments == "Təklif SP-1.pdf\nmenyu.docx"
+        assert out.user_id == approval.requested_by_id                  # göndərənin adından
         assert s.get(LetterApproval, approval.id).sent_at is not None
+        assert any("təsdiqləndi və göndərildi" in n.text for n in s.scalars(select(Notification)))
+    c.post(f"/approvals/{approval.id}/decide", data=dict(decision="approved"), follow_redirects=False)
+    assert len(FakeSMTP.sent) == 1                                      # ikinci klik təkrar göndərmir
+
+
+def test_approved_letter_that_cannot_be_sent_stays_approved_for_manual_sending(factory, opp_id, monkeypatch):
+    from app.db.models import LetterApproval, Notification
+
+    monkeypatch.delenv("SMTP_USER", raising=False)
+    monkeypatch.delenv("SMTP_PASSWORD", raising=False)
+    c = TestClient(web.app)
+    c.post(f"/opportunities/{opp_id}/email/approval", data=LETTER, follow_redirects=False)
+    with factory() as s:
+        approval = s.scalars(select(LetterApproval)).one()
+    r = c.post(f"/approvals/{approval.id}/decide", data=dict(decision="approved"), follow_redirects=False)
+    assert "err=" in r.headers["location"]
+    with factory() as s:
+        row = s.get(LetterApproval, approval.id)
+        assert row.status == "approved" and row.sent_at is None
+        note = s.scalars(select(Notification).where(Notification.user_id == row.requested_by_id)).all()[-1]
+        assert "göndərilmədi" in note.text and f"approval={row.id}#email" in note.link
+        assert s.scalars(select(Outreach.send_key)).one() is None       # əl ilə göndərmək bloklanmır
 
 
 def test_approval_rejects_blocked_files_and_ignores_another_opportunitys_files(factory, opp_id):

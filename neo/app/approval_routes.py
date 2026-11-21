@@ -1,8 +1,8 @@
 """Təsdiq gözləyənlər (yalnız CEO rolu): satışın "Təsdiqə göndər" basdığı məktublar.
 
 Təsdiqləyici mətni düzəldib təsdiqləyir və ya səbəb yazıb rədd edir; qərar göndərənə bildiriş kimi
-gedir, status fürsət səhifəsinin "Təsdiq" bölməsində görünür. Təsdiqlənmiş məktubu göndərən özü
-"Göndərməyə hazırla" ilə göndərir. Məktuba qoşulmuş fayllar (təklif PDF-i, menyu) da təsdiqə gedir:
+gedir, status fürsət səhifəsinin "Təsdiq" bölməsində görünür. "Təsdiqlə" məktubu dərhal göndərir (göndərənin
+seçdiyi poçtdan, onun adından); göndərmək alınmasa göndərən özü "Göndərməyə hazırla" ilə göndərir. Məktuba qoşulmuş fayllar (təklif PDF-i, menyu) da təsdiqə gedir:
 təsdiqləyici onları bu səhifədə açır, təsdiqdən sonra məktubla birlikdə göndərilir (letter_approval_files).
 """
 from __future__ import annotations
@@ -16,7 +16,7 @@ from sqlalchemy import select
 
 from app.auth import security
 from app.auth.security import REQUIRE, REQUIRE_APPROVER, verify_csrf
-from app.crm_routes import APPROVAL_NAMES, _go, _render, approval_files
+from app.crm_routes import APPROVAL_NAMES, _go, _render, approval_files, send_approved
 from app.db.models import LetterApproval, LetterApprovalFile, Opportunity, User
 from app.notify import notify
 
@@ -86,10 +86,18 @@ def approvals_decide(approval_id: int, decision: str = Form(...), note: str = Fo
             row.subject, row.body = subject, body
         row.status, row.decision_note = decision, note or None
         row.decided_by_id, row.decided_at = me.id, datetime.utcnow()
-        link = f"/opportunities/{row.opportunity_id}" + (f"?approval={row.id}#email" if decision == "approved"
-                                                         else "#approvals")
-        text = (f"Məktubun təsdiqləndi: {row.subject[:120]} — indi göndərə bilərsən" if decision == "approved"
-                else f"Məktubun rədd edildi: {row.subject[:120]} — {note[:200]}")
-        notify(db, row.requested_by_id, f"{text} ({me.full_name})", link, commit=False)
         db.commit()
-    return _go("/approvals", msg=f"{APPROVAL_NAMES[decision]}: {subject or row.subject}"[:200])
+        title = row.subject
+        if decision == "rejected":
+            notify(db, row.requested_by_id, f"Məktubun rədd edildi: {title[:120]} — {note[:200]} ({me.full_name})",
+                   f"/opportunities/{row.opportunity_id}#approvals")
+            return _go("/approvals", msg=f"{APPROVAL_NAMES[decision]}: {title}"[:200])
+        # Təsdiq = göndər: məktub dərhal gedir; alınmasa göndərən özü göndərə bilsin deyə link verilir
+        sent, error = send_approved(db, row)
+        if sent:
+            notify(db, row.requested_by_id, f"Məktubun təsdiqləndi və göndərildi: {title[:120]} → {row.to_address} "
+                   f"({me.full_name})", f"/opportunities/{row.opportunity_id}#approvals")
+            return _go("/approvals", msg=f"Təsdiqləndi və göndərildi: {row.to_address}"[:200])
+        notify(db, row.requested_by_id, f"Məktubun təsdiqləndi, amma göndərilmədi ({error[:120]}) — özün göndər: "
+               f"{title[:80]} ({me.full_name})", f"/opportunities/{row.opportunity_id}?approval={row.id}#email")
+    return _go("/approvals", err=f"Təsdiqləndi, amma məktub göndərilmədi: {error}"[:200])

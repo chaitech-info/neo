@@ -392,6 +392,49 @@ def opportunity_email_send(request: Request, opp_id: int, to: str = Form(...), s
 # --- Təsdiqə göndər (Təsdiqləyici rolu, app/approval_routes.py) ------------------------
 
 
+def send_approved(db, row: LetterApproval) -> tuple[bool, str]:
+    """Təsdiqlənmiş məktubu dərhal göndərir — göndərənin adından, seçdiyi poçtdan, təsdiqə qoşulmuş fayllarla.
+    (göndərildi?, xəta mətni). Uğursuz olsa məktub "təsdiqləndi" qalır, göndərən özü fürsətdən göndərə bilər."""
+    opp = db.get(Opportunity, row.opportunity_id)
+    author = db.get(User, row.requested_by_id)
+    if opp is None or author is None:
+        return False, "Fürsət və ya göndərən tapılmadı"
+    if row.sent_at is not None:
+        return True, ""
+    sender = mailboxes.resolve(db, row.mailbox_id)
+    if row.mailbox_id and sender is None:
+        return False, "Seçilmiş göndərən poçt tapılmadı və ya söndürülüb"
+    files = db.scalars(select(LetterApprovalFile).where(LetterApprovalFile.approval_id == row.id)
+                       .order_by(LetterApprovalFile.id))
+    attachments = [(f.filename, f.data, f.content_type) for f in files]
+    out = Outreach(kind="email", lead_key=opp.lead_key, opportunity_id=opp.id, contact_id=row.contact_id,
+                   to_address=row.to_address, subject=row.subject[:200], body=row.body, language=row.language,
+                   status="failed", error="Göndərilir…", user_id=author.id, created_at=datetime.utcnow(),
+                   send_key=f"approval-{row.id}",      # eyni təsdiq iki dəfə göndərilmir
+                   attachments="\n".join(name for name, _, _ in attachments) or None,
+                   mailbox_id=sender.mailbox_id if sender is not None else None)
+    db.add(out)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        return True, ""
+    reply_to = None if sender is not None and sender.can_receive else author.email
+    try:
+        message_id = mail.send_email(to=row.to_address, subject=row.subject[:200], body=row.body, reply_to=reply_to,
+                                     attachments=attachments, sender=sender)
+    except OutreachError as exc:
+        out.error = str(exc)[:500]
+        out.send_key = None             # göndərən sonra əl ilə göndərə bilsin
+        db.commit()
+        return False, str(exc)
+    row.sent_at = datetime.utcnow()
+    crm.email_sent(db, opp, to=row.to_address, subject=row.subject[:200], body=row.body, language=row.language,
+                   contact_id=row.contact_id, user_id=author.id, message_id=message_id, row=out)
+    return True, ""
+
+
+
 def approvers(db) -> list[User]:
     """Təsdiq yalnız CEO rolundadır."""
     return list(db.scalars(select(User).where(User.role_code == "ceo", User.is_active.is_(True))))
