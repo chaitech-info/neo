@@ -775,18 +775,18 @@ def test_offer_language_is_chosen_and_stored(app_db, monkeypatch):
     monkeypatch.setattr(offer_pdf, "render", lambda snap, *a, **k: (seen.append(snap.get("language")), real(snap, *a, **k))[1])
     c = TestClient(web.app)
     page = c.get("/tools/offers").text
-    assert 'id="of-language"' in page and "English" in page and "Русский" in page
-    assert c.post("/api/offers", json=dict(brand="seaport", message="a", language="ru")).status_code == 200
+    assert 'id="of-language"' in page and "English" in page and "Русский" not in page
+    assert c.post("/api/offers", json=dict(brand="seaport", message="a", language="en")).status_code == 200
     with app_db() as s:
-        assert s.scalar(select(OfferRecord.language)) == "ru"
+        assert s.scalar(select(OfferRecord.language)) == "en"
     oid = OK["offer_id"]
     c.get(f"/api/offers/{oid}/pdf")                                 # tarixçədən — saxlanmış dil
-    c.get(f"/api/offers/{oid}/pdf?lang=en")                         # başqa dildə açmaq
-    c.get(f"/api/offers/{oid}/pdf?lang=xx")
-    assert seen == ["ru", "ru", "en", "ru"]
+    c.get(f"/api/offers/{oid}/pdf?lang=az")                         # başqa dildə açmaq
+    c.get(f"/api/offers/{oid}/pdf?lang=ru")                         # rusca seçilmir — saxlanmış dil
+    assert seen == ["en", "en", "az", "en"]
     with app_db() as s:
         s.query(OfferRecord).delete()
         s.commit()
-    c.post("/api/offers", json=dict(brand="seaport", message="a", language="de"))  # tanınmayan — azərbaycanca
+    c.post("/api/offers", json=dict(brand="seaport", message="a", language="ru"))  # rusca / tanınmayan — azərbaycanca
     with app_db() as s:
         assert s.scalar(select(OfferRecord.language)) is None

@@ -30,7 +30,7 @@ router = APIRouter()
 HISTORY_LIMIT = 50
 MAX_PACKAGES = 200
 MAX_LEAD_TEXT = agent.MAX_MESSAGE_LENGTH
-LANGUAGES = {"az": "Azərbaycanca", "en": "English", "ru": "Русский"}
+LANGUAGES = {"az": "Azərbaycanca", "en": "English"}   # rusca istifadə olunmur (PDF modulu onu hələ də bacarır)
 
 
 def language_code(value) -> str:
