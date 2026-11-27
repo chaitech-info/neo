@@ -464,20 +464,40 @@ def _texts(monkeypatch, fn):
 
 
 def test_five_designs_render_the_same_pages_in_their_own_look():
-    assert list(offer_pdf.DESIGNS) == ["classic", "midnight", "wave", "panel", "color"]
+    assert list(offer_pdf.DESIGNS) == ["sheet", "classic", "midnight", "wave", "panel", "color"]
     # Quruluş da fərqlidir: üz qabığının düzümü və gün bloklarının görünüşü təkrarlanmır (klassik/gecə istisna)
-    looks = [(d.cover_style, d.day_style) for d in offer_pdf.DESIGNS.values()]
+    looks = [(d.cover_style, d.day_style) for d in offer_pdf.DESIGNS.values() if d.code != "sheet"]
     assert looks == [("left", "plain"), ("left", "plain"), ("center", "bar"), ("split", "card"), ("center", "side")]
     assert offer_pdf.design_code("garden") == "classic"            # çıxarılmış dizaynla saxlanmış təklif — klassik
     assert offer_pdf.design_code("zzz") == offer_pdf.design_code(None) == "classic"
     sizes = set()
     for code, d in offer_pdf.DESIGNS.items():
+        if code == "sheet":                                         # albom — öz düzümü (test_sheet_design_...)
+            continue
         pdf = offer_pdf.render(WEEKLY, design=code)
         assert pdf.startswith(b"%PDF") and _pages(pdf) == 3, code   # dizayn səhifə düzümünü dəyişmir
         assert (b"NotoSans" in pdf) == d.sans and (b"NotoSerif" in pdf) != d.sans, code
         sizes.add(len(pdf))
     assert len(sizes) == 5                                          # beşi də fərqli PDF-dir
     assert _pages(offer_pdf.render(WEEKLY, design="yox")) == 3      # tanınmayan kod sınmır — klassik
+
+
+def test_sheet_design_follows_the_sample_offer_and_adds_the_weekly_menu(monkeypatch):
+    """Albom (nümunə qiymət təklifi SP-20261021-002 kimi, üfüqi): üz qabığı, paket kartları, həftəlik menyu
+    (nümunədə yoxdur — əlavə olunub), qiymət xülasəsi."""
+    weekly = dict(WEEKLY, offer_id="SP-20261021-002", lines=[dict(WEEKLY["lines"][0], quantity=120, days=22,
+                                                                     line_total="15840.00")])
+    pdf = offer_pdf.render(weekly, design="sheet")
+    assert pdf.startswith(b"%PDF") and _pages(pdf) == 4 and b"841.8898 595.2756" in pdf   # üfüqi A4
+    drawn = _texts(monkeypatch, lambda: offer_pdf.render(weekly, design="sheet"))
+    for text in ("Qiymət təklifi", "Azersun", "SP-20261021-002", "21.10.2026", "Menyu paketləri", "Həftəlik menyu",
+                 "Bazar ertəsi", "Cümə", "Mərcimək şorbası", "Qiymət xülasəsi", "6 AZN", "120 nəfər × 22 gün",
+                 "15 840 AZN", "ISO 22000:2018", "Seaport Catering MMC"):
+        assert text in drawn, text
+    flat = _texts(monkeypatch, lambda: offer_pdf.render(FLAT, design="sheet"))
+    assert "DİGƏR" in flat and "Həftəlik menyu" not in flat                # sadə menyu kartda, həftə səhifəsi yoxdur
+    assert _pages(offer_pdf.render(FLAT, design="sheet")) == 3
+    assert _pages(offer_pdf.render({"brand": "nafa", "lines": []}, design="sheet")) == 2   # boş təklif sınmır
 
 
 def test_pdf_states_price_is_per_person_and_vat_is_not_included(monkeypatch):

@@ -17,6 +17,8 @@ və yeməyin əlavə sahələri (porsiya, kalori …) adın altında kiçik yaz�
 
 Şrift Noto Serif-dir (bax `Text`); Caladea yalnız ehtiyatdır.
 
+"Albom" dizaynı (üfüqi, nümunə qiymət təklifinin quruluşu) ayrıca modulda çəkilir: app/offer_sheet.py.
+
 Dizaynlar (`DESIGNS`, istifadəçi formda seçir): klassik, gecə, yaşıl, isti, minimal — məzmun və düzüm eynidir,
 rənglər, şrift (Noto Serif / Noto Sans) və səhifə bəzəyi fərqlidir. "Təklif məlumatları"nda həmişə yazılır:
 qiymət 1 nəfərlik yemək üçündür və ƏDV qiymətə daxil deyil (agent ƏDV-ni daxil sayıbsa — daxildir).
@@ -102,6 +104,10 @@ class Design:
 LOGO_DEEP, LOGO_BLUE, LOGO_TEAL, LOGO_PURPLE, LOGO_PINK = "#212c59", "#30417d", "#0999ad", "#7c4182", "#e92478"
 
 DESIGNS: dict[str, Design] = {d.code: d for d in (
+    # Albom: üfüqi səhifə, ayrıca modulda çəkilir (app/offer_sheet.py) — formda ilk (yeni təkliflərin seçimi)
+    Design("sheet", "Albom", "üfüqi səhifə: paket kartları, həftəlik menyu, qiymət xülasəsi",
+           _pal("#15303a", LOGO_TEAL, "#667b82", "#d3e1e3"), sans=True, cover_style="sheet", day_style="sheet",
+           swatch=("#0f3a44", LOGO_TEAL)),
     Design("classic", "Klassik", "tünd göy və firuzəyi, sola düzülmüş",
            _pal("#1a365d", "#00a0b2", "#6b7488", "#dfe4eb"), swatch=("#1a365d", "#00a0b2")),
     Design("midnight", "Gecə", "tünd üz qabığı, qızılı vurğu",
@@ -1187,7 +1193,12 @@ def render(snapshot: dict, photos: dict[str, bytes] | None = None, plans: dict[i
            design: str = DEFAULT_DESIGN, exclude: dict | None = None) -> bytes:
     """Agentin təklif snapshot-u → PDF baytları. `photos` — {dish_key: JPEG} (şəkilli təklif; app/dishes.py),
     `plans` — menyu planından qurulmuş paketlər (app/package_menus.py), `design` — DESIGNS-dəki kod,
-    `exclude` — menyudan çıxarılanlar (app/offer_price.py). Footer-də "02 / 03" üçün iki keçid."""
+    `exclude` — menyudan çıxarılanlar (app/offer_price.py). Footer-də "02 / 03" üçün iki keçid.
+    "Albom" dizaynı (üfüqi) ayrıca modulda çəkilir: app/offer_sheet.py."""
+    if design_code(design) == "sheet":
+        from app import offer_sheet
+
+        return offer_sheet.render(snapshot, plans=plans, exclude=exclude)
     first = Doc(snapshot, photos=photos, plans=plans, measure=True, design=design, exclude=exclude)
     first.build()
     return Doc(snapshot, total=len(first.pages), photos=photos, plans=plans, design=design, exclude=exclude).build()
