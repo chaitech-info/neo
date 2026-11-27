@@ -172,6 +172,7 @@ class Text:
         self.fonts = ("Sans", "Sans-I") if sans else ("Noto", "Noto-I")   # dizayna görə: Noto Sans / Noto Serif
         self.cov = {f: _covered(f) for f in self.fonts}
         self.color = color      # rəng verilməyəndə (Doc palitraya görə dəyişir)
+        self.page_h = H         # səhifənin hündürlüyü (üfüqi albom səhifəsində fərqlidir — app/offer_sheet.py)
 
     def runs(self, s: str, italic: bool) -> list[tuple[str, str]]:
         main, alt = (self.fonts[1], "Cal-I") if italic else (self.fonts[0], "Cal")
@@ -196,7 +197,7 @@ class Text:
             x -= w
         elif align == "center":
             x -= w / 2
-        t = self.c.beginText(x, H - y)
+        t = self.c.beginText(x, self.page_h - y)
         t.setFillColor(color)
         t.setCharSpace(tracking)
         for f, chunk in self.runs(s, italic):

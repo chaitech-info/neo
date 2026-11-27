@@ -151,6 +151,7 @@ class Sheet:
         self.c.setAuthor("Seaport Catering" if self.brand == "seaport" else "NAFA")
         self.sans = op.Text(self.c, True, INK)
         self.serif = op.Text(self.c, False, INK)
+        self.sans.page_h = self.serif.page_h = H     # üfüqi səhifə: mətnin yeri bu hündürlükdən hesablanır
         self.page_no = 0
         self.y = TOP
 
@@ -203,7 +204,13 @@ class Sheet:
             iw, ih = img.getSize()
             h = r * 1.62
             w = h * iw / ih
-            self.c.drawImage(img, cx - w / 2, H - cy - h / 2, w, h, mask="auto")
+            c = self.c
+            c.saveState()                    # loqonun ağ fonunun küncləri dairədən çıxmasın
+            path = c.beginPath()
+            path.circle(cx, H - cy, r)
+            c.clipPath(path, stroke=0, fill=0)
+            c.drawImage(img, cx - w / 2, H - cy - h / 2, w, h, mask="auto")
+            c.restoreState()
         else:
             self.serif.draw(cx, cy + r * 0.2, "NAFA", r * 0.55, DEEP, align="center")
 
@@ -296,8 +303,7 @@ class Sheet:
         for i, (key, value) in enumerate(fields):
             x = x0 + i * col
             s.draw(x, H - 112, self.pair(key), 7, MUTED, tracking=0.3)
-            v = serif.wrap(value, 14.5, col - 12)[0]
-            serif.draw(x, H - 92, v, 14.5, INK)
+            serif.draw(x, H - 92, value, op_fit(serif, value, 14.5, col - 12), INK)
         self.watermark()
         self.c.showPage()
 

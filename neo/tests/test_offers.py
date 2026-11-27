@@ -489,6 +489,10 @@ def test_sheet_design_follows_the_sample_offer_and_adds_the_weekly_menu(monkeypa
                                                                      line_total="15840.00")])
     pdf = offer_pdf.render(weekly, design="sheet")
     assert pdf.startswith(b"%PDF") and _pages(pdf) == 4 and b"841.8898 595.2756" in pdf   # üfüqi A4
+    from app import offer_sheet
+
+    sheet = offer_sheet.Sheet(weekly)          # mətn üfüqi səhifənin hündürlüyü ilə yerləşir (portretlə deyil)
+    assert sheet.sans.page_h == sheet.serif.page_h == offer_sheet.H < offer_pdf.H
     drawn = _texts(monkeypatch, lambda: offer_pdf.render(weekly, design="sheet"))
     for text in ("Qiymət təklifi", "Azersun", "SP-20261021-002", "21.10.2026", "Menyu paketləri", "Həftəlik menyu",
                  "Bazar ertəsi", "Cümə", "Mərcimək şorbası", "Qiymət xülasəsi", "6 AZN", "120 nəfər × 22 gün",
