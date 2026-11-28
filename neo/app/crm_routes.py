@@ -22,7 +22,7 @@ from app.auth.security import REQUIRE, verify_csrf
 from app.contacts import EMAIL_RE, contacts_for, normalize_phone, opportunity_emails
 from app.notify import notify
 from app.outreach import LANGUAGES, OutreachError, detect_language
-from app.outreach import linkedin_comment, mail
+from app.outreach import letters, linkedin_comment, mail
 from app.db.models import (REPLY_STATUSES, Contact, InboundEmail, LeadRecord, LetterApproval, LetterApprovalFile,
                            LetterTemplate, Opportunity, Organization, Outreach, Task, Tender, User)
 
@@ -171,6 +171,7 @@ def _opp_context(db, opp: Opportunity, me: User | None = None) -> dict:
     return {
         "emails": opportunity_emails(lead, org, contacts),
         "mailbox_list": mailboxes.active(db), "default_sender": default, "templates": _templates_for(db, me),
+        "builtin_templates": list(letters.BUILTINS.values()),
         "approvals": approvals, "approval_files": approval_files(db, [a.id for a in approvals]),
         "replies": list(db.scalars(select(InboundEmail).where(InboundEmail.opportunity_id == opp.id)
                                    .order_by(InboundEmail.received_at.desc()))),
@@ -191,6 +192,8 @@ def _opp_context(db, opp: Opportunity, me: User | None = None) -> dict:
         "stages": crm.pipeline_for(opp), "stage_names": crm.STAGE_NAMES,
         "lost_reasons": crm.LOST_REASON_NAMES, "task_status_names": crm.TASK_STATUS_NAMES,
         "priority_names": crm.PRIORITY_NAMES,
+        "meetings": crm.meetings_for(db, opp.id), "today": crm.today(),
+        "opened_on": crm.baku_date(opp.created_at) if opp.created_at else None,
     }
 
 
@@ -249,11 +252,15 @@ def opportunity_email_draft(request: Request, opp_id: int, contact_id: str = For
         picked = contact_id.removeprefix("to:").lower() if contact_id.startswith("to:") else ""
         if picked and not to.strip() and any(e["email"] == picked for e in context["emails"]):
             to = picked
-        tpl = _template(db, template_id, me)
+        builtin = letters.get(template_id)       # hazır şablon (app/outreach/letters.py)
+        if builtin:                              # alıcının adı yoxdursa — şirkət adından olan variant
+            builtin = letters.for_recipient(builtin, contact.name if contact else None)
+        tpl = None if builtin else _template(db, template_id, me)
         sender = mailboxes.resolve(db, mailbox_id)
         lead, org = context["lead"], context["org"]
         current = {"to": to.strip(), "subject": " ".join(subject.split()), "body": body.strip(), "language": language,
-                   "contact_id": contact.id if contact else "", "template_id": tpl.id if tpl else "",
+                   "contact_id": contact.id if contact else "",
+                   "template_id": builtin.ref if builtin else (tpl.id if tpl else ""),
                    "mailbox_id": mailbox_id if mailbox_id.isdigit() else "",
                    "approval_id": approval_id if approval_id.isdigit() else "",
                    "files_from": files_from if files_from.isdigit() else "",
@@ -263,19 +270,26 @@ def opportunity_email_draft(request: Request, opp_id: int, contact_id: str = For
             return _render(request, "opportunity.html", {
                 **context, "draft": current, "page_error": "Nəyi dəyişmək lazımdır? Göstərişi yaz, sonra «Yenidən yarat» bas"})
         try:
-            draft = mail.draft_email(
-                lead_title=lead.title if lead else opp.title, lead_text=lead.raw_text if lead else "",
-                org_name=org.name if org else (lead.entity_name if lead else None),
-                contact_name=contact.name if contact else None, contact_title=contact.title if contact else None,
-                sender_name=me.full_name, language=language, template=tpl.body if tpl else None,
-                previous={"subject": current["subject"], "body": current["body"]} if revising else None,
-                instructions=instructions or None,
-                company_name=sender.name if sender is not None and sender.mailbox_id else None)
+            if builtin and language == "az" and not revising:
+                # Hazır şablon olduğu kimi: AI-sız, yalnız müraciət sətri kontaktın adından
+                draft = letters.fill(builtin, contact.name if contact else None)
+            else:
+                draft = mail.draft_email(
+                    lead_title=lead.title if lead else opp.title, lead_text=lead.raw_text if lead else "",
+                    org_name=org.name if org else (lead.entity_name if lead else None),
+                    contact_name=contact.name if contact else None, contact_title=contact.title if contact else None,
+                    sender_name=me.full_name, language=language,
+                    template=letters.template_text(builtin) if builtin else (tpl.body if tpl else None),
+                    previous={"subject": current["subject"], "body": current["body"]} if revising else None,
+                    instructions=instructions or None,
+                    company_name=sender.name if sender is not None and sender.mailbox_id else None)
         except OutreachError as exc:
             if revising:
                 return _render(request, "opportunity.html", {**context, "draft": current, "page_error": str(exc)})
             return _go(path, err=str(exc))
-    draft = {**current, "subject": draft["subject"], "body": mail.with_signature(draft["body"], me.full_name),
+    signature = builtin.signature if builtin else None     # hazır şablonun öz imzası (Sales Support Team …)
+    draft = {**current, "subject": draft["subject"],
+             "body": mail.with_signature(draft["body"], me.full_name, signature),
              "to": current["to"] or (contact.email if contact and contact.email else ""), "revised": revising,
              # Mətn dəyişdi — əvvəlki təsdiq artıq bu məktuba aid deyil.
              "approval_id": ""}
@@ -333,7 +347,7 @@ def opportunity_email_send(request: Request, opp_id: int, to: str = Form(...), s
                  "mailbox_id": mailbox_id if mailbox_id.isdigit() else "",
                  "approval_id": approval_id if approval_id.isdigit() else "",
                  "files_from": files_from if files_from.isdigit() else "", "files": stored,
-                 "template_id": template_id if template_id.isdigit() else ""}
+                 "template_id": template_id if letters.is_ref(template_id) else ""}
         return _render(request, "opportunity.html", {**context, "draft": draft, "page_error": error})
 
     if not EMAIL_RE.fullmatch(to) or len(to) > 254:
@@ -473,7 +487,7 @@ def opportunity_email_approval(request: Request, opp_id: int, to: str = Form("")
             draft = {"to": to, "subject": subject, "body": body, "language": language[:2],
                      "contact_id": contact_id if contact_id.isdigit() else "",
                      "mailbox_id": mailbox_id if mailbox_id.isdigit() else "",
-                     "template_id": template_id if template_id.isdigit() else "",
+                     "template_id": template_id if letters.is_ref(template_id) else "",
                      "files_from": files_from if files_from.isdigit() else "",
                      "files": _stored_files(db, opp.id, files_from),
                      "send_key": send_key if SEND_KEY_RE.fullmatch(send_key) else secrets.token_urlsafe(24)}
@@ -596,6 +610,42 @@ def opportunity_add_task(opp_id: int, title: str = Form(...), due_on: str = Form
         except crm.CrmError as exc:
             return _go(path, err=str(exc))
     return _go(path, msg="Tapşırıq əlavə olundu")
+
+
+@router.post("/opportunities/{opp_id}/meetings", dependencies=[Depends(verify_csrf)])
+def opportunity_add_meeting(request: Request, opp_id: int, met_on: str = Form(""), participants: str = Form(""),
+                            summary: str = Form(""), stage: str = Form(""), decision_on: str = Form(""),
+                            lost_reason: str = Form(""), lost_note: str = Form(""), probability: str = Form(""),
+                            expected_value: str = Form(""), next_step: str = Form(""), next_step_on: str = Form(""),
+                            me: User = Depends(REQUIRE["sales"])):
+    """Canlı görüşün xülasəsi (crm.record_meeting). Xəta olanda forma yazılanlarla geri qaytarılır."""
+    path = f"/opportunities/{opp_id}"
+    form = {"met_on": met_on, "participants": participants, "summary": summary, "stage": stage,
+            "decision_on": decision_on, "lost_reason": lost_reason, "lost_note": lost_note,
+            "probability": probability, "expected_value": expected_value, "next_step": next_step,
+            "next_step_on": next_step_on}
+    with security.SessionLocal() as db:
+        opp = db.get(Opportunity, opp_id)
+        if opp is None:
+            return _go("/opportunities", err="Fürsət tapılmadı")
+        try:
+            prob = probability.strip().rstrip("%").strip()
+            if prob and not prob.isdigit():
+                raise crm.CrmError("Ehtimal 0 ilə 100 arasında tam rəqəm olmalıdır")
+            try:
+                value = Decimal(expected_value.replace(",", ".").replace(" ", "")) if expected_value.strip() else None
+            except InvalidOperation:
+                raise crm.CrmError("Gözlənilən dəyər rəqəm olmalıdır") from None
+            crm.record_meeting(
+                db, opp, user_id=me.id, met_on=crm.parse_due(met_on), summary=summary, participants=participants,
+                stage=stage or None, decision_on=crm.parse_due(decision_on), lost_reason=lost_reason or None,
+                lost_note=lost_note, probability=int(prob) if prob else None, expected_value=value,
+                next_step=next_step, next_step_on=crm.parse_due(next_step_on))
+        except crm.CrmError as exc:
+            db.rollback()
+            return _render(request, "opportunity.html",
+                           {**_opp_context(db, opp, me), "meeting_form": form, "page_error": str(exc)})
+    return _go(path + "#meetings", msg="Görüşün xülasəsi yazıldı")
 
 
 @router.post("/opportunities/{opp_id}/linkedin-comment", dependencies=[Depends(verify_csrf)])

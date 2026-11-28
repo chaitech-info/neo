@@ -12,11 +12,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 
 from sqlalchemy import case, select, update
 from sqlalchemy.orm import Session
 
-from app.db.models import LOST_REASONS, Contact, LeadRecord, Opportunity, Outreach, Task
+from app.db.models import LOST_REASONS, Contact, LeadRecord, Meeting, Opportunity, Outreach, Task
 from app.db.repository import record_event
 from app.tenders import extract_voen, organization_for
 
@@ -260,6 +261,73 @@ def add_task(session: Session, opp: Opportunity, title: str, due_on: date | None
     opp.updated_at = _now()
     session.commit()
     return task
+
+
+MEETING_MIN_SUMMARY = 10
+MAX_MEETING_VALUE = Decimal("1000000000000")
+
+
+def record_meeting(session: Session, opp: Opportunity, *, user_id: int | None, met_on: date | None,
+                   summary: str, participants: str = "", stage: str | None = None,
+                   decision_on: date | None = None, lost_reason: str | None = None, lost_note: str | None = None,
+                   probability: int | None = None, expected_value: Decimal | None = None,
+                   next_step: str = "", next_step_on: date | None = None) -> Meeting:
+    """Canlı görüşün xülasəsi + dörd ölçü. Fürsət də yenilənir: mərhələ (konversiya; uduzulubsa səbəb
+    məcburidir), gözlənilən qərar/bağlanma tarixi (sikl), ehtimal və dəyər (proqnoz). `next_step` doludursa —
+    görüşü yazana tapşırıq. Qazanıldı → ehtimal 100, uduzuldu → 0."""
+    summary = (summary or "").strip()
+    if len(summary) < MEETING_MIN_SUMMARY:
+        raise CrmError("Görüşün xülasəsini yaz (ən azı bir cümlə)")
+    if met_on is None:
+        raise CrmError("Görüşün tarixini seç")
+    if met_on > today():
+        raise CrmError("Görüş tarixi gələcəkdə ola bilməz — xülasə görüşdən sonra yazılır")
+    stage = stage or opp.stage
+    if stage not in pipeline_for(opp):
+        raise CrmError("Bu fürsət növü üçün yanlış mərhələ")
+    if stage == "lost" and lost_reason not in LOST_REASONS:
+        raise CrmError("Fürsət uduzulubsa, itirmə səbəbini seç")
+    if probability is not None and not 0 <= probability <= 100:
+        raise CrmError("Ehtimal 0 ilə 100 arasında olmalıdır")
+    if expected_value is not None and (not expected_value.is_finite() or expected_value < 0
+                                       or expected_value >= MAX_MEETING_VALUE):
+        raise CrmError("Gözlənilən dəyər 0 ilə 999 999 999 999 arasında olmalıdır")
+    if decision_on is not None and decision_on < met_on:
+        raise CrmError("Qərar tarixi görüşdən əvvəl ola bilməz")
+    if stage == "won":
+        probability = 100
+    elif stage == "lost":
+        probability = 0
+    value = expected_value.quantize(Decimal("0.01")) if expected_value is not None else None
+    meeting = Meeting(opportunity_id=opp.id, user_id=user_id, met_on=met_on,
+                      participants=(participants or "").strip()[:500] or None, summary=summary[:5000],
+                      stage_before=opp.stage, stage_after=stage, decision_on=decision_on,
+                      lost_reason_code=lost_reason if stage == "lost" else None,
+                      lost_reason_note=((lost_note or "").strip()[:500] or None) if stage == "lost" else None,
+                      probability=probability, expected_value=value,
+                      next_step=(next_step or "").strip()[:500] or None, next_step_on=next_step_on,
+                      created_at=_now())
+    session.add(meeting)
+    if decision_on is not None:
+        opp.expected_close_on = decision_on
+    if probability is not None:
+        opp.win_probability = probability
+    if value is not None:
+        opp.expected_value = value
+    if stage != opp.stage or stage == "lost":
+        change_stage(session, opp, stage, lost_reason, lost_note)   # commit edir
+    else:
+        opp.updated_at = _now()
+        session.commit()
+    if meeting.next_step and stage not in CLOSED_STAGES:
+        add_task(session, opp, meeting.next_step, next_step_on, user_id, user_id,
+                 description=f"Görüşdən sonra ({met_on:%d.%m.%Y}): {summary[:300]}")
+    return meeting
+
+
+def meetings_for(session: Session, opp_id: int) -> list[Meeting]:
+    return list(session.scalars(select(Meeting).where(Meeting.opportunity_id == opp_id)
+                                .order_by(Meeting.met_on.desc(), Meeting.id.desc())))
 
 
 def set_task_status(session: Session, task: Task, status: str) -> None:

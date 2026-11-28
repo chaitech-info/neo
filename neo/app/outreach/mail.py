@@ -78,7 +78,15 @@ MAX_INSTRUCTIONS = 2000
 
 
 def without_signature(body: str) -> str:
-    """Panel imzanı "\\n--\\n" ilə əlavə edir — yenidən yazdırmazdan əvvəl çıxarılır ki, ikiqat olmasın."""
+    """Panel imzanı "\\n--\\n" ilə (hazır şablonda — şablonun öz imzası ilə) əlavə edir — yenidən yazdırmazdan
+    əvvəl çıxarılır ki, ikiqat olmasın."""
+    from app.outreach import letters
+
+    for b in letters.BUILTINS.values():
+        marker = "\n" + "\n".join(b.signature.split("\n")[:2])      # "\nHörmətlə,\nSales Support Team"
+        head, sep, _ = (body or "").rpartition(marker)
+        if sep:
+            return head.rstrip()
     head, sep, _ = (body or "").rpartition("\n--\n")
     return head.rstrip() if sep else (body or "").strip()
 
@@ -118,7 +126,10 @@ def draft_email(*, lead_title: str, lead_text: str, org_name: str | None, contac
     return {"subject": out["subject"].strip()[:200], "body": out["body"].strip()}
 
 
-def with_signature(body: str, sender_name: str) -> str:
+def with_signature(body: str, sender_name: str, signature: str | None = None) -> str:
+    """`signature` — hazır şablonun öz imzası ("Hörmətlə, Sales Support Team …"); yoxdursa — əməkdaşın adı + şirkət."""
+    if signature:
+        return f"{body.rstrip()}\n\n{signature}"
     me = company()
     lines = [body.rstrip(), "", "--", sender_name]
     if me["signature"]:

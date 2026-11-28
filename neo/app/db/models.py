@@ -330,6 +330,32 @@ class Opportunity(Base):
     leaders_fetched_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     # 0012: məktuba cavab vəziyyəti (REPLY_STATUSES) — boş = məktub göndərilməyib.
     reply_status: Mapped[Optional[str]] = mapped_column(String(16), nullable=True, index=True)
+    # 0022: son görüşdə verilən qazanma ehtimalı (proqnoz), 0–100
+    win_probability: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+
+class Meeting(Base):
+    """Canlı görüşün qısa xülasəsi (0022) — görüşdən sonra satış əməkdaşı yazır. Dörd ölçü (CRM hesabatları):
+    konversiya (stage_before → stage_after), sikl (decision_on), itirmə səbəbi, proqnoz (probability, expected_value)."""
+
+    __tablename__ = "meetings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    opportunity_id: Mapped[int] = mapped_column(ForeignKey("opportunities.id"), index=True)
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    met_on: Mapped[date] = mapped_column(Date)
+    participants: Mapped[Optional[str]] = mapped_column(Text, nullable=True)   # müştəri tərəfdən kimlər
+    summary: Mapped[str] = mapped_column(Text)
+    stage_before: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    stage_after: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    decision_on: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    lost_reason_code: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    lost_reason_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    probability: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    expected_value: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
+    next_step: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    next_step_on: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class Task(Base):

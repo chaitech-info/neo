@@ -113,6 +113,63 @@ def test_draft_route_prefills_form(factory, opp_id, monkeypatch):
     assert "Dadlı Catering" in page  # imza
 
 
+@pytest.mark.parametrize("name, expected", [
+    ("Rauf Əliyev", "Hörmətli Rauf bəy,"),
+    ("Əliyeva Aygün", "Hörmətli Aygün xanım,"),
+    ("Məmmədov Anar Rəşid oğlu", "Hörmətli Anar bəy,"),
+    ("Leyla Kamran qızı", "Hörmətli Leyla xanım,"),
+    ("Əli Həsənzadə", "Hörmətli Əli bəy / xanım,"),          # cinsi bilinmir — istifadəçi seçir
+    ("", "Hörmətli cənab / xanım,"),
+    (None, "Hörmətli cənab / xanım,"),
+])
+def test_builtin_template_salutation(name, expected):
+    from app.outreach import letters
+
+    assert letters.salutation(name) == expected
+
+
+def test_builtin_template_is_filled_without_ai_and_signed_as_the_template(factory, opp_id, monkeypatch):
+    """Hazır Seaport şablonu: mətn olduğu kimi, müraciət kontaktın adından, imza şablonunku; AI çağırılmır."""
+    from app.outreach import letters
+
+    def no_ai(**kw):
+        raise AssertionError("hazır şablon AI-ya getməməlidir")
+
+    monkeypatch.setattr(mail, "draft_email", no_ai)
+    with factory() as s:
+        contact_id = s.scalar(select(Contact.id))
+    client = TestClient(web.app)
+    form_page = client.get(f"/opportunities/{opp_id}").text
+    assert f'value="{letters.DEFAULT}" selected' in form_page                 # formda ilk seçim
+    page = client.post(f"/opportunities/{opp_id}/email/draft",
+                       data={"contact_id": str(contact_id), "language": "az", "template_id": letters.DEFAULT}).text
+    for text in ("Hörmətli Rauf bəy,", "Sizi “Seaport Catering” şirkəti adından salamlayırıq!",
+                 "Hörmətlə,\nSales Support Team\n“Seaport Catering” MMC", "M: (+994) 102395025",
+                 "sales@seaport-catering.az;corporate@seaport-catering.az", "Çıraq Plaza", "korporativ qidalanma"):
+        assert text in page, text
+    letter = page.split('<textarea name="body"', 1)[1].split("</textarea>", 1)[0]
+    assert "Test Admin" not in letter and "Sales Support Team" in letter                # əməkdaşın imzası yox
+    body = letters.fill(letters.SEAPORT_INTRO, "Rauf Əliyev")["body"]
+    signed = mail.with_signature(body, "Test Admin", letters.SEAPORT_INTRO.signature)
+    assert mail.without_signature(signed) == body                             # "Yenidən yarat"-da imza ikiqat olmur
+
+
+def test_company_template_and_nameless_recipient_get_the_company_version(factory, opp_id, monkeypatch):
+    """İkinci hazır şablon — şirkət adından ("“Seaport Catering” şirkəti Sizi salamlayır!"), müraciət sətri yox.
+    Şəxsə şablon seçilib, amma alıcının adı yoxdursa (şirkətin emaili) — avtomatik şirkət variantı."""
+    from app.outreach import letters
+
+    monkeypatch.setattr(mail, "draft_email", lambda **kw: (_ for _ in ()).throw(AssertionError("AI çağırılmamalıdır")))
+    client = TestClient(web.app)
+    assert letters.SEAPORT_COMPANY.ref in client.get(f"/opportunities/{opp_id}").text
+    for template_id, contact_id in ((letters.SEAPORT_COMPANY.ref, ""), (letters.DEFAULT, "to:info@sahil.az")):
+        page = client.post(f"/opportunities/{opp_id}/email/draft",
+                           data={"contact_id": contact_id, "language": "az", "template_id": template_id}).text
+        body = page.split('<textarea name="body"', 1)[1].split("</textarea>", 1)[0]
+        assert "“Seaport Catering” şirkəti Sizi salamlayır!" in body and "Hörmətli" not in body.split("Hörmətlə")[0]
+        assert "Sales Support Team" in body and "Çıraq Plaza" in body
+
+
 def test_send_writes_history_task_and_moves_stage(factory, opp_id, monkeypatch):
     FakeSMTP.sent = []
     monkeypatch.setenv("SMTP_USER", "sales@dadli.az")

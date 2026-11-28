@@ -84,6 +84,94 @@
     {% endif %}
   </section>
 
+  <section class="od-card" id="meetings">
+    <h2>Görüşlər <em>{{ meetings|length }}</em>{% if opp.win_probability is not none %}<span class="mt-now" title="Son görüşdəki proqnoz">Proqnoz: {{ opp.win_probability }}%</span>{% endif %}</h2>
+    {% if meetings %}
+    <ul class="mt-list">
+      {% for m in meetings %}
+      <li class="mt">
+        <div class="mt-head">
+          <b>{{ m.met_on.strftime('%d.%m.%Y') }}</b>
+          {% if m.participants %}<span>· {{ m.participants }}</span>{% endif %}
+          <span class="mt-by">{{ users[m.user_id].full_name if m.user_id in users else '' }}</span>
+        </div>
+        <p class="mt-sum">{{ m.summary }}</p>
+        <div class="mt-tags">
+          {% if m.stage_before and m.stage_after %}
+          <span class="mt-tag mt-c1"><i>Konversiya</i>{% if m.stage_before != m.stage_after %}{{ stage_names.get(m.stage_before, m.stage_before) }} → {{ stage_names.get(m.stage_after, m.stage_after) }}{% else %}{{ stage_names.get(m.stage_after, m.stage_after) }} (dəyişmədi){% endif %}</span>
+          {% endif %}
+          {% if m.decision_on %}
+          <span class="mt-tag mt-c2"><i>Sikl</i>qərar {{ m.decision_on.strftime('%d.%m.%Y') }}{% if opened_on %} · {{ (m.decision_on - opened_on).days }} gün{% endif %}</span>
+          {% endif %}
+          {% if m.lost_reason_code %}
+          <span class="mt-tag mt-c3"><i>İtirmə səbəbi</i>{{ lost_reasons.get(m.lost_reason_code, m.lost_reason_code) }}{% if m.lost_reason_note %}: {{ m.lost_reason_note }}{% endif %}</span>
+          {% endif %}
+          {% if m.probability is not none or m.expected_value is not none %}
+          <span class="mt-tag mt-c4"><i>Proqnoz</i>{% if m.probability is not none %}{{ m.probability }}%{% endif %}{% if m.expected_value is not none %}{% if m.probability is not none %} · {% endif %}{{ '{:,.0f}'.format(m.expected_value).replace(',', ' ') }} {{ opp.currency }}{% endif %}</span>
+          {% endif %}
+        </div>
+        {% if m.next_step %}<p class="mt-next">Növbəti addım: {{ m.next_step }}{% if m.next_step_on %} — {{ m.next_step_on.strftime('%d.%m.%Y') }}{% endif %}</p>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+      <p class="od-empty">Hələ görüş yazılmayıb. Şirkətin əməkdaşları ilə canlı görüşdən sonra qısa xülasəni burada qeyd et.</p>
+    {% endif %}
+
+    {% if can_edit %}
+    {% set f = meeting_form or {} %}
+    <details class="od-add mt-add" {% if meeting_form or not meetings %}open{% endif %}>
+      <summary>+ Görüşün xülasəsini yaz</summary>
+      <form method="post" action="/opportunities/{{ opp.id }}/meetings">
+        {{ csrf_field(request) }}
+        <div class="kw-row">
+          <label class="kw-f">Görüş tarixi<input type="date" name="met_on" required max="{{ today.isoformat() }}" value="{{ f.met_on or today.isoformat() }}"></label>
+          <label class="kw-f">Kiminlə görüşüldü?<input name="participants" maxlength="500" list="mt-people" value="{{ f.participants or '' }}" placeholder="məs. Rauf Əliyev, satınalma müdiri"></label>
+          <datalist id="mt-people">{% for c in contacts %}<option value="{{ c.name }}{% if c.title %}, {{ c.title }}{% endif %}">{% endfor %}</datalist>
+        </div>
+        <label class="kw-f">Qısa xülasə<textarea name="summary" required minlength="10" maxlength="5000" rows="4" placeholder="Nə danışıldı, müştərinin ehtiyacı, razılaşmalar, narahatlıqlar…">{{ f.summary or '' }}</textarea></label>
+
+        <div class="mt-grid">
+          <fieldset class="mt-card mt-c1">
+            <legend><small>Göstərici</small>Konversiya</legend>
+            <p>Görüşdən sonra fürsət hansı mərhələdədir?</p>
+            <select name="stage" id="mt-stage">{% for s in stages %}<option value="{{ s }}" {% if s == (f.stage or opp.stage) %}selected{% endif %}>{{ stage_names[s] }}</option>{% endfor %}</select>
+          </fieldset>
+          <fieldset class="mt-card mt-c2">
+            <legend><small>Göstərici</small>Sikl</legend>
+            <p>Müştəri qərarı nə vaxt verəcək?</p>
+            <input type="date" name="decision_on" value="{{ f.decision_on or (opp.expected_close_on.isoformat() if opp.expected_close_on else '') }}" aria-label="Gözlənilən qərar tarixi">
+          </fieldset>
+          <fieldset class="mt-card mt-c3">
+            <legend><small>Göstərici</small>İtirmə səbəbi</legend>
+            <p>Fürsət itirilibsə, niyə? (yalnız “{{ stage_names['lost'] }}” mərhələsində)</p>
+            <select name="lost_reason" aria-label="İtirmə səbəbi">
+              <option value="">— seç —</option>
+              {% for k, v in lost_reasons.items() %}<option value="{{ k }}" {% if k == f.lost_reason %}selected{% endif %}>{{ v }}</option>{% endfor %}
+            </select>
+            <input name="lost_note" maxlength="500" value="{{ f.lost_note or '' }}" placeholder="qeyd (istəyə görə)" aria-label="İtirmə səbəbi qeydi">
+          </fieldset>
+          <fieldset class="mt-card mt-c4">
+            <legend><small>Göstərici</small>Proqnoz</legend>
+            <p>Qazanma ehtimalı və gözlənilən dəyər</p>
+            <div class="mt-pair">
+              <label>Ehtimal, %<input type="number" name="probability" min="0" max="100" step="5" value="{{ f.probability or (opp.win_probability if opp.win_probability is not none else '') }}"></label>
+              <label>Dəyər, {{ opp.currency }}<input name="expected_value" inputmode="decimal" value="{{ f.expected_value or ('%.0f'|format(opp.expected_value) if opp.expected_value is not none else '') }}"></label>
+            </div>
+          </fieldset>
+        </div>
+
+        <div class="kw-row">
+          <label class="kw-f">Növbəti addım (istəyə görə — tapşırıq kimi əlavə olunur)<input name="next_step" maxlength="500" value="{{ f.next_step or '' }}" placeholder="məs. Dequstasiya təşkil et"></label>
+          <label class="kw-f">Nə vaxta<input type="date" name="next_step_on" value="{{ f.next_step_on or '' }}"></label>
+        </div>
+        <button class="mc-btn mc-btn-hero" type="submit">Görüşü yadda saxla</button>
+        <p class="od-hint">Yadda saxlayanda fürsət də yenilənir: mərhələ, gözlənilən bağlanma tarixi, ehtimal və dəyər.</p>
+      </form>
+    </details>
+    {% endif %}
+  </section>
+
   <div class="od-grid">
     {% if can_edit %}
     <section class="od-card">
@@ -222,6 +310,7 @@
         <div class="kw-row">
           <label class="kw-f">Şablon
             <select name="template_id">
+              {% for b in builtin_templates %}<option value="{{ b.ref }}" {% if loop.first %}selected{% endif %}>{{ b.name }} (hazır)</option>{% endfor %}
               <option value="">— şablonsuz, AI özü yazsın —</option>
               {% for t in templates %}<option value="{{ t.id }}">{{ t.name }}{% if t.is_shared and t.user_id != me.id %} (komanda){% endif %}</option>{% endfor %}
             </select>
@@ -232,7 +321,7 @@
         </div>
         <button class="mc-btn mc-btn-hero" type="submit" data-busy="AI yazır…">AI ilə məktub yaz</button>
       </form>
-      <p class="od-hint">AI ~10 cümləlik qaralama yazır{% if templates %}; şablon seçsən, onun quruluşu və tonu ilə{% endif %}. Göndərməzdən əvvəl oxuyub düzəldə və ya göstəriş verib yenidən yazdıra bilərsən. <a href="/me/templates">Şablonlarım</a></p>
+      <p class="od-hint">Hazır şablon olduğu kimi gəlir, imza şablonun öz imzasıdır. “Şəxsə” — müraciət (“Hörmətli Rauf bəy”) kontaktın adından; alıcının adı yoxdursa (şirkətin emaili), özü “şirkət adından” variantına keçir; başqa dil seçsən, AI onu həmin dilə uyğunlaşdırır. Şablonsuz — AI ~10 cümləlik qaralama yazır{% if templates %}; öz şablonunu seçsən, onun quruluşu və tonu ilə{% endif %}. Göndərməzdən əvvəl oxuyub düzəldə və ya göstəriş verib yenidən yazdıra bilərsən. <a href="/me/templates">Şablonlarım</a></p>
       {% endif %}
     {% endif %}
     {% if outreach %}
