@@ -1,9 +1,18 @@
 """Albom (üfüqi A4) qiymət təklifi — "Albom" dizaynı (offer_pdf.DESIGNS["sheet"]).
 
-Quruluş Askar-ın göndərdiyi nümunə qiymət təklifindəndir (SP-20261021-002), rənglər fərqlidir (tünd firuzəyi
-və loqonun firuzəyisi, nümunədəki tünd göy + çəhrayı əvəzinə):
-1. Üz qabığı — solda tünd panel (loqo, "Qiymət təklifi", konsentrik dairələr), sağda müştəri, salam mətni,
-   təklif nömrəsi və tarix.
+Quruluş Askar-ın göndərdiyi nümunə qiymət təklifindəndir (SP-20261021-002), görünüş Seaport brendbukuna görədir
+(SeaPort_brand_guideline.pdf):
+- rənglər: əsas — tünd göy #15284b, göy #446ca9 (ikisi qradiyent kimi, tünd fonlar) və firuzəyi #0096a9 (vurğu);
+  köməkçi çəhrayı #ea1d76 yalnız kiçik yerdə ("NÜMUNƏ" su nişanı);
+- loqo: rəngli fonda ağ loqo (rəngli loqodan qurulur — `white_logo`), ətrafında heç bir lövhə / çərçivə yoxdur,
+  naxışın üstünə düşmür, ətrafında boş yer saxlanılır; başlıq zolağında ağ yazı loqosu (seaport-mark);
+- şrift: brendbukda Cambria-dır; o Microsoft şriftidir və serverə qoyula bilməz, onun açıq əkizi Caladea-da isə
+  "ə" yoxdur — ona görə bütün mətn eyni üslublu Noto Serif-dir (adi, qalın, kursiv);
+- naxış: brendin "S" dalğa naxışı (`pattern`) — qradiyent fonda firuzəyi, loqodan aralı.
+
+Səhifələr:
+1. Üz qabığı — solda qradiyent panel (ağ loqo, sloqan, "Qiymət təklifi", aşağıda naxış), sağda müştəri, salam
+   mətni, təklif nömrəsi və tarix.
 2. "Menyu paketləri" — hər paket öz kartında (qiymət, menyu / gündəlik seçim), yanda keyfiyyət sertifikatları
    və şirkətin əlaqə məlumatları (yalnız Seaport).
 3. "Həftəlik menyu" — nümunədə olmayan hissə: həftəlik paketin hər günü öz kartında (kateqoriya → yeməklər).
@@ -14,6 +23,7 @@ Paket modeli, menyu planı və "menyudan çıxart" offer_pdf-dəki kimidir (`off
 """
 from __future__ import annotations
 
+import functools
 import io
 import re
 from datetime import date
@@ -21,6 +31,7 @@ from typing import Any
 
 from reportlab.lib.colors import HexColor
 from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen.canvas import Canvas
 
 from app import offer_pdf as op
@@ -32,18 +43,19 @@ HEAD = 58.0                   # məzmun səhifələrinin yuxarı zolağı
 TOP, BOTTOM = 84.0, H - 62.0  # məzmunun yeri
 GAP = 14.0
 
-# Rənglər — nümunənin quruluşu, öz rəngləri: tünd firuzəyi panel, loqonun firuzəyisi vurğu, açıq boz-mavi fon
-DEEP = HexColor("#0f3a44")
-DEEP_SOFT = HexColor("#1d5662")
-ACCENT = HexColor(op.LOGO_TEAL)
-ACCENT_LIGHT = HexColor("#86d5df")
-BG = HexColor("#f4f8f8")
-SOFT = HexColor("#e1eef0")
-INK = HexColor("#15303a")
-MUTED = HexColor("#667b82")
-LINE = HexColor("#d3e1e3")
+# Brendbukun korporativ rəngləri
+NAVY = HexColor("#15284b")        # Pantone 2767 C — əsas, qradiyentin tünd ucu, mətn
+BLUE = HexColor("#446ca9")        # Pantone 7683 C — əsas, qradiyentin açıq ucu
+TEAL = HexColor("#0096a9")        # Pantone 7711 C — əsas, vurğu
+PINK = HexColor("#ea1d76")        # Pantone 213 C — köməkçi
+# Neytral və tünd fonda açıq tonlar (korporativ rənglərin açıq çalarları)
+INK = NAVY
+MUTED = HexColor("#5b6680")
+LINE = HexColor("#dde3ee")
+SOFT = HexColor("#eef2f8")
+ON_DARK = HexColor("#b9cbe8")     # qradiyent fonda köməkçi mətn
+TEAL_LIGHT = HexColor("#7fd0db")  # qradiyent fonda vurğu
 WHITE = op.WHITE
-MARK = HexColor("#0999ad")    # "NÜMUNƏ" su nişanı (şəffaf)
 
 COMPANY = {
     "seaport": ("Seaport Catering MMC",
@@ -55,6 +67,7 @@ CERTS = {"seaport": ("HACCP", "ISO 22000:2018", "ISO 9001:2015", "ISO 45001:2018
 # Sabit mətnlər: (az, en, ru)
 T = {
     "offer": ("Qiymət təklifi", "Price offer", "Ценовое предложение"),
+    "slogan": ("Dadlı Həyatın Fəlsəfəsi", "The Philosophy of Tasty Life", "Философия вкусной жизни"),
     "for": ("Hazırlanıb", "Prepared for", "Подготовлено для"),
     "no": ("Təklif №", "Offer no.", "Предложение №"),
     "date": ("Tarix", "Date", "Дата"),
@@ -128,6 +141,27 @@ def _number(value: Any) -> float | None:
         return None
 
 
+@functools.lru_cache(maxsize=4)
+def white_logo(name: str) -> ImageReader:
+    """Brendbukdakı "ağ loqo": rəngli loqonun (ağ fonda) forması ağ rəngdə, fon şəffaf. Rəngli hissələr ağ olur,
+    ağ hissələr (fon, "p"-nin içindəki yarpaq) şəffaf — tünd fonda brendbukdakı kimi görünür."""
+    from PIL import Image, ImageChops
+
+    img = Image.open(op.STATIC / "offer" / name).convert("RGBA")
+    r, g, b, a = img.split()
+    ink = ImageChops.darker(ImageChops.darker(r, g), b).point(lambda v: 255 - v)   # ağdan uzaqlıq
+    alpha = ImageChops.multiply(ink, a).point(lambda v: min(255, int(v * 1.35)))
+    out = Image.new("RGBA", img.size, (255, 255, 255, 0))
+    out.putalpha(alpha)
+    return ImageReader(out)
+
+
+def op_fit(t: op.Text, s: str, size: float, width: float) -> float:
+    """Başlıq sığmırsa kiçilir (ən çox yarıya qədər)."""
+    w = t.width(s, size)
+    return size if w <= width else max(size * width / w, size * 0.5)
+
+
 class Sheet:
     def __init__(self, snapshot: dict, plans: dict[int, op.Package] | None = None, exclude: dict | None = None):
         op._register_fonts()
@@ -149,9 +183,10 @@ class Sheet:
         self.c = Canvas(self.buf, pagesize=(W, H))
         self.c.setTitle(f"{T['offer'][self.li]} · {self.offer_id}" if self.offer_id else T["offer"][self.li])
         self.c.setAuthor("Seaport Catering" if self.brand == "seaport" else "NAFA")
-        self.sans = op.Text(self.c, True, INK)
-        self.serif = op.Text(self.c, False, INK)
-        self.sans.page_h = self.serif.page_h = H     # üfüqi səhifə: mətnin yeri bu hündürlükdən hesablanır
+        # Brendbukun şrifti (Cambria) əvəzinə Noto Serif: adi və qalın
+        self.t = op.Text(self.c, False, INK)
+        self.b = op.Text(self.c, False, INK, bold=True)
+        self.t.page_h = self.b.page_h = H     # üfüqi səhifə: mətnin yeri bu hündürlükdən hesablanır
         self.page_no = 0
         self.y = TOP
 
@@ -160,7 +195,7 @@ class Sheet:
         return T[key][self.li]
 
     def pair(self, key: str) -> str:
-        """Etiket təklifin dilində, altında / yanında ingiliscə: "Tarix / Date" (ingiliscə təklifdə — yalnız "Date")."""
+        """Etiket təklifin dilində, yanında ingiliscə: "Tarix / Date" (ingiliscə təklifdə — yalnız "Date")."""
         main = T[key][self.li]
         return main if self.lang == "en" else f"{main} / {T[key][1]}"
 
@@ -183,6 +218,49 @@ class Sheet:
         self.c.setLineWidth(width)
         self.c.line(x1, H - y, x2, H - y)
 
+    def clip(self, x: float, top: float, w: float, h: float, r: float = 0) -> None:
+        """Sonrakı çəkilişi düzbucaqlının (r — yumru künc) içi ilə məhdudlaşdırır (saveState-dən sonra)."""
+        path = self.c.beginPath()
+        if r:
+            path.roundRect(x, H - top - h, w, h, r)
+        else:
+            path.rect(x, H - top - h, w, h)
+        self.c.clipPath(path, stroke=0, fill=0)
+
+    def gradient(self, x: float, top: float, w: float, h: float, r: float = 0) -> None:
+        """Brendbukun qradiyenti: sol-aşağıda tünd göy #15284b → sağ-yuxarıda göy #446ca9."""
+        c = self.c
+        c.saveState()
+        self.clip(x, top, w, h, r)
+        c.linearGradient(x, H - top - h, x + w, H - top, (NAVY, BLUE), extend=True)
+        c.restoreState()
+
+    def pattern(self, x: float, top: float, w: float, h: float, alpha: float = 0.5, size: float = 11.0) -> None:
+        """Brendin "S" dalğa naxışı (brendbuk: "Naxış rəngli fonda") — firuzəyi xətlər, verilən sahəyə kəsilir."""
+        c = self.c
+        c.saveState()
+        self.clip(x, top, w, h)
+        c.setStrokeColor(TEAL)
+        c.setStrokeAlpha(alpha)
+        c.setLineWidth(size * 0.11)
+        c.setLineCap(1)
+        r = size / 2
+        dx, dy = size * 2.2, size * 1.9
+        row = 0
+        yy = H - top - h - size
+        while yy < H - top + size:
+            xx = x - size + (dx / 2 if row % 2 else 0)
+            while xx < x + w + size:
+                # "S": yuxarı halqa (sağa açılır) + aşağı halqa (sola açılır), uclarında kiçik qıvrım
+                c.arc(xx - r, yy, xx + r, yy + 2 * r, 0, 270)
+                c.arc(xx - r, yy - 2 * r, xx + r, yy, 180, 270)
+                c.arc(xx + r, yy + r * 0.5, xx + 2 * r, yy + r * 1.5, 180, 180)
+                c.arc(xx - 2 * r, yy - r * 1.5, xx - r, yy - r * 0.5, 0, 180)
+                xx += dx
+            yy += dy
+            row += 1
+        c.restoreState()
+
     def money(self, value: Any) -> str:
         s = op._money(value, self.currency)
         return s.replace(".", ",") if self.lang == "az" else s
@@ -195,103 +273,81 @@ class Sheet:
         num = num or p.price
         return (num.replace(".", ",") if self.lang == "az" else num), cur
 
-    def logo_disc(self, cx: float, cy: float, r: float) -> None:
-        """Loqo (dairəvi, ağ fonlu) ağ dairənin içində — tünd fonda."""
-        self.c.setFillColor(WHITE)
-        self.c.circle(cx, H - cy, r, stroke=0, fill=1)
-        if self.brand == "seaport":
-            img = op._logo("seaport-logo.png")
-            iw, ih = img.getSize()
-            h = r * 1.62
-            w = h * iw / ih
-            c = self.c
-            c.saveState()                    # loqonun ağ fonunun küncləri dairədən çıxmasın
-            path = c.beginPath()
-            path.circle(cx, H - cy, r)
-            c.clipPath(path, stroke=0, fill=0)
-            c.drawImage(img, cx - w / 2, H - cy - h / 2, w, h, mask="auto")
-            c.restoreState()
-        else:
-            self.serif.draw(cx, cy + r * 0.2, "NAFA", r * 0.55, DEEP, align="center")
+    def logo_white(self, cx: float, top: float, width: float, mark: bool = False) -> float:
+        """Ağ loqo tünd fonda (brendbuk: "Ağ qara logo"; `mark` — yalnız yazı hissəsi). Hündürlüyü qaytarır."""
+        if self.brand != "seaport":
+            self.b.draw(cx, top + width * 0.3, "NAFA", width * 0.32, WHITE, align="center")
+            return width * 0.4
+        img = white_logo("seaport-mark.png" if mark else "seaport-logo.png")
+        iw, ih = img.getSize()
+        h = width * ih / iw
+        self.c.drawImage(img, cx - width / 2, H - top - h, width, h, mask="auto")
+        return h
 
     def watermark(self) -> None:
         if not self.snap.get("example"):
             return
         c = self.c
         c.saveState()
-        c.setFillColor(MARK)
-        c.setFillAlpha(0.08)
+        c.setFillColor(PINK)
+        c.setFillAlpha(0.06)
         c.translate(W / 2, H / 2 - 30)
         c.rotate(28)
-        word = self.tx("sample")
-        c.setFont("Sans", 130)
-        c.drawCentredString(0, 0, word)
+        c.setFont("Noto-B", 120)
+        c.drawCentredString(0, 0, self.tx("sample"))
         c.restoreState()
 
-    def circles(self, cx: float, cy: float, clip: tuple[float, float, float, float]) -> None:
-        """Nümunədəki kimi konsentrik dairələr (panelin kənarında kəsilir)."""
-        c = self.c
-        c.saveState()
-        path = c.beginPath()
-        x, top, w, h = clip
-        path.rect(x, H - top - h, w, h)
-        c.clipPath(path, stroke=0, fill=0)
-        c.setFillColor(ACCENT)
-        c.setFillAlpha(0.16)
-        c.circle(cx, H - cy, 78, stroke=0, fill=1)
-        c.setStrokeColor(ACCENT)
-        c.setLineWidth(1)
-        for r, alpha in ((112, 0.55), (160, 0.4), (208, 0.28), (256, 0.18)):
-            c.setStrokeAlpha(alpha)
-            c.circle(cx, H - cy, r, stroke=1, fill=0)
-        c.restoreState()
+    def eyebrow(self, x: float, y: float, text: str, color: Any = TEAL, size: float = 7.5,
+                align: str = "left") -> None:
+        self.b.draw(x, y, text, size, color, tracking=1.4, align=align)
 
     # --- səhifələr --------------------------------------------------------------------------------
     def cover(self) -> None:
-        s, serif = self.sans, self.serif
-        self.fill(BG, 0, 0, W, H)
-        self.fill(DEEP, 0, 0, PANEL, H)
-        self.circles(PANEL, H * 0.53, (0, 0, PANEL, H))
-        self.logo_disc(M + 46, 92, 48)
-        # Başlıq: təklifin dilində, altında digər dil(lər)
-        y = 382.0
-        for line in serif.wrap(self.tx("offer"), 31, PANEL - 2 * M)[:2]:
-            serif.draw(M, y, line, 31, WHITE)
-            y += 36
+        t, b = self.t, self.b
+        self.fill(WHITE, 0, 0, W, H)
+        self.gradient(0, 0, PANEL, H)
+        self.pattern(0, H - 150, PANEL, 150)                # naxış panelin aşağısında, loqodan aralı
+        # Ağ loqo + sloqan (brendbuk: "Loqo sloqan ilə ağ"), ətrafında boş yer
+        lh = self.logo_white(PANEL / 2, 52, 128)
+        if self.brand == "seaport":
+            t.draw(PANEL / 2, 52 + lh + 26, self.tx("slogan"), 12, WHITE, align="center")
+        y = 318.0
+        for line in b.wrap(self.tx("offer"), 28, PANEL - 2 * M)[:2]:
+            b.draw(M, y, line, 28, WHITE)
+            y += 33
         if self.lang != "en":
-            s.draw(M, y, T["offer"][1], 12.5, ACCENT_LIGHT)
+            t.draw(M, y, T["offer"][1], 12.5, ON_DARK, italic=True)
             y += 18
-        self.fill(ACCENT, M, y + 12, 52, 3.5)
+        self.fill(TEAL, M, y + 12, 52, 3)
 
         x0 = PANEL + 58
         width = W - M - x0
-        s.draw(x0, 112, self.up_pair("for"), 7.5, ACCENT, tracking=1.6)
+        self.eyebrow(x0, 112, self.up_pair("for"))
         y = 160.0
         name = self.customer or "—"
-        size = 34.0
-        lines = serif.wrap(name, size, width)
+        size = 32.0
+        lines = b.wrap(name, size, width)
         if len(lines) > 2:
-            size = 26.0
-            lines = serif.wrap(name, size, width)[:3]
+            size = 25.0
+            lines = b.wrap(name, size, width)[:3]
         for line in lines:
-            serif.draw(x0, y, line, size, INK)
-            y += size + 6
-        self.fill(ACCENT, x0, y - 4, 46, 3.5)
+            b.draw(x0, y, line, size, INK)
+            y += size + 7
+        self.fill(TEAL, x0, y - 4, 46, 3)
         y += 34
         if self.customer:
-            for line in s.wrap(_greeting(self.customer, self.lang), 11.5, min(width, 400))[:5]:
-                s.draw(x0, y, line, 11.5, MUTED)
+            for line in t.wrap(_greeting(self.customer, self.lang), 11.5, min(width, 400))[:5]:
+                t.draw(x0, y, line, 11.5, MUTED)
                 y += 19
-        # Paket(lər) qısaca — üz qabığında
         if self.packages:
             y += 14
             for p in self.packages[:3]:
                 if y > 405:
                     break
                 num, cur = self.price_parts(p)
-                s.draw(x0, y, p.name, 11, INK)
-                s.draw(x0 + min(width, 400), y, f"{num} {cur}".strip() + (f" / {p.unit}" if p.unit else ""),
-                       11, ACCENT, align="right")
+                b.draw(x0, y, p.name, 11, INK)
+                t.draw(x0 + min(width, 400), y, f"{num} {cur}".strip() + (f" / {p.unit}" if p.unit else ""),
+                       11, TEAL, align="right")
                 y += 18
 
         self.rule(H - 140, x0, W - M)
@@ -302,50 +358,61 @@ class Sheet:
         col = width / len(fields)
         for i, (key, value) in enumerate(fields):
             x = x0 + i * col
-            s.draw(x, H - 112, self.pair(key), 7, MUTED, tracking=0.3)
-            serif.draw(x, H - 92, value, op_fit(serif, value, 14.5, col - 12), INK)
+            t.draw(x, H - 112, self.pair(key), 7.5, MUTED, tracking=0.3)
+            b.draw(x, H - 92, value, op_fit(b, value, 14, col - 12), INK)
         self.watermark()
         self.c.showPage()
 
     def header(self) -> None:
         self.page_no += 1
-        s = self.sans
-        self.fill(BG, 0, 0, W, H)
-        self.fill(DEEP, 0, 0, W, HEAD)
-        self.fill(ACCENT, 0, HEAD, W, 3.5)
-        self.logo_disc(M + 19, HEAD / 2, 21)
-        brand = "Seaport Catering" if self.brand == "seaport" else "NAFA"
-        s.draw(M + 50, HEAD / 2 + 4, brand, 10, WHITE, tracking=0.6)
+        self.fill(WHITE, 0, 0, W, H)
+        self.gradient(0, 0, W, HEAD)
+        self.fill(TEAL, 0, HEAD, W, 3)
+        self.logo_white(M + 34, 12, 68, mark=True)           # ağ yazı loqosu (brendbuk: "Ağ qara loqo yazı hissəsi")
         head = self.tx("offer") + (f" · {self.offer_id}" if self.offer_id else "")
-        s.draw(W - M, HEAD / 2 + 4, head, 10, WHITE, align="right")
+        self.t.draw(W - M, HEAD / 2 + 4, head, 10, WHITE, align="right")
         self.y = TOP
 
     def footer(self) -> None:
-        s = self.sans
-        self.rule(H - 46, M, W - M, ACCENT, 0.9)
+        t = self.t
+        self.rule(H - 46, M, W - M, TEAL, 0.9)
         if self.company:
             name, address, phone, mail = self.company
-            s.draw(M, H - 32, f"{name} · {address[0]}; {address[1]}", 7, MUTED)
-            s.draw(M, H - 21, f"{phone} · {mail}", 7, MUTED)
-        s.draw(W - M, H - 32, f"{self.tx('page')} {self.page_no + 1}", 7, MUTED, align="right")
+            t.draw(M, H - 32, f"{name} · {address[0]}; {address[1]}", 7, MUTED)
+            t.draw(M, H - 21, f"{phone} · {mail}", 7, MUTED)
+        t.draw(W - M, H - 32, f"{self.tx('page')} {self.page_no + 1}", 7, MUTED, align="right")
         if self.offer_id:
-            s.draw(W - M, H - 21, self.offer_id, 7, MUTED, align="right")
+            t.draw(W - M, H - 21, self.offer_id, 7, MUTED, align="right")
         self.watermark()
         self.c.showPage()
 
     def title(self, key: str, suffix: str = "", right: str = "") -> None:
         y = self.y
-        self.serif.draw(M, y + 22, self.tx(key) + (f" · {suffix}" if suffix else ""), 23, INK)
-        sub = "" if self.lang == "en" else T[key][1]
-        if sub:
-            self.sans.draw(M, y + 38, sub, 8.5, MUTED)
+        self.b.draw(M, y + 22, self.tx(key) + (f" · {suffix}" if suffix else ""), 22, INK)
+        if self.lang != "en":
+            self.t.draw(M, y + 38, T[key][1], 9, MUTED, italic=True)
         if right:
-            self.sans.draw(W - M, y + 22, right, 9, ACCENT, align="right", tracking=0.4)
+            self.b.draw(W - M, y + 22, right, 9.5, TEAL, align="right", tracking=0.3)
         self.y = y + 56
+
+    def card(self, x: float, top: float, w: float, h: float, head: float, r: float = 10) -> None:
+        """Ağ kart, yuxarıda qradiyent başlıq və firuzəyi xətt (künclər yumru)."""
+        c = self.c
+        self.fill(LINE, x + 1, top + 2, w, h, r)
+        self.fill(WHITE, x, top, w, h, r)
+        c.saveState()
+        self.clip(x, top, w, h, r)
+        c.linearGradient(x, H - top - head, x + w, H - top, (NAVY, BLUE), extend=True)
+        c.restoreState()
+        c.saveState()
+        self.clip(x, top, w, h, r)
+        self.fill(WHITE, x, top + head, w, h - head)
+        self.fill(TEAL, x, top + head, w, 3)
+        c.restoreState()
 
     # --- "Menyu paketləri" -------------------------------------------------------------------------
     def card_rows(self, p: op.Package, width: float) -> list[tuple[str, str]]:
-        """Kartın gövdəsi: [("label", "ŞORBA") | ("item", "Mərci şorbası") | ("note", "...")]."""
+        """Kartın gövdəsi: [("label", "Şorba") | ("item", "Mərci şorbası") | ("cont", …) | ("note", "...")]."""
         rows: list[tuple[str, str]] = []
         if p.weekly:
             rows.append(("label", self.tx("daily")))
@@ -353,12 +420,12 @@ class Sheet:
                 rows.append(("item", f"{n} {label}" if n else label))
             rows.append(("note", self.tx("see_week")))
             return rows
-        for b in p.blocks:
-            for g in b.groups:
+        for blk in p.blocks:
+            for g in blk.groups:
                 if g.label:
                     rows.append(("label", g.label))
                 for item in g.items:
-                    for k, line in enumerate(self.sans.wrap(item, 9.5, width - 14)):
+                    for k, line in enumerate(self.t.wrap(item, 9.5, width - 14)):
                         rows.append(("item" if k == 0 else "cont", line))
         return rows
 
@@ -368,33 +435,20 @@ class Sheet:
 
     def package_card(self, i: int, p: op.Package, x: float, top: float, w: float, h: float,
                      rows: list[tuple[str, str]]) -> None:
-        c, s, serif = self.c, self.sans, self.serif
-        # kölgə + kart
-        self.fill(LINE, x + 1, top + 2, w, h, 12)
-        self.fill(WHITE, x, top, w, h, 12)
-        # tünd başlıq (yuxarı künclər yumru)
-        c.saveState()
-        path = c.beginPath()
-        path.roundRect(x, H - top - h, w, h, 12)
-        c.clipPath(path, stroke=0, fill=0)
-        self.fill(DEEP, x, top, w, 74)
-        c.setFillColor(DEEP_SOFT)
-        c.circle(x + w - 8, H - top - 6, 46, stroke=0, fill=1)
-        self.fill(ACCENT, x, top + 74, w, 3.5)
-        c.restoreState()
-        s.draw(x + 20, top + 25, f"{self.up(self.tx('package'))} {i + 1}", 7.5, ACCENT_LIGHT, tracking=1.6)
-        serif.draw(x + 20, top + 56, p.name, op_fit(serif, p.name, 21, w - 40), WHITE)
-        # qiymət
+        c, t, b = self.c, self.t, self.b
+        self.card(x, top, w, h, 74, 12)
+        self.eyebrow(x + 20, top + 25, f"{self.up(self.tx('package'))} {i + 1}", TEAL_LIGHT)
+        b.draw(x + 20, top + 56, p.name, op_fit(b, p.name, 21, w - 40), WHITE)
         num, cur = self.price_parts(p)
-        nw = serif.draw(x + 20, top + 124, num, 32, INK)
+        nw = b.draw(x + 20, top + 124, num, 30, INK)
         if cur:
-            s.draw(x + 28 + nw, top + 108, cur, 10, INK)
+            b.draw(x + 28 + nw, top + 108, cur, 10, INK)
         if p.unit:
-            s.draw(x + 28 + nw, top + 122, f"/ {p.unit}", 8, MUTED)
+            t.draw(x + 28 + nw, top + 122, f"/ {p.unit}", 8.5, MUTED)
         y = top + 140
         if p.description:
-            for line in s.wrap(p.description, 8, w - 40)[:2]:
-                s.draw(x + 20, y, line, 8, MUTED)
+            for line in t.wrap(p.description, 8, w - 40)[:2]:
+                t.draw(x + 20, y, line, 8, MUTED)
                 y += 11
         y += 4
         self.rule(y, x + 20, x + w - 20)
@@ -403,37 +457,37 @@ class Sheet:
         for kind, text in rows:
             step = self.row_height(kind)
             if y + step > limit:
-                s.draw(x + 34, y + 12, "…", 9.5, MUTED)
+                t.draw(x + 34, y + 12, "…", 9.5, MUTED)
                 break
             if kind == "label":
-                s.draw(x + 20, y + 16, self.up(text), 7, ACCENT, tracking=1.4)
+                self.eyebrow(x + 20, y + 16, self.up(text), size=7)
             elif kind == "note":
-                for j, line in enumerate(s.wrap(text, 7.5, w - 40)[:2]):
-                    s.draw(x + 20, y + 16 + j * 10, line, 7.5, MUTED, italic=True)
+                for j, line in enumerate(t.wrap(text, 8, w - 40)[:2]):
+                    t.draw(x + 20, y + 16 + j * 10, line, 8, MUTED, italic=True)
             else:
                 if kind == "item":
-                    c.setFillColor(ACCENT)
+                    c.setFillColor(TEAL)
                     c.circle(x + 23, H - (y + 9), 1.8, stroke=0, fill=1)
-                s.draw(x + 33, y + 12, text, 9.5, INK)
+                t.draw(x + 33, y + 12, text, 9.5, INK)
             y += step
 
     def side_column(self, x: float, top: float, w: float) -> None:
-        s, serif = self.sans, self.serif
+        t, b = self.t, self.b
         y = top
         certs = CERTS.get(self.brand)
         if certs:
             h = 150.0
             self.fill(SOFT, x, y, w, h, 12)
-            serif.draw(x + 18, y + 34, self.tx("quality"), op_fit(serif, self.tx("quality"), 14.5, w - 36), INK)
+            b.draw(x + 18, y + 34, self.tx("quality"), op_fit(b, self.tx("quality"), 14, w - 36), INK)
             cx, cy = x + 18, y + 54
             for cert in certs:
-                cw = s.width(cert, 8.5) + 22
+                cw = b.width(cert, 8.5) + 22
                 if cx + cw > x + w - 14:
                     cx, cy = x + 18, cy + 32
-                self.c.setStrokeColor(DEEP)
+                self.c.setStrokeColor(NAVY)
                 self.c.setLineWidth(0.9)
                 self.c.roundRect(cx, H - cy - 22, cw, 22, 11, stroke=1, fill=0)
-                s.draw(cx + cw / 2, cy + 14.5, cert, 8.5, DEEP, align="center")
+                b.draw(cx + cw / 2, cy + 14.5, cert, 8.5, NAVY, align="center")
                 cx += cw + 8
             y += h + GAP
         self.contact_card(x, y, w)
@@ -441,17 +495,17 @@ class Sheet:
     def contact_card(self, x: float, top: float, w: float) -> float:
         if not self.company:
             return top
-        s, serif = self.sans, self.serif
+        t, b = self.t, self.b
         name, address, phone, mail = self.company
         h = 112.0
         self.fill(SOFT, x, top, w, h, 12)
-        serif.draw(x + 18, top + 28, name, 13.5, INK)
+        b.draw(x + 18, top + 28, name, 13.5, INK)
         y = top + 46
         for line in address:
-            s.draw(x + 18, y, line, 8, MUTED)
+            t.draw(x + 18, y, line, 8, MUTED)
             y += 12
-        s.draw(x + 18, y + 6, phone, 9, INK)
-        s.draw(x + 18, y + 22, mail, 8, MUTED)
+        b.draw(x + 18, y + 6, phone, 9, INK)
+        t.draw(x + 18, y + 22, mail, 8, MUTED)
         return top + h
 
     def packages_pages(self) -> None:
@@ -480,53 +534,45 @@ class Sheet:
             self.footer()
 
     # --- "Həftəlik menyu" ----------------------------------------------------------------------------
-    def day_rows(self, b: op.Block, width: float) -> list[tuple[str, str]]:
+    DAY_STEP = {"label": 18.0, "item": 13.5, "cont": 11.5, "dnote": 10.0}
+
+    def day_rows(self, blk: op.Block, width: float) -> list[tuple[str, str]]:
         rows: list[tuple[str, str]] = []
-        for g in b.groups:
+        for g in blk.groups:
             if g.label:
                 rows.append(("label", g.label))
             for item in g.items:
-                for k, line in enumerate(self.sans.wrap(item, 8.8, width)):
+                for k, line in enumerate(self.t.wrap(item, 8.8, width)):
                     rows.append(("item" if k == 0 else "cont", line))
                 note = g.notes.get(item, "")
                 if note:
-                    for line in self.sans.wrap(note, 7, width)[:2]:
+                    for line in self.t.wrap(note, 7, width)[:2]:
                         rows.append(("dnote", line))
         return rows
 
-    DAY_STEP = {"label": 18.0, "item": 13.5, "cont": 11.5, "dnote": 10.0}
-
-    def day_card(self, b: op.Block, x: float, top: float, w: float, h: float, rows: list[tuple[str, str]]) -> None:
-        c, s = self.c, self.sans
-        self.fill(LINE, x + 1, top + 2, w, h, 10)
-        self.fill(WHITE, x, top, w, h, 10)
-        c.saveState()
-        path = c.beginPath()
-        path.roundRect(x, H - top - h, w, h, 10)
-        c.clipPath(path, stroke=0, fill=0)
-        self.fill(DEEP, x, top, w, 40)
-        self.fill(ACCENT, x, top + 40, w, 2.5)
-        c.restoreState()
-        title, _, week = b.title.partition(" · ")
-        s.draw(x + 12, top + 18, s.wrap(title, 10.5, w - 24)[0], 10.5, WHITE)
-        sub = " · ".join(v for v in (b.accent if self.lang != "en" else "", week) if v)
+    def day_card(self, blk: op.Block, x: float, top: float, w: float, h: float, rows: list[tuple[str, str]]) -> None:
+        c, t, b = self.c, self.t, self.b
+        self.card(x, top, w, h, 40)
+        title, _, week = blk.title.partition(" · ")
+        b.draw(x + 12, top + 18, title, op_fit(b, title, 10.5, w - 24), WHITE)
+        sub = " · ".join(v for v in (blk.accent if self.lang != "en" else "", week) if v)
         if sub:
-            s.draw(x + 12, top + 32, sub, 7, ACCENT_LIGHT, tracking=0.4)
+            t.draw(x + 12, top + 32, sub, 7.5, ON_DARK, italic=True)
         y = top + 48
         for kind, text in rows:
             step = self.DAY_STEP[kind]
             if y + step > top + h - 4:       # səhifəyə sığmayan (çox uzun) gün — kartın içində kəsilir
-                s.draw(x + 20, y + 8, "…", 8.8, MUTED)
+                t.draw(x + 20, y + 8, "…", 8.8, MUTED)
                 break
             if kind == "label":
-                s.draw(x + 12, y + 13, self.up(text), 6.5, ACCENT, tracking=1.2)
+                self.eyebrow(x + 12, y + 13, self.up(text), size=6.5)
             elif kind == "dnote":
-                s.draw(x + 20, y + 7, text, 7, MUTED)
+                t.draw(x + 20, y + 7, text, 7, MUTED)
             else:
                 if kind == "item":
-                    c.setFillColor(ACCENT)
+                    c.setFillColor(TEAL)
                     c.circle(x + 14, H - (y + 7.2), 1.5, stroke=0, fill=1)
-                s.draw(x + 20, y + 10, text, 8.8, INK)
+                t.draw(x + 20, y + 10, text, 8.8, INK)
             y += step
 
     def weekly_pages(self) -> None:
@@ -535,8 +581,7 @@ class Sheet:
             n = len(p.blocks)
             cols = 5 if n in (5, 10) or n > 7 else min(n, 4) if n != 6 else 3
             w = (W - 2 * M - GAP * (cols - 1)) / cols
-            inner = w - 32
-            rows = [self.day_rows(b, inner) for b in p.blocks]
+            rows = [self.day_rows(blk, w - 32) for blk in p.blocks]
             heights = [48 + sum(self.DAY_STEP[k] for k, _ in r) + 10 for r in rows]
             suffix = p.name if len(weekly) > 1 or len(self.packages) > 1 else ""
             span = p.days_span[0] if p.days_span else ""
@@ -565,7 +610,7 @@ class Sheet:
         return qs, (self.money(total) if total not in (None, "") else "—")
 
     def summary_page(self) -> None:
-        s, serif = self.sans, self.serif
+        t, b = self.t, self.b
         self.header()
         self.title("summary")
         top = self.y
@@ -574,55 +619,50 @@ class Sheet:
         cols = (x1 + 18, x1 + 205, x1 + 300, x2 - 18)    # paket | vahid qiymət (sağa) | miqdar (orta) | cəmi (sağa)
         self.fill(SOFT, x1, top, tw, 32, 8)
         hy = top + 20
-        s.draw(cols[0], hy, self.up(self.tx("package")), 7, MUTED, tracking=1.3)
-        s.draw(cols[1], hy, self.up(self.tx("unit_price")), 7, MUTED, tracking=1.3, align="right")
-        s.draw(cols[2], hy, self.up(self.tx("qty")), 7, MUTED, tracking=1.3, align="center")
-        s.draw(cols[3], hy, self.up(self.tx("sum")), 7, MUTED, tracking=1.3, align="right")
+        self.eyebrow(cols[0], hy, self.up(self.tx("package")), MUTED, 7)
+        self.eyebrow(cols[1], hy, self.up(self.tx("unit_price")), MUTED, 7, align="right")
+        self.eyebrow(cols[2], hy, self.up(self.tx("qty")), MUTED, 7, align="center")
+        self.eyebrow(cols[3], hy, self.up(self.tx("sum")), MUTED, 7, align="right")
         y = top + 32
         for k, (p, line) in enumerate(zip(self.packages, self.lines)):
             if y + 44 > BOTTOM - 170:
                 break
-            if k % 2 == 0:
-                self.fill(HexColor("#fbfdfd"), x1, y, tw, 44)
+            if k % 2 == 1:
+                self.fill(HexColor("#f7f9fc"), x1, y, tw, 44)
             num, cur = self.price_parts(p)
             qty, total = self.quantity(line)
-            serif.draw(cols[0], y + 27, p.name, op_fit(serif, p.name, 13, 112), INK)
-            s.draw(cols[1], y + 27, f"{num} {cur}".strip(), 10, INK, align="right")
-            s.draw(cols[2], y + 27, qty, 9.5, MUTED, align="center")
-            s.draw(cols[3], y + 27, total, 10.5, INK, align="right")
+            b.draw(cols[0], y + 27, p.name, op_fit(b, p.name, 13, 112), INK)
+            t.draw(cols[1], y + 27, f"{num} {cur}".strip(), 10.5, INK, align="right")
+            t.draw(cols[2], y + 27, qty, 9.5, MUTED, align="center")
+            b.draw(cols[3], y + 27, total, 10.5, INK, align="right")
             y += 44
         self.rule(y, x1, x2)
         vat_in = self.totals.get("vat_included") is True
-        s.draw(x2, y + 22, " / ".join(dict.fromkeys(
-            (T["vat_in" if vat_in else "vat_out"][self.li], T["vat_in" if vat_in else "vat_out"][1]))),
-            8.5, ACCENT, align="right")
-        s.draw(x2, y + 36, self.tx("per_person"), 8, MUTED, align="right")
+        key = "vat_in" if vat_in else "vat_out"
+        b.draw(x2, y + 22, " / ".join(dict.fromkeys((T[key][self.li], T[key][1]))), 8.5, TEAL, align="right")
+        t.draw(x2, y + 36, self.tx("per_person"), 8, MUTED, align="right", italic=True)
 
-        # Yekun kartı
+        # Yekun kartı: qradiyent, aşağısında naxış
         kx, kw, kh = x2 + 30, W - M - x2 - 30, 230.0
-        c = self.c
-        c.saveState()
-        path = c.beginPath()
-        path.roundRect(kx, H - top - kh, kw, kh, 14)
-        c.clipPath(path, stroke=0, fill=0)
-        self.fill(DEEP, kx, top, kw, kh)
-        c.setFillColor(DEEP_SOFT)
-        c.circle(kx + kw - 10, H - top - 12, 64, stroke=0, fill=1)
-        c.restoreState()
-        s.draw(kx + 24, top + 40, self.up(self.tx("grand")), 7.5, ACCENT_LIGHT, tracking=1.6)
+        self.gradient(kx, top, kw, kh, 14)
+        self.c.saveState()
+        self.clip(kx, top, kw, kh, 14)
+        self.pattern(kx, top + kh - 64, kw, 64, alpha=0.4)
+        self.c.restoreState()
+        self.eyebrow(kx + 24, top + 40, self.up(self.tx("grand")), TEAL_LIGHT)
         total = self.totals.get("total")
         if total not in (None, ""):
-            serif.draw(kx + 24, top + 86, self.money(total), op_fit(serif, self.money(total), 30, kw - 48), WHITE)
+            b.draw(kx + 24, top + 86, self.money(total), op_fit(b, self.money(total), 28, kw - 48), WHITE)
             yy = top + 116
             for key, value in (("net", self.totals.get("subtotal")), ("vat", self.totals.get("vat"))):
                 if value not in (None, ""):
-                    s.draw(kx + 24, yy, self.tx(key), 9, ACCENT_LIGHT)
-                    s.draw(kx + kw - 24, yy, self.money(value), 9, WHITE, align="right")
+                    t.draw(kx + 24, yy, self.tx(key), 9.5, ON_DARK)
+                    t.draw(kx + kw - 24, yy, self.money(value), 9.5, WHITE, align="right")
                     yy += 18
         else:
             yy = top + 76
-            for line in serif.wrap(self.tx("later"), 13, kw - 48)[:4]:
-                serif.draw(kx + 24, yy, line, 13, WHITE)
+            for line in t.wrap(self.tx("later"), 13, kw - 48)[:4]:
+                t.draw(kx + 24, yy, line, 13, WHITE)
                 yy += 20
 
         # Təşəkkür + əlaqə
@@ -630,11 +670,11 @@ class Sheet:
         cw = 250.0 if self.company else 0.0
         tw2 = W - 2 * M - (cw + 30 if cw else 0)
         yy = by + 26
-        for line in serif.wrap(self.tx("thanks"), 18, tw2)[:2]:
-            serif.draw(M, yy, line, 18, INK)
+        for line in b.wrap(self.tx("thanks"), 18, tw2)[:2]:
+            b.draw(M, yy, line, 18, INK)
             yy += 24
-        for line in s.wrap(self.tx("ask"), 10, tw2)[:2]:
-            s.draw(M, yy + 4, line, 10, MUTED)
+        for line in t.wrap(self.tx("ask"), 10.5, tw2)[:2]:
+            t.draw(M, yy + 4, line, 10.5, MUTED)
             yy += 14
         if cw:
             self.contact_card(W - M - cw, by, cw)
@@ -647,12 +687,6 @@ class Sheet:
         self.summary_page()
         self.c.save()
         return self.buf.getvalue()
-
-
-def op_fit(t: op.Text, s: str, size: float, width: float) -> float:
-    """Başlıq sığmırsa kiçilir (ən çox yarıya qədər)."""
-    w = t.width(s, size)
-    return size if w <= width else max(size * width / w, size * 0.5)
 
 
 def render(snapshot: dict, plans: dict[int, op.Package] | None = None, exclude: dict | None = None) -> bytes:

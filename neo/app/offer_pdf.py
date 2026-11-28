@@ -105,9 +105,9 @@ LOGO_DEEP, LOGO_BLUE, LOGO_TEAL, LOGO_PURPLE, LOGO_PINK = "#212c59", "#30417d", 
 
 DESIGNS: dict[str, Design] = {d.code: d for d in (
     # Albom: üfüqi səhifə, ayrıca modulda çəkilir (app/offer_sheet.py) — formda ilk (yeni təkliflərin seçimi)
-    Design("sheet", "Albom", "üfüqi səhifə: paket kartları, həftəlik menyu, qiymət xülasəsi",
-           _pal("#15303a", LOGO_TEAL, "#667b82", "#d3e1e3"), sans=True, cover_style="sheet", day_style="sheet",
-           swatch=("#0f3a44", LOGO_TEAL)),
+    Design("sheet", "Albom", "üfüqi səhifə, brendbuka görə: paket kartları, həftəlik menyu, qiymət xülasəsi",
+           _pal("#15284b", "#0096a9", "#5b6680", "#dde3ee"), cover_style="sheet", day_style="sheet",
+           swatch=("#15284b", "#0096a9")),
     Design("classic", "Klassik", "tünd göy və firuzəyi, sola düzülmüş",
            _pal("#1a365d", "#00a0b2", "#6b7488", "#dfe4eb"), swatch=("#1a365d", "#00a0b2")),
     Design("midnight", "Gecə", "tünd üz qabığı, qızılı vurğu",
@@ -150,7 +150,7 @@ def _register_fonts() -> None:
     if _fonts_ready:
         return
     for name, file in (("Cal", "Caladea-Regular"), ("Cal-I", "Caladea-Italic"),
-                       ("Noto", "NotoSerif-Regular"), ("Noto-I", "NotoSerif-Italic"),
+                       ("Noto", "NotoSerif-Regular"), ("Noto-I", "NotoSerif-Italic"), ("Noto-B", "NotoSerif-Bold"),
                        ("Sans", "NotoSans-Regular"), ("Sans-I", "NotoSans-Italic")):
         pdfmetrics.registerFont(TTFont(name, str(STATIC / "fonts" / f"{file}.ttf")))
     _fonts_ready = True
@@ -167,9 +167,10 @@ class Text:
     """Bütün mətn Noto Serif-lədir: Azərbaycan əlifbasının hamısı (ə, Ə, ğ, ı, ş …) və kiril bir şriftdədir.
     Əvvəl əsas şrift Caladea idi və "ə" sözün ortasında Noto-ya keçirdi — hərf fərqli görünürdü."""
 
-    def __init__(self, c: Canvas, sans: bool = False, color: Any = None):
+    def __init__(self, c: Canvas, sans: bool = False, color: Any = None, bold: bool = False):
         self.c = c
-        self.fonts = ("Sans", "Sans-I") if sans else ("Noto", "Noto-I")   # dizayna görə: Noto Sans / Noto Serif
+        # dizayna görə: Noto Sans / Noto Serif; `bold` — Noto Serif Bold (albom dizaynının başlıqları)
+        self.fonts = ("Sans", "Sans-I") if sans else ("Noto-B" if bold else "Noto", "Noto-I")
         self.cov = {f: _covered(f) for f in self.fonts}
         self.color = color      # rəng verilməyəndə (Doc palitraya görə dəyişir)
         self.page_h = H         # səhifənin hündürlüyü (üfüqi albom səhifəsində fərqlidir — app/offer_sheet.py)
